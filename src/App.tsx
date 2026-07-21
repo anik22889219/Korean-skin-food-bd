@@ -1,0 +1,101 @@
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { CartProvider } from './context/CartContext';
+import { MainLayout } from './components/MainLayout';
+import { StoreCatalog } from './components/StoreCatalog';
+import { ProductDetail } from './components/ProductDetail';
+import { Login } from './components/Login';
+import { Profile } from './components/Profile';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { AdminRoute } from './components/AdminRoute';
+import { AdminLayout } from './components/AdminLayout';
+import { AdminDashboardHome } from './components/AdminDashboardHome';
+import { ProductManagement } from './components/ProductManagement';
+import { AdminSEO } from './components/AdminSEO';
+import { AdminSocial } from './components/AdminSocial';
+import { AdminChatLeads } from './components/AdminChatLeads';
+import { AboutUs } from './components/AboutUs';
+import { ContactUs } from './components/ContactUs';
+import PosRegister from './components/PosRegister';
+import PosScan from './components/PosScan';
+import { productService } from './services/productService';
+
+// Wrapper for in-store QR scanning to consume useParams and AuthContext cleanly
+const PosScanRouteWrapper: React.FC = () => {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+  
+  return (
+    <div className="min-h-screen bg-[#FFF5F8] text-gray-800 font-sans">
+      <PosScan 
+        sessionId={sessionId || ''} 
+        onBack={() => navigate('/')} 
+        currentUser={profile} 
+        onLoginStaff={(email, role) => {
+          console.log('[PosScan] Simulated staff login overlay:', email, role);
+        }}
+      />
+    </div>
+  );
+};
+
+// Wrapper for the POS Register simulator to pass products
+const PosRegisterRouteWrapper: React.FC = () => {
+  const navigate = useNavigate();
+  const products = productService.getProducts();
+  
+  return (
+    <div className="min-h-screen bg-[#FFF5F8] text-gray-800 font-sans">
+      <div className="p-4 md:p-8">
+        <PosRegister onBack={() => navigate('/admin')} products={products} />
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <CartProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* PUBLIC SHOP PAGES */}
+            <Route path="/" element={<MainLayout />}>
+              <Route index element={<StoreCatalog />} />
+              <Route path="shop" element={<StoreCatalog />} />
+              <Route path="about-us" element={<AboutUs />} />
+              <Route path="contact-us" element={<ContactUs />} />
+              <Route path="product/:id" element={<ProductDetail />} />
+              <Route path="login" element={<Login />} />
+              
+              {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="profile" element={<Profile />} />
+              </Route>
+            </Route>
+
+            {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
+            <Route path="pos/scan/:sessionId" element={<PosScanRouteWrapper />} />
+
+            {/* ADMIN DASHBOARD HUB - ADMINS/SUPER_ADMINS ONLY */}
+            <Route element={<AdminRoute />}>
+              <Route path="admin" element={<AdminLayout />}>
+                <Route index element={<AdminDashboardHome />} />
+                <Route path="pos" element={<PosRegisterRouteWrapper />} />
+                <Route path="products" element={<ProductManagement />} />
+                <Route path="seo" element={<AdminSEO />} />
+                <Route path="social" element={<AdminSocial />} />
+                <Route path="chat-leads" element={<AdminChatLeads />} />
+              </Route>
+            </Route>
+
+            {/* FALLBACK ROUTING */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </CartProvider>
+    </AuthProvider>
+  );
+}

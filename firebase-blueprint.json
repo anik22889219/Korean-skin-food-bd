@@ -1,0 +1,179 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with role details",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "loyaltyPoints": { "type": "number" },
+        "role": { "type": "string", "enum": ["customer", "admin", "inventory_manager", "customer_support", "super_admin"] }
+      },
+      "required": ["uid", "name", "role"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Korean skin care products info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nameBN": { "type": "string" },
+        "brand": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "barcode": { "type": "string" }
+      },
+      "required": ["id", "name", "price", "stock"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "address": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "sessionType": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "customerName", "totalAmount", "status", "createdAt"]
+    },
+    "PosSession": {
+      "title": "PosSession",
+      "description": "In-store active register checkout session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "created_at": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerAddress": { "type": "string" },
+        "deliveryArea": { "type": "string" }
+      },
+      "required": ["id", "status", "created_at"]
+    },
+    "Scan": {
+      "title": "Scan",
+      "description": "Scanned items in a POS session",
+      "type": "object",
+      "properties": {
+        "product_id": { "type": "string" },
+        "scanned_at": { "type": "string" }
+      },
+      "required": ["product_id", "scanned_at"]
+    },
+    "AiAgentRun": {
+      "title": "AiAgentRun",
+      "description": "Logs of AI agent background runs and triggers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "agentType": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "status": { "type": "string", "enum": ["success", "failed", "pending"] },
+        "summary": { "type": "string" },
+        "output": { "type": "object" }
+      },
+      "required": ["id", "agentType", "timestamp", "status", "summary"]
+    },
+    "AdPerformance": {
+      "title": "AdPerformance",
+      "description": "Meta Marketing API daily campaign performance aggregation",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "spend": { "type": "number" },
+        "impressions": { "type": "number" },
+        "clicks": { "type": "number" },
+        "ctr": { "type": "number" },
+        "cpc": { "type": "number" },
+        "purchases": { "type": "number" },
+        "roas": { "type": "number" },
+        "revenue": { "type": "number" },
+        "updatedAt": { "type": "string" },
+        "isMock": { "type": "boolean" }
+      },
+      "required": ["date", "spend", "impressions", "clicks", "purchases"]
+    },
+    "CloudinaryImage": {
+      "title": "CloudinaryImage",
+      "description": "Mock Cloudinary media library image assets",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "url", "name", "createdAt"]
+    },
+    "ProductReview": {
+      "title": "ProductReview",
+      "description": "Customer product reviews and ratings with photo feedback",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "rating": { "type": "number" },
+        "title": { "type": "string" },
+        "comment": { "type": "string" },
+        "photos": { "type": "array", "items": { "type": "string" } },
+        "isVerifiedPurchaser": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "helpfulCount": { "type": "number" },
+        "helpfulVoters": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "productId", "userName", "rating", "comment", "isVerifiedPurchaser", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/product_reviews/{reviewId}": {
+      "schema": "ProductReview",
+      "description": "Customer ratings, photos and text feedback"
+    },
+    "/cloudinary_images/{imageId}": {
+      "schema": "CloudinaryImage",
+      "description": "Uploaded images on Cloudinary media library"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Registered customer and staff accounts"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Product catalog"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer orders history"
+    },
+    "/pos_sessions/{sessionId}": {
+      "schema": "PosSession",
+      "description": "Active Point-of-Sale registers sessions"
+    },
+    "/pos_sessions/{sessionId}/scans/{scanId}": {
+      "schema": "Scan",
+      "description": "Subcollection storing real-time scanned items under each POS session"
+    },
+    "/ai_agent_runs/{runId}": {
+      "schema": "AiAgentRun",
+      "description": "Logs and activities of the AI Agents"
+    },
+    "/ad_performance/{date}": {
+      "schema": "AdPerformance",
+      "description": "Daily aggregated marketing performance metrics"
+    }
+  }
+}
