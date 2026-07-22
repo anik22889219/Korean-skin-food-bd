@@ -11,7 +11,7 @@ import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { 
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
-  Sparkles, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon
+  Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -281,7 +281,7 @@ export const ProductDetail: React.FC = () => {
     : 0;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 space-y-10">
+    <div className="w-full max-w-[1720px] mx-auto px-4 py-8 md:px-8 lg:px-12 space-y-10">
       
       {/* Lightbox Modal for Review Photos */}
       <AnimatePresence>
@@ -541,7 +541,7 @@ export const ProductDetail: React.FC = () => {
             >
               <div className="flex items-center justify-between border-b border-pink-100/80 pb-3">
                 <h4 className="text-sm font-extrabold text-gray-900 flex items-center gap-2">
-                  <Sparkles size={16} className="text-[#E91E8C]" />
+                  <Wand2 size={16} className="text-[#E91E8C]" />
                   <span>Share Your Skincare Experience</span>
                 </h4>
 

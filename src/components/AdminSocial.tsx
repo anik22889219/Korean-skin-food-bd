@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { productService } from '../services/productService';
 import { Product } from '../types';
-import { Sparkles, Image as ImageIcon, Copy, Check, MessageSquare, ThumbsUp, Share2, Award, Sun, Heart, Smile } from 'lucide-react';
+import { Wand2, Image as ImageIcon, Copy, Check, MessageSquare, ThumbsUp, Share2, Award, Sun, Heart, Smile } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from '@google/genai';
 
@@ -152,7 +152,7 @@ export const AdminSocial: React.FC = () => {
                 disabled={isGenerating || !selectedProduct}
                 className="px-3 py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-[10px] font-bold rounded-lg cursor-pointer transition flex items-center gap-1 shadow-sm"
               >
-                <Sparkles size={11} className={isGenerating ? "animate-spin" : ""} />
+                <Wand2 size={11} className={isGenerating ? "animate-spin" : ""} />
                 <span>{isGenerating ? "Rewriting Copy..." : "Optimize with Gemini"}</span>
               </button>
             </div>

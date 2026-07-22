@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { jsPDF } from 'jspdf';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
+import { addProductToSession } from '../services/posService';
 import { Product, Order } from '../types';
 import { 
   Tv, 
@@ -20,7 +21,12 @@ import {
   ArrowLeft, 
   CheckCircle,
   Truck,
-  Sparkles
+  Sparkles,
+  Search,
+  X,
+  Receipt,
+  Loader2,
+  QrCode
 } from 'lucide-react';
 
 interface PosRegisterProps {
@@ -31,15 +37,51 @@ interface PosRegisterProps {
 export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const [sessionId, setSessionId] = useState<string>('');
   const [scans, setScans] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isPairingModalOpen, setIsPairingModalOpen] = useState<boolean>(false);
   
   // Form fields
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
-  const [deliveryArea, setDeliveryArea] = useState<'inside' | 'outside'>('inside');
+  const [deliveryArea, setDeliveryArea] = useState<'inside' | 'outside' | 'none'>('inside');
   
   // Invoice state
   const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
+
+  // Manual Product Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [searchMessage, setSearchMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const searchContainerRef = React.useRef<HTMLDivElement>(null);
+
+  // Filter products by name, brand, or barcode
+  const filteredProducts = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return products;
+    return products.filter((p) => {
+      const matchName = p.name && p.name.toLowerCase().includes(term);
+      const matchNameBN = p.nameBN && p.nameBN.toLowerCase().includes(term);
+      const matchBrand = p.brand && p.brand.toLowerCase().includes(term);
+      const matchBarcode = p.barcode && p.barcode.toLowerCase().includes(term);
+      const matchId = p.id && p.id.toLowerCase().includes(term);
+      return matchName || matchNameBN || matchBrand || matchBarcode || matchId;
+    });
+  }, [searchQuery, products]);
+
+  // Click outside listener to close search dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // 1. Initialize POS session in Firestore on mount
   useEffect(() => {
@@ -54,7 +96,8 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           customerPhone: '',
           customerAddress: '',
           customerArea: '',
-          computerJoined: true
+          computerJoined: true,
+          items: []
         });
         setSessionId(newSessionId);
       } catch (err) {
@@ -119,25 +162,84 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     }, 0);
   }, [cartItems]);
 
-  const deliveryCharge = deliveryArea === 'inside' ? 60 : 120;
+  const totalItemsCount = useMemo(() => {
+    return cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  }, [cartItems]);
+
+  const deliveryCharge = deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0;
   const grandTotal = subtotal + (cartItems.length > 0 ? deliveryCharge : 0);
+
+  // Product select behavior for Manual Product Search
+  const handleSelectProduct = async (product: Product) => {
+    if (!sessionId) return;
+
+    const currentCartItem = cartItems.find((item) => item.product.id === product.id);
+    const currentQty = currentCartItem ? currentCartItem.quantity : 0;
+
+    if (product.stock <= 0) {
+      setSearchMessage({ type: 'error', text: `Cannot add "${product.name}". Product is out of stock!` });
+      return;
+    }
+
+    if (currentQty >= product.stock) {
+      setSearchMessage({
+        type: 'error',
+        text: `Cannot add more. Available stock for "${product.name}" is ${product.stock}.`
+      });
+      return;
+    }
+
+    const res = await addProductToSession(sessionId, product.id, currentQty);
+
+    if (res.success) {
+      setSearchQuery('');
+      setIsDropdownOpen(false);
+      setSelectedIndex(-1);
+      setSearchMessage({ type: 'success', text: `"${product.name}" added to cart!` });
+      setTimeout(() => {
+        setSearchMessage(null);
+      }, 3000);
+    } else {
+      setSearchMessage({ type: 'error', text: res.message });
+    }
+  };
+
+  // Keyboard Navigation Support
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isDropdownOpen || filteredProducts.length === 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        setIsDropdownOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev < filteredProducts.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : filteredProducts.length - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const targetIdx = selectedIndex >= 0 ? selectedIndex : 0;
+      if (filteredProducts[targetIdx]) {
+        handleSelectProduct(filteredProducts[targetIdx]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsDropdownOpen(false);
+      setSelectedIndex(-1);
+    }
+  };
 
   // 4. Manual cart adjustments (Reactive back to Firestore)
   const handleIncrement = async (productId: string) => {
     if (!sessionId) return;
-    const product = productService.getProductById(productId);
-    if (product && product.stock <= 0) {
-      alert(`Cannot add. ${product.name} is out of stock!`);
-      return;
-    }
-    try {
-      const scanRef = doc(collection(db, 'pos_sessions', sessionId, 'scans'));
-      await setDoc(scanRef, {
-        product_id: productId,
-        scanned_at: new Date().toISOString()
-      });
-    } catch (err) {
-      console.error('Error simulating manual scan:', err);
+    const currentCartItem = cartItems.find(item => item.product.id === productId);
+    const currentQty = currentCartItem ? currentCartItem.quantity : 0;
+    const res = await addProductToSession(sessionId, productId, currentQty);
+    if (!res.success) {
+      alert(res.message);
     }
   };
 
@@ -168,7 +270,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cartItems.length === 0) {
-      alert('Cart is empty! Scan some products from your mobile scanner.');
+      alert('Cart is empty! Scan some products from your mobile scanner or search above.');
       return;
     }
 
@@ -180,6 +282,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       }
     }
 
+    setIsSubmitting(true);
     try {
       const orderId = 'POS-' + Math.floor(100000 + Math.random() * 900000);
       const newOrder: Order = {
@@ -187,7 +290,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         customerName: customerName.trim() || 'In-Person Customer',
         customerPhone: customerPhone.trim() || 'Walk-In',
         address: customerAddress.trim() 
-          ? `${customerAddress.trim()} (${deliveryArea === 'inside' ? 'Inside Dhaka' : 'Outside Dhaka'})` 
+          ? `${customerAddress.trim()} (${deliveryArea === 'inside' ? 'Inside Dhaka' : deliveryArea === 'outside' ? 'Outside Dhaka' : 'No Delivery Cost'})` 
           : 'In-Store Checkout Counter',
         items: cartItems.map(item => ({
           productId: item.product.id,
@@ -243,6 +346,8 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     } catch (err) {
       console.error('Error during POS checkout:', err);
       alert('Checkout failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -331,13 +436,14 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       doc.setDrawColor(200, 200, 200);
       doc.line(120, currentY, 195, currentY);
 
+      const currentDeliveryFee = invoiceOrder.items.length > 0 ? (deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0) : 0;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
       doc.text('Subtotal:', 130, currentY + 6);
-      doc.text(`BDT ৳${invoiceOrder.totalAmount - (invoiceOrder.items.length > 0 ? (deliveryArea === 'inside' ? 60 : 120) : 0)}`, 170, currentY + 6);
+      doc.text(`BDT ৳${invoiceOrder.totalAmount - currentDeliveryFee}`, 170, currentY + 6);
 
       doc.text('Delivery Charge:', 130, currentY + 12);
-      doc.text(`BDT ৳${deliveryArea === 'inside' ? 60 : 120}`, 170, currentY + 12);
+      doc.text(`BDT ৳${currentDeliveryFee}`, 170, currentY + 12);
 
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(233, 30, 140);
@@ -359,7 +465,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const pairingUrl = `${window.location.origin}/pos/scan/${sessionId}`;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 pb-12 print:p-0">
+    <div className="w-full space-y-8 pb-12 print:p-0">
       
       {/* HEADER SECTION (HIDDEN ON PRINT) */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-pink-100 pb-5 print:hidden">
@@ -388,6 +494,71 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           </div>
         )}
       </div>
+
+      {/* PAIRING QR CODE MODAL POPUP */}
+      {isPairingModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn print:hidden">
+          <div className="bg-white p-6 sm:p-8 rounded-[32px] border border-pink-100 shadow-2xl max-w-md w-full space-y-5 text-center relative">
+            <button
+              type="button"
+              onClick={() => setIsPairingModalOpen(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 p-2 rounded-full transition cursor-pointer"
+              title="Close modal"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="w-12 h-12 bg-pink-100/60 rounded-2xl flex items-center justify-center mx-auto text-[#E91E8C]">
+              <Smartphone size={24} />
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-gray-900 tracking-tight">
+                Pair Mobile Barcode Scanner
+              </h3>
+              <p className="text-xs text-gray-500">
+                Scan this QR code with a smartphone camera to connect mobile camera scanner.
+              </p>
+            </div>
+
+            {sessionId ? (
+              <div className="bg-pink-50/30 border border-pink-100 p-5 rounded-2xl inline-block shadow-inner">
+                <QRCodeSVG 
+                  value={pairingUrl} 
+                  size={180} 
+                  bgColor={"#FFFFFF"}
+                  fgColor={"#E91E8C"}
+                  level={"H"}
+                />
+                <div className="text-[10px] text-pink-600 mt-2 font-mono font-bold truncate max-w-[220px] mx-auto bg-white px-2 py-1 rounded-lg border border-pink-100 shadow-2xs">
+                  {pairingUrl}
+                </div>
+              </div>
+            ) : (
+              <div className="w-48 h-48 bg-pink-50 animate-pulse mx-auto rounded-2xl flex items-center justify-center">
+                <span className="text-xs text-pink-400 font-semibold">Generating pairing...</span>
+              </div>
+            )}
+
+            <div className="bg-pink-50/50 p-4 rounded-2xl text-left border border-pink-100 text-xs text-gray-600 space-y-1">
+              <span className="font-extrabold text-pink-700 uppercase text-[10px] block">Instruction for staff:</span>
+              <p className="leading-relaxed text-[11px]">
+                1. Open camera on smartphone & scan this QR code.<br/>
+                2. Log in as staff on mobile.<br/>
+                3. Start scanning product barcodes — cart on this register will update in <strong>real-time</strong>.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsPairingModalOpen(false)}
+              className="w-full bg-[#E91E8C] hover:bg-[#FF4B91] text-white py-3 rounded-2xl font-bold text-xs transition cursor-pointer shadow-md shadow-pink-200"
+            >
+              Done / Close Popup
+            </button>
+          </div>
+        </div>
+      )}
 
       {invoiceOrder ? (
         // INVOICE / RECEIPT SCREEN
@@ -535,150 +706,375 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
         </div>
       ) : (
-        // REGISTER SCREEN
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        // REGISTER SCREEN - 2 BALANCED SIDE-BY-SIDE COLUMNS
+        <form onSubmit={handleCheckout} className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start w-full">
           
-          {/* LEFT COLUMN: LIVE SESSION SYNCHRONIZATION DETAILS (5/12) */}
+          {/* ================= LEFT COLUMN (PRODUCT SEARCH + MOCK SCANNER CATALOG) ================= */}
           <div className="lg:col-span-5 space-y-6">
             
-            {/* PAIRING STATUS & QR CODE */}
-            <div className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm text-center space-y-5">
+            {/* 1. PAIR MOBILE SCANNER POPUP TRIGGER */}
+            <div className="bg-white p-5 rounded-[28px] border border-pink-100 shadow-sm flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#E91E8C] flex-shrink-0">
+                  <Smartphone size={20} />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs font-extrabold text-gray-900 uppercase tracking-wider truncate">
+                    Mobile Camera Scanner
+                  </h4>
+                  <p className="text-[11px] text-gray-500 truncate">
+                    Pair phone for wireless camera scanning
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsPairingModalOpen(true)}
+                className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white px-3.5 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 flex-shrink-0 shadow-sm shadow-pink-200"
+              >
+                <QrCode size={15} />
+                <span>Scan Pairing Code</span>
+              </button>
+            </div>
+
+            {/* 2. MANUAL PRODUCT SEARCH & DESKTOP CATALOG (MOCK SCANNER) */}
+            <div 
+              ref={searchContainerRef} 
+              className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm space-y-5 relative"
+            >
               <div className="space-y-1">
-                <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider flex items-center justify-center gap-1.5">
-                  <Smartphone className="text-[#E91E8C]" size={16} />
-                  <span>Scan Pairing Code</span>
-                </h3>
+                <h4 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider flex items-center gap-2">
+                  <Search size={18} className="text-[#E91E8C]" />
+                  <span>Manual Product Search & Quick Selector</span>
+                </h4>
                 <p className="text-xs text-gray-500">
-                  Scan this code on a mobile device to open the barcode camera scanner.
+                  Type to search or click any product below to instantly add items to POS cart.
                 </p>
               </div>
 
-              {sessionId ? (
-                <div className="bg-pink-50/20 border border-pink-100/60 p-4 rounded-2xl inline-block shadow-inner relative group">
-                  <QRCodeSVG 
-                    value={pairingUrl} 
-                    size={160} 
-                    bgColor={"#FFFFFF"}
-                    fgColor={"#E91E8C"}
-                    level={"H"}
-                  />
-                  <div className="text-[10px] text-gray-400 mt-2 font-mono font-semibold truncate max-w-[200px] mx-auto">
-                    {pairingUrl}
+              {/* Search Input Container */}
+              <div className="relative">
+                <Search size={18} className="text-pink-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setIsDropdownOpen(true);
+                    setSelectedIndex(-1);
+                  }}
+                  onFocus={() => setIsDropdownOpen(true)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Search product by name, brand or barcode..."
+                  className="w-full bg-pink-50/20 text-gray-800 text-xs sm:text-sm pl-11 pr-10 py-3.5 rounded-2xl border border-pink-200 outline-none focus:border-[#E91E8C] focus:bg-white focus:ring-4 focus:ring-[#E91E8C]/10 transition shadow-inner font-medium"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setIsDropdownOpen(false);
+                      setSelectedIndex(-1);
+                    }}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-pink-600 cursor-pointer p-1"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+
+                {/* Dropdown list when typing */}
+                {isDropdownOpen && searchQuery.trim().length > 0 && (
+                  <div className="absolute z-30 left-0 right-0 top-full mt-2 bg-white rounded-2xl border border-pink-100 shadow-2xl max-h-80 overflow-y-auto divide-y divide-pink-50">
+                    {filteredProducts.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-gray-400 font-medium">
+                        No matching products found for "{searchQuery}"
+                      </div>
+                    ) : (
+                      filteredProducts.map((p, idx) => {
+                        const isSelected = idx === selectedIndex;
+                        const currentCartItem = cartItems.find((item) => item.product.id === p.id);
+                        const currentCartQty = currentCartItem ? currentCartItem.quantity : 0;
+                        const isOutOfStock = p.stock <= 0;
+                        const isMaxCart = currentCartQty >= p.stock;
+
+                        return (
+                          <div
+                            key={p.id}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              if (!isOutOfStock && !isMaxCart) {
+                                handleSelectProduct(p);
+                              }
+                            }}
+                            onMouseEnter={() => setSelectedIndex(idx)}
+                            className={`p-3 flex items-center justify-between gap-3 transition text-xs ${
+                              isOutOfStock
+                                ? 'bg-gray-50/70 opacity-60 cursor-not-allowed'
+                                : isMaxCart
+                                ? 'bg-amber-50/40 cursor-not-allowed'
+                                : isSelected
+                                ? 'bg-pink-50/90 border-l-4 border-[#E91E8C] cursor-pointer'
+                                : 'hover:bg-pink-50/40 cursor-pointer'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <img
+                                src={p.image}
+                                alt={p.name}
+                                className="w-11 h-11 object-cover rounded-xl border border-pink-100 flex-shrink-0 shadow-sm"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[9px] uppercase font-bold text-[#E91E8C] bg-pink-100/60 px-1.5 py-0.5 rounded">
+                                    {p.brand}
+                                  </span>
+                                  {p.barcode && (
+                                    <span className="text-[9px] text-gray-400 font-mono">
+                                      #{p.barcode}
+                                    </span>
+                                  )}
+                                </div>
+                                <h5 className="font-bold text-gray-800 text-xs truncate mt-0.5" title={p.name}>
+                                  {p.name}
+                                </h5>
+                                <div className="flex items-center gap-2 mt-0.5 text-[10px]">
+                                  <span className="font-mono font-extrabold text-[#E91E8C]">
+                                    ৳{p.discountPrice || p.price}
+                                  </span>
+                                  {isOutOfStock ? (
+                                    <span className="text-red-500 font-bold bg-red-50 px-1.5 rounded">
+                                      Stock 0
+                                    </span>
+                                  ) : isMaxCart ? (
+                                    <span className="text-amber-600 font-bold bg-amber-50 px-1.5 rounded">
+                                      Max in cart ({currentCartQty}/{p.stock})
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-500">
+                                      Stock: <strong className="text-emerald-600">{p.stock}</strong>
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isOutOfStock || isMaxCart}
+                              className={`px-3 py-1.5 rounded-xl font-bold text-[11px] transition flex-shrink-0 flex items-center gap-1 ${
+                                isOutOfStock || isMaxCart
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                  : 'bg-[#E91E8C] hover:bg-[#FF4B91] text-white shadow-sm shadow-pink-100'
+                              }`}
+                            >
+                              <Plus size={12} />
+                              <span>Add</span>
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="w-40 h-40 bg-pink-50 animate-pulse mx-auto rounded-2xl flex items-center justify-center">
-                  <span className="text-xs text-pink-400 font-semibold">Generating pairing...</span>
+                )}
+              </div>
+
+              {/* Status / feedback message */}
+              {searchMessage && (
+                <div
+                  className={`p-3 rounded-2xl text-xs font-semibold flex items-center gap-2 ${
+                    searchMessage.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-red-50 text-red-700 border border-red-200'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full flex-shrink-0 bg-current"></span>
+                  <span>{searchMessage.text}</span>
                 </div>
               )}
 
-              <div className="bg-pink-50/40 p-4 rounded-2xl text-left border border-pink-100/50">
-                <span className="text-[10px] uppercase font-bold text-pink-700 block mb-1">Instruction for staff:</span>
-                <p className="text-[11px] text-gray-600 leading-relaxed">
-                  Log in as staff on your smartphone, scan this QR code using the camera, and start scanning items. The cart on this desktop register will update in <strong>real-time</strong>.
-                </p>
-              </div>
-            </div>
+              {/* DESKTOP MOCK SCANNER / QUICK PRODUCT GRID */}
+              <div className="space-y-3 pt-3 border-t border-pink-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-[#E91E8C]" />
+                    <span>Quick Catalog ({filteredProducts.length})</span>
+                  </span>
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="text-[11px] font-bold text-pink-600 hover:underline cursor-pointer"
+                    >
+                      Clear Filter
+                    </button>
+                  )}
+                </div>
 
-            {/* MOCK SCANNER UTILITY FOR EASY DEMO */}
-            <div className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm space-y-4">
-              <div className="space-y-1">
-                <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles size={13} className="text-[#E91E8C]" />
-                  <span>Desktop Mock Scanner</span>
-                </h4>
-                <p className="text-[11px] text-gray-500">
-                  No smartphone? Click on any product below to instantly simulate scanning it into this live session.
-                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[420px] overflow-y-auto pr-1">
+                  {filteredProducts.map((p) => {
+                    const currentCartItem = cartItems.find((item) => item.product.id === p.id);
+                    const currentCartQty = currentCartItem ? currentCartItem.quantity : 0;
+                    const isOutOfStock = p.stock <= 0;
+                    const isMaxCart = currentCartQty >= p.stock;
+
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => {
+                          if (!isOutOfStock && !isMaxCart) {
+                            handleSelectProduct(p);
+                          }
+                        }}
+                        disabled={isOutOfStock || isMaxCart}
+                        className={`p-2.5 rounded-2xl border text-left text-xs transition cursor-pointer flex items-center gap-2.5 group ${
+                          isOutOfStock
+                            ? 'bg-gray-50 opacity-50 cursor-not-allowed border-gray-100'
+                            : isMaxCart
+                            ? 'bg-amber-50/30 border-amber-200 cursor-not-allowed'
+                            : 'bg-pink-50/20 hover:bg-pink-50/80 border-pink-100 hover:border-pink-300 shadow-2xs hover:shadow-sm'
+                        }`}
+                      >
+                        <img
+                          src={p.image}
+                          alt={p.name}
+                          className="w-10 h-10 object-cover rounded-xl border border-pink-100 shadow-2xs flex-shrink-0 group-hover:scale-105 transition"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">
+                            {p.brand}
+                          </span>
+                          <h5 className="font-bold text-gray-800 text-xs truncate" title={p.name}>
+                            {p.name}
+                          </h5>
+                          <div className="flex items-center justify-between mt-0.5">
+                            <span className="text-[#E91E8C] font-black font-mono text-xs">
+                              ৳{p.discountPrice || p.price}
+                            </span>
+                            {isOutOfStock ? (
+                              <span className="text-[9px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">Stock 0</span>
+                            ) : isMaxCart ? (
+                              <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Max</span>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 font-extrabold flex items-center gap-0.5 group-hover:text-[#E91E8C]">
+                                <Plus size={11} />
+                                <span>Add</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                {products.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => handleIncrement(p.id)}
-                    className="p-2 bg-pink-50/20 hover:bg-pink-50 border border-pink-100/50 hover:border-pink-300 rounded-xl text-left text-[11px] transition cursor-pointer flex items-center gap-2"
-                  >
-                    <img src={p.image} className="w-6 h-6 object-cover rounded shadow-sm flex-shrink-0" referrerPolicy="no-referrer" />
-                    <div className="truncate">
-                      <span className="font-bold text-gray-800 block truncate">{p.name}</span>
-                      <span className="text-[9px] text-[#E91E8C] font-bold font-mono">৳{p.discountPrice || p.price}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
             </div>
 
           </div>
 
-          {/* RIGHT COLUMN: RUNNING CART & CUSTOMER FORM (7/12) */}
+          {/* ================= RIGHT COLUMN (CART + CUSTOMER & DELIVERY + ORDER SUMMARY) ================= */}
           <div className="lg:col-span-7 space-y-6">
-            
-            {/* LIVE CART ITEMS LIST */}
+
+            {/* 1. REAL-TIME CART */}
             <div className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm space-y-4">
               <div className="flex justify-between items-center border-b border-pink-50 pb-3">
                 <div>
-                  <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShoppingBag className="text-[#E91E8C]" size={16} />
+                  <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wider flex items-center gap-2">
+                    <ShoppingBag className="text-[#E91E8C]" size={18} />
                     <span>Real-Time Cart</span>
                   </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Scanned items from live session</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Scanned items from mobile & manual search</p>
                 </div>
-                <span className="bg-pink-50 border border-pink-100 text-[#E91E8C] font-bold text-[10px] px-2.5 py-1 rounded-full font-mono">
-                  {scans.length} items scanned
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-pink-50 border border-pink-100 text-[#E91E8C] font-extrabold text-xs px-3 py-1.5 rounded-full font-mono shadow-xs">
+                    {totalItemsCount} items ({scans.length} scans)
+                  </span>
+                </div>
               </div>
 
               {cartItems.length === 0 ? (
-                <div className="py-12 text-center space-y-2 text-gray-400">
-                  <ShoppingBag size={32} className="mx-auto opacity-30 animate-pulse text-gray-500" />
-                  <p className="text-xs font-semibold">Cart is currently empty.</p>
-                  <p className="text-[10px]">Scanned products will show up here instantly!</p>
+                <div className="py-12 text-center space-y-3 text-gray-400">
+                  <div className="w-16 h-16 bg-pink-50 rounded-full flex items-center justify-center mx-auto text-[#E91E8C]/40 border border-pink-100">
+                    <ShoppingBag size={28} />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-gray-700">Cart is currently empty</p>
+                    <p className="text-[11px] text-gray-400">Scan barcodes with mobile or select products on the left to start building order.</p>
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                   {cartItems.map(item => {
                     const price = item.product.discountPrice || item.product.price;
+                    const itemSubtotal = price * item.quantity;
+                    const isMaxStock = item.quantity >= item.product.stock;
+
                     return (
                       <div 
                         key={item.product.id}
-                        className="bg-pink-50/25 border border-pink-100/50 p-3 rounded-2xl flex items-center justify-between text-xs transition hover:bg-pink-50/40"
+                        className="bg-pink-50/20 border border-pink-100/60 p-3.5 rounded-2xl flex items-center justify-between text-xs transition hover:bg-pink-50/40 gap-3"
                       >
-                        <div className="flex items-center gap-3">
-                          <img src={item.product.image} className="w-10 h-10 object-cover rounded shadow-sm" referrerPolicy="no-referrer" />
-                          <div>
-                            <span className="text-[9px] uppercase font-bold text-pink-600 block">{item.product.brand}</span>
-                            <h4 className="font-bold text-gray-850 truncate max-w-xs">{item.product.name}</h4>
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <img 
+                            src={item.product.image} 
+                            alt={item.product.name}
+                            className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-sm flex-shrink-0" 
+                            referrerPolicy="no-referrer" 
+                          />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">{item.product.brand}</span>
+                            <h4 className="font-bold text-gray-850 truncate text-xs">{item.product.name}</h4>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[#E91E8C] font-extrabold font-mono">৳{price}</span>
-                              <span className="text-[10px] text-gray-400">Stock: {item.product.stock} left</span>
+                              <span className="text-[#E91E8C] font-extrabold font-mono text-xs">৳{price}</span>
+                              <span className="text-[10px] text-gray-400">Stock: {item.product.stock}</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          {/* Row Subtotal */}
+                          <div className="text-right font-mono hidden sm:block">
+                            <span className="text-[10px] text-gray-400 block">Subtotal</span>
+                            <span className="font-extrabold text-gray-800 text-xs">৳{itemSubtotal}</span>
+                          </div>
+
                           {/* Real-time sync controllers */}
-                          <div className="flex items-center bg-white border border-pink-100 rounded-lg">
+                          <div className="flex items-center bg-white border border-pink-200 rounded-xl shadow-xs">
                             <button 
+                              type="button"
                               onClick={() => handleDecrement(item.product.id, item.docIds)}
-                              className="p-1 hover:bg-pink-50 text-gray-400 hover:text-pink-600 cursor-pointer"
+                              className="p-1.5 hover:bg-pink-50 text-gray-500 hover:text-pink-600 transition cursor-pointer"
+                              title="Decrease quantity"
                             >
-                              <Minus size={11} />
+                              <Minus size={12} />
                             </button>
-                            <span className="px-2 text-gray-800 font-mono font-black text-xs">{item.quantity}</span>
+                            <span className="px-2.5 text-gray-900 font-mono font-black text-xs">{item.quantity}</span>
                             <button 
+                              type="button"
                               onClick={() => handleIncrement(item.product.id)}
-                              className="p-1 hover:bg-pink-50 text-gray-400 hover:text-pink-600 cursor-pointer"
+                              disabled={isMaxStock}
+                              className={`p-1.5 transition cursor-pointer ${
+                                isMaxStock 
+                                  ? 'text-gray-300 cursor-not-allowed' 
+                                  : 'hover:bg-pink-50 text-gray-500 hover:text-pink-600'
+                              }`}
+                              title={isMaxStock ? 'Stock limit reached' : 'Increase quantity'}
                             >
-                              <Plus size={11} />
+                              <Plus size={12} />
                             </button>
                           </div>
 
                           <button 
+                            type="button"
                             onClick={() => handleRemove(item.product.id, item.docIds)}
-                            className="text-gray-400 hover:text-red-500 cursor-pointer p-1"
+                            className="text-gray-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-xl transition cursor-pointer"
+                            title="Remove item"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </div>
@@ -688,15 +1084,19 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
               )}
             </div>
 
-            {/* CUSTOMER FORM & DISPATCH */}
-            <form onSubmit={handleCheckout} className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm space-y-4 text-xs">
-              <span className="text-pink-700 font-bold uppercase tracking-wider block text-[10px]">
-                In-Store Delivery & Customer Details:
-              </span>
+            {/* 2. CUSTOMER & DELIVERY INFORMATION */}
+            <div className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm space-y-4 text-xs">
+              <div className="border-b border-pink-50 pb-2.5">
+                <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <User size={15} className="text-[#E91E8C]" />
+                  <span>Customer & Delivery Details</span>
+                </h4>
+                <p className="text-[11px] text-gray-500 mt-0.5">Optional details for invoice & dispatch record</p>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-500 font-bold mb-1 flex items-center gap-1">
+                  <label className="block text-gray-600 font-bold mb-1 flex items-center gap-1 text-[11px]">
                     <User size={12} className="text-pink-500" />
                     <span>Customer Name (Optional)</span>
                   </label>
@@ -705,12 +1105,12 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder="e.g., Sadia Anjum"
-                    className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
+                    className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] focus:bg-white transition"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-500 font-bold mb-1 flex items-center gap-1">
+                  <label className="block text-gray-600 font-bold mb-1 flex items-center gap-1 text-[11px]">
                     <Phone size={12} className="text-pink-500" />
                     <span>Customer Mobile (Optional)</span>
                   </label>
@@ -719,36 +1119,55 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="e.g., 01700000000"
-                    className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
+                    className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] focus:bg-white transition"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-500 font-bold mb-1 flex items-center gap-1">
+                <label className="block text-gray-600 font-bold mb-1.5 flex items-center gap-1 text-[11px]">
                   <Truck size={12} className="text-pink-500" />
                   <span>Select Delivery Zone</span>
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setDeliveryArea('inside')}
-                    className={`p-3 rounded-xl border font-bold transition text-center cursor-pointer ${deliveryArea === 'inside' ? 'bg-[#E91E8C]/10 border-[#E91E8C] text-[#E91E8C]' : 'bg-white border-pink-100 hover:bg-pink-50 text-gray-600'}`}
+                    className={`p-2.5 rounded-xl border font-bold transition text-center cursor-pointer text-xs ${
+                      deliveryArea === 'inside' 
+                        ? 'bg-[#E91E8C]/10 border-[#E91E8C] text-[#E91E8C] shadow-xs' 
+                        : 'bg-white border-pink-100 hover:bg-pink-50 text-gray-600'
+                    }`}
                   >
                     Inside Dhaka (৳60)
                   </button>
                   <button
                     type="button"
                     onClick={() => setDeliveryArea('outside')}
-                    className={`p-3 rounded-xl border font-bold transition text-center cursor-pointer ${deliveryArea === 'outside' ? 'bg-[#E91E8C]/10 border-[#E91E8C] text-[#E91E8C]' : 'bg-white border-pink-100 hover:bg-pink-50 text-gray-600'}`}
+                    className={`p-2.5 rounded-xl border font-bold transition text-center cursor-pointer text-xs ${
+                      deliveryArea === 'outside' 
+                        ? 'bg-[#E91E8C]/10 border-[#E91E8C] text-[#E91E8C] shadow-xs' 
+                        : 'bg-white border-pink-100 hover:bg-pink-50 text-gray-600'
+                    }`}
                   >
                     Outside Dhaka (৳120)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryArea('none')}
+                    className={`p-2.5 rounded-xl border font-bold transition text-center cursor-pointer text-xs ${
+                      deliveryArea === 'none' 
+                        ? 'bg-[#E91E8C]/10 border-[#E91E8C] text-[#E91E8C] shadow-xs' 
+                        : 'bg-white border-pink-100 hover:bg-pink-50 text-gray-600'
+                    }`}
+                  >
+                    No Delivery Cost (৳0)
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-500 font-bold mb-1 flex items-center gap-1">
+                <label className="block text-gray-600 font-bold mb-1 flex items-center gap-1 text-[11px]">
                   <MapPin size={12} className="text-pink-500" />
                   <span>Delivery Address (Optional)</span>
                 </label>
@@ -756,43 +1175,67 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   rows={2}
                   value={customerAddress}
                   onChange={(e) => setCustomerAddress(e.target.value)}
-                  placeholder="Street, Area, District"
-                  className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
+                  placeholder="Street address, Area, City"
+                  className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] focus:bg-white transition"
                 />
               </div>
+            </div>
 
-              {/* Summary calculations */}
-              <div className="bg-pink-50/20 border border-pink-100 p-4 rounded-2xl space-y-2 font-mono text-gray-700">
+            {/* 3. ORDER SUMMARY & CHECKOUT BUTTON */}
+            <div className="bg-gradient-to-b from-pink-50/30 to-pink-50/80 p-6 rounded-[32px] border border-pink-200/80 shadow-sm space-y-5 text-xs">
+              <div className="border-b border-pink-200/60 pb-2">
+                <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Receipt size={15} className="text-[#E91E8C]" />
+                  <span>Order Summary</span>
+                </h4>
+              </div>
+
+              {/* Calculations Breakdown */}
+              <div className="space-y-2 font-mono text-gray-700">
                 <div className="flex justify-between font-medium">
-                  <span>Gross Items Subtotal:</span>
-                  <span>৳{subtotal}</span>
+                  <span className="text-gray-600">Gross Items Subtotal ({totalItemsCount} pcs):</span>
+                  <span className="font-bold text-gray-900">৳{subtotal}</span>
                 </div>
-                {cartItems.length > 0 && (
-                  <div className="flex justify-between font-medium">
-                    <span>Selected Delivery Charge:</span>
-                    <span>৳{deliveryCharge}</span>
+                <div className="flex justify-between font-medium">
+                  <span className="text-gray-600">Selected Delivery Charge:</span>
+                  <span className="font-bold text-gray-900">৳{cartItems.length > 0 ? deliveryCharge : 0}</span>
+                </div>
+                
+                {/* Grand Total Highlight */}
+                <div className="bg-white p-4 rounded-2xl border border-pink-200 shadow-sm flex items-center justify-between mt-3">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-pink-600 block tracking-wider">Total Amount Due</span>
+                    <span className="text-sm font-black text-gray-900">Grand Total BDT</span>
                   </div>
-                )}
-                <div className="border-t border-pink-100 pt-2.5 flex justify-between text-gray-900 font-extrabold text-sm">
-                  <span className="text-pink-700 font-black">Grand Total BDT:</span>
-                  <span className="text-[#E91E8C] font-black">৳{grandTotal}</span>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-[#E91E8C] font-mono">৳{grandTotal}</span>
+                  </div>
                 </div>
               </div>
 
+              {/* Checkout Action Button */}
               <button 
                 type="submit"
-                disabled={cartItems.length === 0}
-                className="w-full bg-gradient-to-r from-[#FF4B91] to-[#E91E8C] text-white py-3.5 rounded-2xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-40 shadow-md shadow-pink-100"
+                disabled={cartItems.length === 0 || isSubmitting}
+                className="w-full bg-gradient-to-r from-[#FF4B91] to-[#E91E8C] hover:from-[#E91E8C] hover:to-[#D81B60] text-white py-4 rounded-2xl text-xs sm:text-sm font-extrabold transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-pink-200/60 active:scale-[0.99]"
               >
-                <CheckCircle size={15} />
-                <span>Confirm & Create Order (Generate Invoice)</span>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Creating Order & Generating Invoice...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={18} />
+                    <span>Confirm & Create Order (Generate Invoice)</span>
+                  </>
+                )}
               </button>
-
-            </form>
+            </div>
 
           </div>
 
-        </div>
+        </form>
       )}
 
     </div>

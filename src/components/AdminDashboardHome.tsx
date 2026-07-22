@@ -6,7 +6,7 @@ import { productService } from '../services/productService';
 import { posService } from '../services/posService';
 import { Product, Order, AdPerformance } from '../types';
 import { 
-  TrendingUp, Sparkles, RefreshCw, AlertCircle, ShoppingBag, 
+  TrendingUp, Wand2, RefreshCw, AlertCircle, ShoppingBag, 
   ArrowUpRight, ArrowDownRight, Zap, Play, CheckCircle
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -228,7 +228,7 @@ export const AdminDashboardHome: React.FC = () => {
       <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4">
         <div>
           <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
-            <Sparkles className="text-[#E91E8C]" size={14} />
+            <Wand2 className="text-[#E91E8C]" size={14} />
             <span>Autonomous Skincare Optimizer Activity Log</span>
           </h4>
           <p className="text-[10px] text-gray-400">Live stream of cron background crawls, margin recommendations, and automated discount suggestions.</p>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { cloudinaryService, CloudinaryImage } from '../services/cloudinaryService';
-import { X, Search, Upload, Check, Trash2, Image, Sparkles } from 'lucide-react';
+import { X, Search, Upload, Check, Trash2, Image, Wand2 } from 'lucide-react';
 
 interface MediaLibraryModalProps {
   isOpen: boolean;
@@ -331,7 +331,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                 disabled={isUploading || !uploadPreview || !uploadName.trim()}
                 className="w-full bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-bold py-2.5 rounded-xl cursor-pointer transition shadow-md disabled:opacity-40 flex items-center justify-center gap-1.5"
               >
-                <Sparkles size={13} className={isUploading ? "animate-spin" : ""} />
+                <Wand2 size={13} className={isUploading ? "animate-spin" : ""} />
                 <span>{isUploading ? "Uploading to Cloudinary Library..." : "Upload & Select Asset"}</span>
               </button>
             </form>

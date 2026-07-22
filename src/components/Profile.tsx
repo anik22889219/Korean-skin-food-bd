@@ -9,7 +9,7 @@ import { useCart } from '../context/CartContext';
 import { 
   ShoppingBag, Phone, MapPin, User, Save, CheckCircle, Clock, Package, 
   HelpCircle, Search, Filter, Copy, Check, ChevronDown, ChevronUp, 
-  RefreshCw, DollarSign, Mail, ArrowRight, Sparkles, Tag, ShieldCheck, Truck, XCircle,
+  RefreshCw, DollarSign, Mail, ArrowRight, Wand2, Tag, ShieldCheck, Truck, XCircle,
   Gift, Award, Crown, Coins, Percent
 } from 'lucide-react';
 
@@ -368,7 +368,7 @@ export const Profile: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8 py-6 px-4">
+    <div className="w-full max-w-[1720px] mx-auto space-y-8 py-6 px-4 md:px-8 lg:px-12">
       {/* Toast Notification for Reorder */}
       <AnimatePresence>
         {reorderMessage && (
@@ -378,7 +378,7 @@ export const Profile: React.FC = () => {
             exit={{ opacity: 0, y: -20 }}
             className="fixed top-20 right-6 z-50 bg-[#E91E8C] text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 text-xs font-bold"
           >
-            <Sparkles size={16} />
+            <Wand2 size={16} />
             <span>{reorderMessage}</span>
           </motion.div>
         )}
@@ -610,7 +610,7 @@ export const Profile: React.FC = () => {
                   </div>
                 </div>
                 <div className="bg-white/5 p-2 rounded-xl border border-white/10 flex items-center gap-2 text-left">
-                  <Sparkles size={14} className="text-emerald-300 shrink-0" />
+                  <Wand2 size={14} className="text-emerald-300 shrink-0" />
                   <div>
                     <span className="font-extrabold block text-white">3. Direct Checkout</span>
                     <span className="text-pink-200 text-[9px]">Apply savings at payment</span>

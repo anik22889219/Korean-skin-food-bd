@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart3, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
-  Sparkles, LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck 
+  LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -222,7 +222,7 @@ export const AdminLayout: React.FC = () => {
         </div>
 
         {/* Page Inner Container */}
-        <main className="flex-1 p-4 md:p-8 overflow-y-auto max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-y-auto w-full min-w-0">
           <Outlet />
         </main>
       </div>

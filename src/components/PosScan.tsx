@@ -3,13 +3,14 @@ import { collection, doc, setDoc, onSnapshot, query, addDoc } from 'firebase/fir
 import { Html5Qrcode } from 'html5-qrcode';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
+import { addProductToSession } from '../services/posService';
 import { authService } from '../services/authService';
 import { Product, UserProfile } from '../types';
 import { 
   Camera, 
   Smartphone, 
   ShieldAlert, 
-  Sparkles, 
+  Wand2, 
   CheckCircle, 
   ArrowLeft,
   X,
@@ -131,21 +132,16 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
       navigator.vibrate(100);
     }
 
-    // Retrieve product to show name
-    const product = productService.getProductById(productId);
-    if (product) {
-      setLastScannedProduct(product);
-    }
-
-    // Write scan document to Firestore
-    try {
-      const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
-      await addDoc(scansColRef, {
-        product_id: productId,
-        scanned_at: new Date().toISOString()
-      });
-    } catch (err) {
-      console.error("Failed to write scan to Firestore:", err);
+    // Call shared addProductToSession helper
+    const result = await addProductToSession(sessionId, productId);
+    if (result.success && result.product) {
+      setLastScannedProduct(result.product);
+    } else {
+      const product = productService.getProductById(productId);
+      if (product) {
+        setLastScannedProduct(product);
+      }
+      console.warn("Scan add issue:", result.message);
     }
   };
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Sparkles, CheckCircle, ShieldCheck, Heart, Users, Award } from 'lucide-react';
+import { Wand2, CheckCircle, ShieldCheck, Heart, Users, Award } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const AboutUs: React.FC = () => {
@@ -12,7 +12,7 @@ export const AboutUs: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.4 }}
-      className="max-w-7xl mx-auto px-4 py-8 md:px-8 space-y-16"
+      className="w-full max-w-[1720px] mx-auto px-4 py-8 md:px-8 lg:px-12 space-y-16"
     >
       {/* Hero Banner Section */}
       <div className="relative rounded-[32px] overflow-hidden bg-slate-900 p-8 md:p-16 flex flex-col md:flex-row justify-between items-center gap-10 shadow-xl text-white">
@@ -82,7 +82,7 @@ export const AboutUs: React.FC = () => {
           {/* Pillar 2 */}
           <div className="bg-white p-6 rounded-[24px] border border-pink-50 shadow-sm hover:shadow-md transition text-center space-y-4">
             <div className="w-12 h-12 bg-pink-50 rounded-2xl flex items-center justify-center text-[#E91E8C] mx-auto border border-pink-100">
-              <Sparkles size={24} />
+              <Wand2 size={24} />
             </div>
             <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider">BD Climate Tailored</h3>
             <p className="text-[11px] text-gray-500 leading-relaxed">

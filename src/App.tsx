@@ -46,13 +46,7 @@ const PosRegisterRouteWrapper: React.FC = () => {
   const navigate = useNavigate();
   const products = productService.getProducts();
   
-  return (
-    <div className="min-h-screen bg-[#FFF5F8] text-gray-800 font-sans">
-      <div className="p-4 md:p-8">
-        <PosRegister onBack={() => navigate('/admin')} products={products} />
-      </div>
-    </div>
-  );
+  return <PosRegister onBack={() => navigate('/admin')} products={products} />;
 };
 
 export default function App() {

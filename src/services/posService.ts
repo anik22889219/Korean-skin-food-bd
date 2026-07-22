@@ -1,7 +1,7 @@
-import { PosSession, Order } from '../types';
+import { PosSession, Order, Product } from '../types';
 import { productService } from './productService';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { collection, onSnapshot, doc, setDoc, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, query, orderBy, addDoc, getDocs } from 'firebase/firestore';
 
 const DEFAULT_ORDERS: Order[] = [
   {
@@ -82,7 +82,11 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snaps
 onSnapshot(collection(db, 'pos_sessions'), (snapshot) => {
   const sess: PosSession[] = [];
   snapshot.forEach((doc) => {
-    sess.push(doc.data() as PosSession);
+    const data = doc.data() as PosSession;
+    sess.push({
+      ...data,
+      items: Array.isArray(data?.items) ? data.items : []
+    });
   });
   if (sess.length > 0) {
     sessionsCache = sess;
@@ -93,6 +97,73 @@ onSnapshot(collection(db, 'pos_sessions'), (snapshot) => {
     handleFirestoreError(err, OperationType.GET, 'pos_sessions', false);
   }
 });
+
+export async function addProductToSession(
+  sessionId: string,
+  productId: string,
+  currentCartQuantity?: number
+): Promise<{ success: boolean; message: string; product?: Product }> {
+  if (!sessionId || !productId) {
+    return { success: false, message: 'Invalid session or product ID' };
+  }
+
+  const product = productService.getProductById(productId);
+  if (!product) {
+    return { success: false, message: 'Product not found in inventory.' };
+  }
+
+  if (product.stock <= 0) {
+    return { success: false, message: `Product "${product.name}" is out of stock!` };
+  }
+
+  let currentQty = currentCartQuantity;
+  if (currentQty === undefined) {
+    try {
+      const q = query(collection(db, 'pos_sessions', sessionId, 'scans'));
+      const snapshot = await getDocs(q);
+      let count = 0;
+      snapshot.forEach((docSnap) => {
+        if (docSnap.data().product_id === productId) {
+          count++;
+        }
+      });
+      currentQty = count;
+    } catch (err) {
+      console.warn('Error fetching current session scans count:', err);
+      currentQty = 0;
+    }
+  }
+
+  if (currentQty >= product.stock) {
+    return {
+      success: false,
+      message: `Cannot add more. Available stock for "${product.name}" is ${product.stock} (Cart already has ${currentQty}).`
+    };
+  }
+
+  try {
+    const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+    await addDoc(scansColRef, {
+      product_id: productId,
+      scanned_at: new Date().toISOString()
+    });
+
+    setDoc(doc(db, 'pos_sessions', sessionId), {
+      lastScanTime: new Date().toISOString()
+    }, { merge: true }).catch(() => {});
+
+    posService.scanProductIntoSession(sessionId, productId);
+
+    return {
+      success: true,
+      message: `"${product.name}" added to session!`,
+      product
+    };
+  } catch (err: any) {
+    console.error('Error adding product scan to session:', err);
+    return { success: false, message: 'Failed to add product to session.' };
+  }
+}
 
 export const posService = {
   getSessions(): PosSession[] {
@@ -139,7 +210,7 @@ export const posService = {
     }
 
     const session = { ...sessionsCache[sessionIndex] };
-    session.items = [...session.items];
+    session.items = Array.isArray(session.items) ? [...session.items] : [];
     const existingItemIndex = session.items.findIndex(item => item.productId === productId);
 
     if (existingItemIndex !== -1) {
@@ -167,10 +238,11 @@ export const posService = {
     const sIdx = sessionsCache.findIndex(s => s.id === sessionId);
     if (sIdx !== -1) {
       const session = { ...sessionsCache[sIdx] };
+      const currentItems = Array.isArray(session.items) ? session.items : [];
       if (quantity <= 0) {
-        session.items = session.items.filter(item => item.productId !== productId);
+        session.items = currentItems.filter(item => item.productId !== productId);
       } else {
-        session.items = session.items.map(item => item.productId === productId ? { ...item, quantity } : item);
+        session.items = currentItems.map(item => item.productId === productId ? { ...item, quantity } : item);
       }
       session.lastScanTime = new Date().toISOString();
       sessionsCache[sIdx] = session;
@@ -199,13 +271,14 @@ export const posService = {
     }
 
     const session = sessionsCache[sIdx];
-    if (session.items.length === 0) {
+    const sessionItems = Array.isArray(session?.items) ? session.items : [];
+    if (sessionItems.length === 0) {
       return { success: false, message: 'Cart is empty' };
     }
 
     // Verify and decrement stock
     const products = productService.getProducts();
-    for (const item of session.items) {
+    for (const item of sessionItems) {
       const prod = products.find(p => p.id === item.productId);
       if (!prod) {
         return { success: false, message: `Product ${item.name} not found in inventory` };
@@ -216,7 +289,7 @@ export const posService = {
     }
 
     // Decrement stock & log inventory
-    for (const item of session.items) {
+    for (const item of sessionItems) {
       const prod = products.find(p => p.id === item.productId)!;
       const prevStock = prod.stock;
       prod.stock -= item.quantity;
@@ -233,14 +306,14 @@ export const posService = {
     }
 
     // Create Order
-    const totalAmount = session.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalAmount = sessionItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const orderId = 'POS-' + Math.floor(100000 + Math.random() * 900000);
     const newOrder: Order = {
       id: orderId,
       customerName: customerName || 'In-Person Customer',
       customerPhone: customerPhone || 'Walk-In',
       address: 'In-Store Checkout',
-      items: session.items,
+      items: sessionItems,
       totalAmount,
       status: 'delivered',
       createdAt: new Date().toISOString(),

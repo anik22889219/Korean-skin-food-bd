@@ -6,7 +6,7 @@ import { cloudinaryService } from '../services/cloudinaryService';
 import { Product } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { 
-  Plus, Sparkles, QrCode, Search, 
+  Plus, Wand2, QrCode, Search, 
   Trash2, Edit, AlertCircle, CheckCircle, X, 
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff
 } from 'lucide-react';
@@ -655,7 +655,7 @@ export const ProductManagement: React.FC = () => {
                         disabled={isAiGeneratingContent === p.id}
                         className="mx-auto bg-pink-50 text-[#E91E8C] border border-pink-100 hover:bg-pink-100 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
                       >
-                        <Sparkles size={11} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
+                        <Wand2 size={11} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
                         <span>{isAiGeneratingContent === p.id ? "Writing..." : "Auto-Generate SEO"}</span>
                       </button>
                     </td>
@@ -750,7 +750,7 @@ export const ProductManagement: React.FC = () => {
                     disabled={isAiGeneratingContent === p.id}
                     className="mr-auto bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 px-2 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
                   >
-                    <Sparkles size={10} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
+                    <Wand2 size={10} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
                     <span>{isAiGeneratingContent === p.id ? "..." : "SEO Write"}</span>
                   </button>
 
@@ -795,7 +795,7 @@ export const ProductManagement: React.FC = () => {
               {/* Modal Header */}
               <div className="p-4 border-b border-pink-50 flex justify-between items-center bg-white">
                 <span className="text-xs font-black text-gray-950 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-[#E91E8C]" />
+                  <Wand2 size={14} className="text-[#E91E8C]" />
                   <span>Product Specifications & AI Profile</span>
                 </span>
                 <button 
@@ -882,7 +882,7 @@ export const ProductManagement: React.FC = () => {
                 {/* AI generated description and discussion */}
                 <div className="space-y-2">
                   <span className="text-[10px] uppercase font-black text-pink-700 tracking-wider block flex items-center gap-1">
-                    <Sparkles size={11} className="text-[#E91E8C]" />
+                    <Wand2 size={11} className="text-[#E91E8C]" />
                     <span>AI Generated Discussion & Usage</span>
                   </span>
                   <div className="bg-pink-50/10 p-4 rounded-2xl border border-pink-100/30 text-gray-700 text-xs leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap">
@@ -1029,7 +1029,7 @@ export const ProductManagement: React.FC = () => {
                         disabled={isAnalyzingImage || !editingProduct.image}
                         className="flex-1 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 text-xs font-bold py-2 px-3 rounded-xl transition shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-40"
                       >
-                        <Sparkles size={13} className={isAnalyzingImage ? "animate-spin" : ""} />
+                        <Wand2 size={13} className={isAnalyzingImage ? "animate-spin" : ""} />
                         <span>{isAnalyzingImage ? "Analyzing..." : "Analyze Image with AI"}</span>
                       </button>
                     </div>
@@ -1208,7 +1208,7 @@ export const ProductManagement: React.FC = () => {
             
             <div className="p-4 border-b border-pink-100 flex justify-between items-center bg-white">
               <span className="text-xs font-black text-gray-950 uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles size={14} className="text-[#E91E8C] animate-pulse" />
+                <Wand2 size={14} className="text-[#E91E8C] animate-pulse" />
                 <span>AI-Powered Product Registration</span>
               </span>
               <button 
@@ -1233,7 +1233,7 @@ export const ProductManagement: React.FC = () => {
                 {/* Gemini Free Tier info & Token Capacity Indicator */}
                 <div className="bg-pink-50/20 p-4 rounded-2xl border border-pink-100/60 space-y-2.5 shadow-sm">
                   <div className="flex items-center gap-1.5">
-                    <Sparkles size={14} className="text-[#E91E8C]" />
+                    <Wand2 size={14} className="text-[#E91E8C]" />
                     <span className="text-[10px] uppercase font-black text-pink-700 tracking-wider">Gemini Workspace Engine</span>
                   </div>
                   <div className="space-y-1">
@@ -1490,7 +1490,7 @@ export const ProductManagement: React.FC = () => {
                         disabled={isAnalyzingCapturedImage}
                         className="px-5 py-2 bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-extrabold rounded-xl transition flex items-center gap-1.5 shadow-md disabled:opacity-40 cursor-pointer"
                       >
-                        <Sparkles size={13} className={isAnalyzingCapturedImage ? "animate-spin" : ""} />
+                        <Wand2 size={13} className={isAnalyzingCapturedImage ? "animate-spin" : ""} />
                         <span>{isAnalyzingCapturedImage ? "Analyzing with Gemini..." : "Extract & Register Product"}</span>
                       </button>
                     </div>

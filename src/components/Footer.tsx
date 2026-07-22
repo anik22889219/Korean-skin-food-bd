@@ -1,14 +1,14 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  Sparkles, Mail, Phone, MapPin, MessageSquare, 
+  Wand2, Mail, Phone, MapPin, MessageSquare, 
   ExternalLink, ShieldCheck, Truck, HeartHandshake
 } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer id="main_footer" className="bg-white border-t border-pink-100 text-gray-700 pt-12 pb-20 md:pb-12 px-4 md:px-8 shadow-inner mt-auto">
-      <div className="max-w-7xl mx-auto space-y-10">
+    <footer id="main_footer" className="bg-white border-t border-pink-100 text-gray-700 pt-12 pb-20 md:pb-12 px-4 md:px-8 lg:px-12 shadow-inner mt-auto">
+      <div className="w-full max-w-[1720px] mx-auto space-y-10">
         
         {/* Top Section: Guarantee Badges */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pb-8 border-b border-pink-100/70">
@@ -50,7 +50,7 @@ export const Footer: React.FC = () => {
           <div className="lg:col-span-4 space-y-4">
             <Link to="/" className="flex items-center gap-2.5 group">
               <div className="w-9 h-9 bg-[#E91E8C] rounded-full flex items-center justify-center shadow-md shadow-[#E91E8C]/25 border border-[#FF62B2]">
-                <Sparkles className="text-white" size={16} />
+                <Wand2 className="text-white" size={16} />
               </div>
               <div>
                 <h3 className="text-base font-extrabold text-gray-900 tracking-tight leading-none">Korean Skin Food BD</h3>

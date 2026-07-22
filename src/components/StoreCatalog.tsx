@@ -5,7 +5,7 @@ import { useCart } from '../context/CartContext';
 import { useNavigate } from 'react-router-dom';
 import { 
   ShoppingBag, Search, SlidersHorizontal, Percent, 
-  Sparkles, CheckCircle, X 
+  Wand2, CheckCircle, X 
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -43,7 +43,7 @@ export const StoreCatalog: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.3 }}
-      className="max-w-7xl mx-auto space-y-8 px-4 py-6 md:px-8"
+      className="w-full max-w-[1720px] mx-auto space-y-8 px-4 py-6 md:px-8 lg:px-12"
     >
       
       {/* 1. BRAND HERO PROMO */}
@@ -171,7 +171,7 @@ export const StoreCatalog: React.FC = () => {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
             {filteredProducts.map(prod => (
               <div 
                 key={prod.id}

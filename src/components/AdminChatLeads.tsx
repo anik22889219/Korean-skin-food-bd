@@ -20,7 +20,7 @@ import {
   Filter,
   DollarSign,
   X,
-  Sparkles,
+  Wand2,
   Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -790,7 +790,7 @@ export function AdminChatLeads() {
                 {/* AI Conversation Summary */}
                 <div className="space-y-1.5">
                   <span className="text-[10px] uppercase font-black text-pink-700 tracking-wider flex items-center gap-1">
-                    <Sparkles size={11} className="text-[#E91E8C]" />
+                    <Wand2 size={11} className="text-[#E91E8C]" />
                     <span>AI Consultation Summary</span>
                   </span>
                   <div className="bg-pink-50/10 p-3.5 rounded-2xl border border-pink-100/30 text-gray-700 italic leading-relaxed">

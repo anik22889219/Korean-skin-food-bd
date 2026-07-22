@@ -65,7 +65,7 @@ export default function QrSheet({ onBack, products }: QrSheetProps) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8 pb-12 print:p-0">
+    <div className="w-full space-y-8 pb-12 print:p-0">
       
       {/* HEADER SECTION (HIDDEN ON PRINT) */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-pink-100 pb-5 print:hidden">

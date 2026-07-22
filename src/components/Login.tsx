@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Sparkles, ArrowRight } from 'lucide-react';
+import { Wand2, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export const Login: React.FC = () => {
@@ -34,7 +34,7 @@ export const Login: React.FC = () => {
       >
         {/* Logo Icon */}
         <div className="w-16 h-16 bg-[#E91E8C] rounded-full flex items-center justify-center shadow-lg shadow-[#E91E8C]/20 border border-[#FF62B2] mx-auto">
-          <Sparkles className="text-white" size={32} />
+          <Wand2 className="text-white" size={32} />
         </div>
 
         {/* Title & Desc */}

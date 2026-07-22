@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Mail, Phone, MessageSquare, MapPin, CheckCircle, 
-  ChevronDown, ChevronUp, Sparkles, Send 
+  ChevronDown, ChevronUp, Wand2, Send 
 } from 'lucide-react';
 
 export const ContactUs: React.FC = () => {
@@ -52,7 +52,7 @@ export const ContactUs: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.4 }}
-      className="max-w-7xl mx-auto px-4 py-8 md:px-8 space-y-16"
+      className="w-full max-w-[1720px] mx-auto px-4 py-8 md:px-8 lg:px-12 space-y-16"
     >
       {/* Page Header */}
       <div className="text-center space-y-3 max-w-2xl mx-auto">
@@ -70,7 +70,7 @@ export const ContactUs: React.FC = () => {
         <div className="lg:col-span-5 space-y-8">
           <div className="bg-white p-6 rounded-[28px] border border-pink-50 shadow-sm space-y-6">
             <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
-              <Sparkles className="text-[#E91E8C]" size={16} />
+              <Wand2 className="text-[#E91E8C]" size={16} />
               <span>Direct Support Channels</span>
             </h3>
             

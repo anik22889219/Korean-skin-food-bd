@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { 
-  ShoppingBag, Sparkles, Languages, LogOut, User, X, 
+  ShoppingBag, Languages, LogOut, User, X, 
   Trash2, Plus, Minus, CheckCircle, ShieldCheck, Settings,
   LayoutDashboard, Tv, Globe, MessageSquare, Menu, ChevronLeft, 
   ChevronRight, Home, Compass, BarChart3, CreditCard, Boxes, 
@@ -98,7 +98,7 @@ export const MainLayout: React.FC = () => {
         {/* Center Section: Branding Logo */}
         <Link to="/" className="flex items-center gap-2.5 group">
           <div className="w-8 h-8 bg-[#E91E8C] rounded-full flex items-center justify-center shadow-md shadow-[#E91E8C]/25 border border-[#FF62B2] group-hover:scale-105 transition-transform duration-300">
-            <Sparkles className="text-white" size={14} />
+            <Wand2 className="text-white" size={14} />
           </div>
           <div>
             <h1 className="text-sm md:text-base font-extrabold text-gray-900 tracking-tight leading-none">Korean Skin Food BD</h1>
@@ -506,7 +506,7 @@ export const MainLayout: React.FC = () => {
                         <span className="text-[#E91E8C] font-black">৳{calculateGrandTotal()}</span>
                       </div>
                       <div className="text-[10px] text-pink-600 font-sans font-bold pt-1 text-right flex items-center justify-end gap-1">
-                        <Sparkles size={11} />
+                        <Wand2 size={11} />
                         <span>You will earn +{calculatePointsEarned()} Loyalty Points on this order!</span>
                       </div>
                     </div>
