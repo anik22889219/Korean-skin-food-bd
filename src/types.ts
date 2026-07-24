@@ -17,6 +17,9 @@ export interface Product {
   rating: number;
   reviewsCount: number;
   barcode: string;
+  barcodeNormalized?: string;
+  sku?: string;
+  lowStockThreshold?: number;
   qrCodeUrl: string;
   generatedSeoContent?: string;
   generatedSocialPost?: string;

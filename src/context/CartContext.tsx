@@ -103,7 +103,10 @@ const TRANSLATIONS = {
     selectStaffRole: "Select Staff Role to Enter",
     staffEmail: "Staff Work Email",
     staffLogin: "Log in as Staff",
-    currency: "৳"
+    currency: "৳",
+    loginToOrder: "Login Required to Place Order",
+    loginToOrderDesc: "You must be logged in with your account to complete your purchase and earn K-Beauty Loyalty Points.",
+    loginToOrderBtn: "Log In / Register with Google"
   },
   bn: {
     tagline: "নিজেকে ভালোবাসুন, নিজের ত্বকের যত্ন নিন",
@@ -158,7 +161,10 @@ const TRANSLATIONS = {
     selectStaffRole: "প্রবেশ করতে স্টাফ রোল সিলেক্ট করুন",
     staffEmail: "স্টাফ কাজের ইমেইল",
     staffLogin: "স্টাফ হিসেবে লগইন",
-    currency: "৳"
+    currency: "৳",
+    loginToOrder: "অর্ডার করতে লগইন করা আবশ্যক",
+    loginToOrderDesc: "অর্ডার সম্পন্ন করতে এবং লয়ালটি পয়েন্ট অর্জন করতে আপনার গুগল অ্যাকাউন্ট দিয়ে লগইন করুন।",
+    loginToOrderBtn: "গুগল দিয়ে লগইন করুন"
   }
 };
 
@@ -197,6 +203,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     localStorage.setItem('ksf_online_cart_v1', JSON.stringify(cart));
   }, [cart]);
+
+  // Auto-fill checkout form from logged-in user profile
+  useEffect(() => {
+    if (user) {
+      setCheckoutForm((prev) => ({
+        ...prev,
+        name: prev.name || profile?.name || user.displayName || '',
+        phone: prev.phone || profile?.phone || user.phoneNumber || '',
+        address: prev.address || profile?.address || ''
+      }));
+    }
+  }, [user, profile]);
 
   const availablePoints = profile?.loyaltyPoints ?? 0;
 
@@ -272,6 +290,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    if (!user) {
+      alert(language === 'bn' ? 'অর্ডার সম্পন্ন করতে আপনাকে অবশ্যই প্রথমে লগইন করতে হবে।' : 'Login Required: You must be logged in to place an order.');
+      return;
+    }
 
     try {
       const orderItems: OrderItem[] = cart.map((item) => ({

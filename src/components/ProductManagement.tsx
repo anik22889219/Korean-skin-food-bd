@@ -1,14 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { productService } from '../services/productService';
 import { agentService } from '../services/agentService';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { Product } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { 
+  auditProductsBarcodes, 
+  checkDuplicateBarcode, 
+  normalizeBarcode, 
+  validateBarcodeFormat,
+  extractCodeFromScanText,
+  scanBarcodeFromImageFile,
+  scanBarcodeFromLiveVideoSnapshot,
+  applyCameraTrackConstraints,
+  BarcodeAuditReport 
+} from '../utils/barcode';
+import { 
   Plus, Wand2, QrCode, Search, 
   Trash2, Edit, AlertCircle, CheckCircle, X, 
-  Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff
+  Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
+  Barcode, ShieldAlert, Check, RefreshCw, Camera
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -21,6 +34,10 @@ export const ProductManagement: React.FC = () => {
   const [selectedProductForPopup, setSelectedProductForPopup] = useState<Product | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   
+  // Barcode Audit Modal State
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [auditResult, setAuditResult] = useState<BarcodeAuditReport | null>(null);
+
   // Search and filters
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
@@ -30,6 +47,224 @@ export const ProductManagement: React.FC = () => {
   // Cloudinary media library popup states
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
   const [mediaPurpose, setMediaPurpose] = useState<'main' | 'gallery'>('main');
+
+  // Edit Form Camera Barcode Scanner States
+  const [isFormCameraActive, setIsFormCameraActive] = useState(false);
+  const [isPhotoScanning, setIsPhotoScanning] = useState(false);
+  const [formCameraError, setFormCameraError] = useState<string | null>(null);
+  const [useFormFrontCamera, setUseFormFrontCamera] = useState(false);
+  const [formCameraZoom, setFormCameraZoom] = useState<number>(1.5);
+  const formHtml5QrcodeRef = useRef<Html5Qrcode | null>(null);
+  const isFormScannerStoppingRef = useRef<boolean>(false);
+
+  const handleLiveLensSnap = async (containerId: string) => {
+    setIsPhotoScanning(true);
+    setAlertMsg({ type: 'info', text: '🔍 Performing Google Lens HD Instant Scan from live camera frame...' });
+
+    try {
+      const scannedBc = await scanBarcodeFromLiveVideoSnapshot(containerId);
+      if (scannedBc) {
+        setEditingProduct(prev => prev ? {
+          ...prev,
+          barcode: scannedBc,
+          barcodeNormalized: scannedBc
+        } : null);
+        setAlertMsg({ type: 'success', text: `Scanned Barcode: "${scannedBc}" applied to product form!` });
+        setTimeout(() => setAlertMsg(null), 4000);
+        stopFormCameraScanner();
+      } else {
+        setAlertMsg({ 
+          type: 'error', 
+          text: 'Could not read barcode from this instant frame. Tip: Hold camera ~15cm away (do not place too close to avoid lens focus blur) and tap "📸 Lens Live Snap" again!' 
+        });
+        setTimeout(() => setAlertMsg(null), 5000);
+      }
+    } catch (err) {
+      console.error("Live Lens snap error:", err);
+      setAlertMsg({ type: 'error', text: 'Error performing live Lens snapshot scan.' });
+    } finally {
+      setIsPhotoScanning(false);
+    }
+  };
+
+  const handleZoomChange = async (newZoom: number) => {
+    setFormCameraZoom(newZoom);
+    if (isFormCameraActive) {
+      await applyCameraTrackConstraints("edit-form-barcode-scanner-container", { zoom: newZoom, triggerFocus: true });
+    }
+  };
+
+  const handleGoogleLensPhotoScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsPhotoScanning(true);
+    setAlertMsg({ type: 'info', text: '🔍 Analyzing photo with Google Lens barcode scanner...' });
+
+    try {
+      const scannedBc = await scanBarcodeFromImageFile(file);
+      if (scannedBc) {
+        setEditingProduct(prev => prev ? {
+          ...prev,
+          barcode: scannedBc,
+          barcodeNormalized: scannedBc
+        } : null);
+        setAlertMsg({ type: 'success', text: `Scanned Barcode: "${scannedBc}" applied to product form!` });
+        setTimeout(() => setAlertMsg(null), 4000);
+        stopFormCameraScanner();
+      } else {
+        setAlertMsg({ 
+          type: 'error', 
+          text: 'Could not detect a barcode in this photo. Please ensure the barcode is clearly visible and try snapping a closer, focused photo.' 
+        });
+        setTimeout(() => setAlertMsg(null), 5000);
+      }
+    } catch (err) {
+      console.error("Photo scan error:", err);
+      setAlertMsg({ type: 'error', text: 'Error analyzing barcode photo. Please try again.' });
+    } finally {
+      setIsPhotoScanning(false);
+      e.target.value = '';
+    }
+  };
+
+  const stopFormCameraScanner = async () => {
+    const scanner = formHtml5QrcodeRef.current;
+    if (!scanner) {
+      setIsFormCameraActive(false);
+      return;
+    }
+
+    if (isFormScannerStoppingRef.current) return;
+    isFormScannerStoppingRef.current = true;
+
+    try {
+      if (scanner.isScanning) {
+        await scanner.stop().catch(() => {});
+      }
+      scanner.clear();
+    } catch (e) {
+      console.warn("Form camera stop error:", e);
+    } finally {
+      formHtml5QrcodeRef.current = null;
+      isFormScannerStoppingRef.current = false;
+      setIsFormCameraActive(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isFormCameraActive || !editingProduct) return;
+
+    let isCancelled = false;
+    let localScanner: Html5Qrcode | null = null;
+
+    const startScanner = async () => {
+      setFormCameraError(null);
+
+      // Wait 100ms for React to mount the DOM container element
+      await new Promise(res => setTimeout(res, 100));
+      if (isCancelled) return;
+
+      const element = document.getElementById("edit-form-barcode-scanner-container");
+      if (!element) return;
+
+      // Safely stop and clear previous scanner instance if present
+      if (formHtml5QrcodeRef.current) {
+        try {
+          if (formHtml5QrcodeRef.current.isScanning) {
+            await formHtml5QrcodeRef.current.stop().catch(() => {});
+          }
+          formHtml5QrcodeRef.current.clear();
+        } catch (e) {
+          // ignore cleanup errors from previous state
+        }
+        formHtml5QrcodeRef.current = null;
+      }
+
+      if (isCancelled) return;
+
+      try {
+        localScanner = new Html5Qrcode("edit-form-barcode-scanner-container");
+        formHtml5QrcodeRef.current = localScanner;
+
+        const cameraConfig = { facingMode: useFormFrontCamera ? "user" : "environment" };
+
+        await localScanner.start(
+          cameraConfig,
+          {
+            fps: 20,
+            qrbox: (width, height) => {
+              const minDim = Math.min(width, height);
+              return { width: Math.floor(minDim * 0.85), height: Math.floor(minDim * 0.55) };
+            },
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            }
+          } as any,
+          (scannedText) => {
+            if (!scannedText || isCancelled) return;
+            const extracted = extractCodeFromScanText(scannedText);
+            const norm = normalizeBarcode(extracted);
+            if (norm) {
+              setEditingProduct(prev => prev ? { 
+                ...prev, 
+                barcode: norm, 
+                barcodeNormalized: norm 
+              } : null);
+              setAlertMsg({ type: 'success', text: `Scanned Barcode: "${norm}" applied to product form!` });
+              setTimeout(() => setAlertMsg(null), 4000);
+              stopFormCameraScanner();
+            }
+          },
+          () => {}
+        );
+
+        // Apply hardware track zoom & focus constraints shortly after stream starts
+        setTimeout(() => {
+          if (!isCancelled) {
+            applyCameraTrackConstraints("edit-form-barcode-scanner-container", { zoom: formCameraZoom, triggerFocus: true });
+          }
+        }, 600);
+
+        const focusInterval = setInterval(() => {
+          if (!isCancelled) {
+            applyCameraTrackConstraints("edit-form-barcode-scanner-container", { zoom: formCameraZoom, triggerFocus: false });
+          }
+        }, 4000);
+
+        return () => {
+          clearInterval(focusInterval);
+        };
+      } catch (err: any) {
+        if (isCancelled) return;
+        const errStr = String(err?.message || err);
+        if (errStr.includes("already under transition")) {
+          console.warn("Camera transition in progress, skipping start...");
+          return;
+        }
+        console.error("Edit form camera startup error:", err);
+        setFormCameraError("Camera permission blocked or unavailable. Ensure camera access is allowed in browser settings.");
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      isCancelled = true;
+      if (localScanner) {
+        try {
+          if (localScanner.isScanning) {
+            localScanner.stop().then(() => localScanner?.clear()).catch(() => {});
+          } else {
+            localScanner.clear();
+          }
+        } catch (e) {}
+        if (formHtml5QrcodeRef.current === localScanner) {
+          formHtml5QrcodeRef.current = null;
+        }
+      }
+    };
+  }, [isFormCameraActive, useFormFrontCamera]);
 
   // AI automation states
   const [isTranslatingName, setIsTranslatingName] = useState(false);
@@ -143,7 +378,8 @@ export const ProductManagement: React.FC = () => {
     
     try {
       const newId = 'p' + Math.floor(100 + Math.random() * 900);
-      const barcode = Math.floor(8800000000000 + Math.random() * 9999999999).toString();
+      // AI Product Import Rule: Do NOT invent fake barcodes. Set to empty if not provided.
+      const barcode = sug.barcode ? normalizeBarcode(sug.barcode) : '';
       
       // 1. Store the representative product image in Cloudinary mock/real system
       let finalImageUrl = sug.imageUrl || 'https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?q=80&w=600&auto=format&fit=crop';
@@ -231,7 +467,8 @@ export const ProductManagement: React.FC = () => {
       const data = await res.json();
       
       const newId = 'p' + Math.floor(100 + Math.random() * 900);
-      const barcode = Math.floor(8800000000000 + Math.random() * 9999999999).toString();
+      // AI Product Import Rule: Do NOT invent fake barcodes. Set to empty if not detected.
+      const barcode = data.barcode ? normalizeBarcode(data.barcode) : '';
       const generatedName = data.brand && data.ml ? `${data.brand} Skincare ${data.ml}` : 'Analyzed Skincare Bottle';
       const productName = data.seoTitle || generatedName;
 
@@ -319,6 +556,7 @@ export const ProductManagement: React.FC = () => {
   };
 
   const handleStartAddProduct = () => {
+    stopFormCameraScanner();
     setIsAddingProduct(true);
     setEditingProduct({
       id: 'p' + Math.floor(100 + Math.random() * 900),
@@ -338,15 +576,21 @@ export const ProductManagement: React.FC = () => {
       skinTypes: ['All'],
       rating: 4.8,
       reviewsCount: 1,
-      barcode: Math.floor(8800000000000 + Math.random() * 9999999999).toString()
+      barcode: '',
+      barcodeNormalized: '',
+      sku: '',
+      lowStockThreshold: 5
     } as any);
   };
 
   const handleStartEditProduct = (p: Product) => {
+    stopFormCameraScanner();
     setIsAddingProduct(false);
     setEditingProduct({ 
       ...p,
-      images: p.images || [] // ensure array exists
+      images: p.images || [],
+      sku: p.sku || '',
+      lowStockThreshold: p.lowStockThreshold ?? 5
     });
   };
 
@@ -355,13 +599,44 @@ export const ProductManagement: React.FC = () => {
     if (!editingProduct) return;
 
     try {
-      if (isAddingProduct) {
-        productService.createProduct(editingProduct);
-        setAlertMsg({ type: 'success', text: 'New K-Beauty product added successfully.' });
-      } else {
-        productService.updateProduct(editingProduct);
-        setAlertMsg({ type: 'success', text: 'Stock parameters and specs successfully updated.' });
+      const rawBc = (editingProduct.barcode || '').trim();
+      let isDupWarning = false;
+      let dupProdName = '';
+
+      if (rawBc) {
+        // STEP 7: Check Duplicate Barcodes for warning feedback
+        const dupCheck = checkDuplicateBarcode(products, rawBc, editingProduct.id);
+        if (dupCheck.isDuplicate) {
+          isDupWarning = true;
+          dupProdName = dupCheck.conflictingProduct?.name || 'another item';
+        }
       }
+
+      const normBc = normalizeBarcode(rawBc);
+      const updatedProd: Product = {
+        ...editingProduct,
+        barcode: rawBc,
+        barcodeNormalized: normBc
+      };
+
+      if (isAddingProduct) {
+        await productService.createProduct(updatedProd);
+        setAlertMsg({ 
+          type: isDupWarning ? 'warning' : 'success', 
+          text: isDupWarning 
+            ? `New product created! ⚠️ Note: Barcode "${rawBc}" is also used by "${dupProdName}".`
+            : 'New K-Beauty product registered successfully.' 
+        });
+      } else {
+        await productService.updateProduct(updatedProd);
+        setAlertMsg({ 
+          type: isDupWarning ? 'warning' : 'success', 
+          text: isDupWarning 
+            ? `Product updated successfully! ⚠️ Note: Barcode "${rawBc}" is also assigned to "${dupProdName}".`
+            : 'Product specs and stock updated successfully.' 
+        });
+      }
+      stopFormCameraScanner();
       setEditingProduct(null);
       refreshProducts();
       setTimeout(() => setAlertMsg(null), 3000);
@@ -498,6 +773,36 @@ export const ProductManagement: React.FC = () => {
     });
   };
 
+  const handleRunBarcodeAudit = () => {
+    const currentProds = productService.getProducts();
+    const results = auditProductsBarcodes(currentProds);
+    setAuditResult(results);
+    setIsAuditModalOpen(true);
+  };
+
+  const handleBackfillAndNormalize = async () => {
+    const currentProds = productService.getProducts();
+    let count = 0;
+    for (const p of currentProds) {
+      const rawBc = p.barcode || '';
+      const normBc = normalizeBarcode(rawBc);
+      if (p.barcodeNormalized !== normBc || (p.barcode && p.barcode !== p.barcode.trim())) {
+        const updated = {
+          ...p,
+          barcode: rawBc.trim(),
+          barcodeNormalized: normBc
+        };
+        await productService.updateProduct(updated);
+        count++;
+      }
+    }
+    refreshProducts();
+    const newResults = auditProductsBarcodes(productService.getProducts());
+    setAuditResult(newResults);
+    setAlertMsg({ type: 'success', text: `Normalized and backfilled barcodes for ${count} product(s)!` });
+    setTimeout(() => setAlertMsg(null), 4000);
+  };
+
   const openMediaLibrary = (purpose: 'main' | 'gallery') => {
     setMediaPurpose(purpose);
     setIsMediaModalOpen(true);
@@ -523,6 +828,16 @@ export const ProductManagement: React.FC = () => {
         </div>
 
         <div className="flex gap-2.5 flex-wrap">
+          <button 
+            type="button"
+            onClick={handleRunBarcodeAudit}
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+            title="Audit missing, duplicate, and unnormalized barcodes"
+          >
+            <Barcode size={13} className="text-amber-400" />
+            <span>Audit Barcodes & Fixes</span>
+          </button>
+
           <button 
             onClick={() => navigate('/admin/pos')}
             className="px-4 py-2 bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
@@ -1037,6 +1352,189 @@ export const ProductManagement: React.FC = () => {
                       Use the Cloudinary Library to pick from existing images or upload from your device. Click "Analyze Image with AI" to auto-extract skincare specs!
                     </p>
                   </div>
+                </div>
+              </div>
+
+              {/* Barcode Identity & Inventory Foundation */}
+              <div className="p-3 bg-pink-50/20 border border-pink-100 rounded-2xl space-y-3">
+                <span className="text-[10px] uppercase font-black text-pink-700 tracking-wider flex items-center gap-1">
+                  <Barcode size={13} />
+                  <span>Barcode Identity & Inventory Control</span>
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="sm:col-span-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1">
+                      <label className="block text-gray-600 font-bold">
+                        Physical Barcode (EAN/UPC)
+                      </label>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isFormCameraActive) {
+                              stopFormCameraScanner();
+                            } else {
+                              setIsFormCameraActive(true);
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-lg text-[10px] font-extrabold cursor-pointer transition flex items-center gap-1 shadow-sm"
+                          title="Scan barcode with mobile video camera"
+                        >
+                          <Camera size={12} />
+                          <span>{isFormCameraActive ? "Close Cam" : "📷 Live Cam"}</span>
+                        </button>
+
+                        <label
+                          className={`px-2.5 py-1 ${isPhotoScanning ? 'bg-slate-400' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'} text-white rounded-lg text-[10px] font-extrabold cursor-pointer transition flex items-center gap-1 shadow-sm`}
+                          title="Upload or snap a focused photo (Google Lens style, zero blur)"
+                        >
+                          <Search size={12} />
+                          <span>{isPhotoScanning ? "Analyzing Photo..." : "🔍 Lens Photo Scan"}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            capture="environment" 
+                            onChange={handleGoogleLensPhotoScan}
+                            className="hidden"
+                            disabled={isPhotoScanning}
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Live Camera Viewfinder if active */}
+                    {isFormCameraActive && (
+                      <div className="my-2 p-3 bg-slate-900 rounded-2xl border border-pink-300 text-white space-y-2.5 shadow-lg">
+                        <div className="flex flex-wrap items-center justify-between text-[10px] gap-1.5 border-b border-slate-800 pb-2">
+                          <span className="font-bold text-amber-300 flex items-center gap-1">
+                            <Camera size={13} />
+                            <span>Live Camera Viewfinder</span>
+                          </span>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-700">
+                              <span className="text-[9px] text-slate-400 font-bold">Zoom:</span>
+                              {[1.0, 1.5, 2.0, 2.5].map((zVal) => (
+                                <button
+                                  key={zVal}
+                                  type="button"
+                                  onClick={() => handleZoomChange(zVal)}
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold cursor-pointer transition ${
+                                    formCameraZoom === zVal 
+                                      ? "bg-[#E91E8C] text-white" 
+                                      : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                                  }`}
+                                >
+                                  {zVal}x
+                                </button>
+                              ))}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => applyCameraTrackConstraints("edit-form-barcode-scanner-container", { zoom: formCameraZoom, triggerFocus: true })}
+                              className="px-2 py-0.5 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 rounded text-[9px] font-bold border border-amber-500/40 cursor-pointer transition flex items-center gap-1"
+                              title="Force camera focus re-calibration"
+                            >
+                              🎯 Refocus
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setUseFormFrontCamera(!useFormFrontCamera)}
+                              className="text-[10px] text-slate-300 hover:text-white underline cursor-pointer font-semibold"
+                            >
+                              Cam ({useFormFrontCamera ? "Front" : "Rear"})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopFormCameraScanner}
+                              className="text-[10px] text-rose-400 hover:text-rose-300 cursor-pointer font-bold"
+                            >
+                              ✕ Close
+                            </button>
+                          </div>
+                        </div>
+
+                        <div 
+                          id="edit-form-barcode-scanner-container" 
+                          className="w-full h-48 bg-black rounded-xl overflow-hidden relative border border-slate-700 shadow-inner"
+                        />
+
+                        {/* Instant Google Lens Live Video Snapshot Scan Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleLiveLensSnap("edit-form-barcode-scanner-container")}
+                          disabled={isPhotoScanning}
+                          className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs py-2 px-3 rounded-xl shadow-md flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                        >
+                          <Search size={14} className={isPhotoScanning ? "animate-spin" : ""} />
+                          <span>{isPhotoScanning ? "Scanning Live HD Frame..." : "📸 Google Lens Live Scan (Instant Snap & Decode)"}</span>
+                        </button>
+
+                        <div className="text-[10px] text-amber-200/90 bg-amber-950/50 p-2 rounded-xl border border-amber-800/40 leading-relaxed">
+                          💡 <strong>Clear Scan Tip:</strong> Hold phone ~15cm away from product and use <strong>1.5x or 2.0x Zoom</strong> to avoid lens focus blur. Tap <strong>"📸 Google Lens Live Scan"</strong> for instant high-res decoding!
+                        </div>
+
+                        {formCameraError && (
+                          <p className="text-[10px] text-rose-400 bg-rose-950/80 p-2 rounded-lg border border-rose-800">
+                            {formCameraError}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <input 
+                      type="text" 
+                      placeholder="e.g. 8809598450123"
+                      value={editingProduct.barcode || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditingProduct({ 
+                          ...editingProduct, 
+                          barcode: val,
+                          barcodeNormalized: normalizeBarcode(val)
+                        });
+                      }}
+                      className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold"
+                    />
+                    {editingProduct.barcode ? (
+                      <span className="text-[9px] text-gray-500 font-mono block mt-1">
+                        Normalized: <strong className="text-pink-600">"{normalizeBarcode(editingProduct.barcode)}"</strong>
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-amber-600 block mt-1 font-semibold">
+                        ⚠️ No barcode assigned. Scanners will match via Product ID or manually.
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-600 font-bold mb-1">SKU Code</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. BOJ-SUN-50"
+                      value={editingProduct.sku || ''}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, sku: e.target.value })}
+                      className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-200 outline-none focus:border-[#E91E8C] font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-gray-600 font-bold mb-1">
+                    Low Stock Alert Threshold (Units)
+                  </label>
+                  <input 
+                    type="number" 
+                    min="1"
+                    value={editingProduct.lowStockThreshold ?? 5}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, lowStockThreshold: Number(e.target.value) })}
+                    className="w-28 bg-white text-gray-800 px-3 py-1.5 rounded-lg border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold"
+                  />
+                  <span className="text-[9px] text-gray-400 ml-2">Triggers low stock alert in inventory management.</span>
                 </div>
               </div>
 
@@ -1565,6 +2063,183 @@ export const ProductManagement: React.FC = () => {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* BARCODE DATA AUDIT TOOL MODAL */}
+      {isAuditModalOpen && auditResult && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[28px] border border-pink-100 overflow-hidden max-w-2xl w-full shadow-2xl flex flex-col justify-between max-h-[90vh]">
+            
+            {/* Modal Header */}
+            <div className="p-4 border-b border-pink-100 flex justify-between items-center bg-slate-900 text-white">
+              <span className="text-xs font-black uppercase tracking-wider flex items-center gap-2 text-amber-400">
+                <Barcode size={16} />
+                <span>Barcode Identity & Data Audit Tool</span>
+              </span>
+              <button 
+                type="button" 
+                onClick={() => setIsAuditModalOpen(false)} 
+                className="text-slate-400 hover:text-white cursor-pointer p-1 rounded-full hover:bg-slate-800 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6 text-xs bg-white">
+              <p className="text-gray-600 leading-relaxed text-xs">
+                This diagnostic audit tool validates barcode data integrity across your Firestore database catalog to prevent camera scanner mismatches, lost leading zeros, spaces, or duplicates.
+              </p>
+
+              {/* Grid of 4 Audit Metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-pink-50 p-3 rounded-2xl border border-pink-100 text-center space-y-0.5">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase block">Total Products</span>
+                  <span className="text-xl font-black text-gray-900 font-mono">{auditResult.totalProducts}</span>
+                </div>
+
+                <div className={`p-3 rounded-2xl border text-center space-y-0.5 ${
+                  auditResult.missingBarcodes.length > 0 
+                    ? 'bg-amber-50 border-amber-200 text-amber-900' 
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                }`}>
+                  <span className="text-[10px] font-bold uppercase block">Missing Barcode</span>
+                  <span className="text-xl font-black font-mono">{auditResult.missingBarcodes.length}</span>
+                </div>
+
+                <div className={`p-3 rounded-2xl border text-center space-y-0.5 ${
+                  auditResult.duplicateBarcodes.length > 0 
+                    ? 'bg-rose-50 border-rose-200 text-rose-900' 
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                }`}>
+                  <span className="text-[10px] font-bold uppercase block">Duplicates</span>
+                  <span className="text-xl font-black font-mono">{auditResult.duplicateBarcodes.length}</span>
+                </div>
+
+                <div className={`p-3 rounded-2xl border text-center space-y-0.5 ${
+                  auditResult.unnormalizedBarcodes.length > 0 
+                    ? 'bg-sky-50 border-sky-200 text-sky-900' 
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                }`}>
+                  <span className="text-[10px] font-bold uppercase block">Unnormalized</span>
+                  <span className="text-xl font-black font-mono">{auditResult.unnormalizedBarcodes.length}</span>
+                </div>
+              </div>
+
+              {/* DUPLICATE BARCODES WARNING */}
+              {auditResult.duplicateBarcodes.length > 0 && (
+                <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
+                  <span className="font-extrabold text-rose-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <ShieldAlert size={14} className="text-rose-600" />
+                    <span>Duplicate Barcode Collision Detected ({auditResult.duplicateBarcodes.length} Groups)</span>
+                  </span>
+                  <p className="text-[11px] text-rose-700 leading-relaxed">
+                    The following products share identical barcode values. Edit these products to assign unique physical barcodes:
+                  </p>
+                  <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                    {auditResult.duplicateBarcodes.map((dup, idx) => (
+                      <div key={idx} className="bg-white p-2.5 rounded-xl border border-rose-200 text-[11px] space-y-1">
+                        <div className="font-mono font-bold text-rose-700">
+                          Normalized Barcode: "{dup.normalizedBarcode}"
+                        </div>
+                        <ul className="list-disc list-inside text-gray-700 space-y-0.5">
+                          {dup.products.map(p => (
+                            <li key={p.id}>
+                              <strong>{p.name}</strong> <span className="text-gray-400 font-mono">(ID: {p.id})</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* UNNORMALIZED BARCODES LIST */}
+              {auditResult.unnormalizedBarcodes.length > 0 && (
+                <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl space-y-2">
+                  <span className="font-extrabold text-sky-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <RefreshCw size={14} className="text-sky-600" />
+                    <span>Unnormalized Barcodes Needing Backfill ({auditResult.unnormalizedBarcodes.length} Products)</span>
+                  </span>
+                  <p className="text-[11px] text-sky-700">
+                    These products have unnormalized formatting (spaces, hyphens, or uncomputed <code>barcodeNormalized</code> field). Click <strong>"Backfill & Normalize Barcodes"</strong> below to automatically standardize them.
+                  </p>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                    {auditResult.unnormalizedBarcodes.map((un, idx) => (
+                      <div key={idx} className="bg-white p-2 rounded-xl border border-sky-100 flex justify-between items-center text-[10px]">
+                        <span className="font-bold text-gray-800 truncate max-w-[200px]">{un.product.name}</span>
+                        <div className="font-mono text-gray-600">
+                          Raw: <span className="text-rose-600">"{un.raw}"</span> &rarr; Norm: <span className="text-emerald-600">"{un.normalized}"</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* MISSING BARCODES LIST */}
+              {auditResult.missingBarcodes.length > 0 && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
+                  <span className="font-extrabold text-amber-800 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <AlertCircle size={14} className="text-amber-600" />
+                    <span>Products Missing Physical Barcodes ({auditResult.missingBarcodes.length})</span>
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-32 overflow-y-auto pr-1">
+                    {auditResult.missingBarcodes.map(p => (
+                      <div key={p.id} className="bg-white p-2 rounded-xl border border-amber-200 flex items-center justify-between text-[10px]">
+                        <span className="font-bold text-gray-800 truncate">{p.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAuditModalOpen(false);
+                            handleStartEditProduct(p);
+                          }}
+                          className="text-[#E91E8C] font-extrabold hover:underline cursor-pointer ml-2 flex-shrink-0"
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* CLEAN BILL OF HEALTH BANNER */}
+              {auditResult.duplicateBarcodes.length === 0 && 
+               auditResult.unnormalizedBarcodes.length === 0 && 
+               auditResult.missingBarcodes.length === 0 && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-1">
+                  <CheckCircle size={28} className="text-emerald-600 mx-auto" />
+                  <h4 className="font-bold text-emerald-900 text-sm">100% Barcode Integrity Verified!</h4>
+                  <p className="text-xs text-emerald-700">All products have unique, normalized, and valid physical barcodes in Firestore.</p>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-pink-50/20 border-t border-pink-100 flex justify-between items-center gap-2">
+              <button 
+                type="button"
+                onClick={handleBackfillAndNormalize}
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-emerald-400 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <RefreshCw size={13} />
+                <span>Backfill & Normalize Barcodes</span>
+              </button>
+
+              <button 
+                type="button" 
+                onClick={() => setIsAuditModalOpen(false)} 
+                className="px-5 py-2.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-extrabold rounded-xl cursor-pointer transition shadow-sm"
+              >
+                Done / Close
+              </button>
+            </div>
+
           </div>
         </div>
       )}

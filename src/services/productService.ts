@@ -2,8 +2,13 @@ import { Product, InventoryLog } from '../types';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
+import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
 
-let productsCache: Product[] = [...INITIAL_PRODUCTS];
+// Ensure initial products have barcodeNormalized populated
+let productsCache: Product[] = INITIAL_PRODUCTS.map(p => ({
+  ...p,
+  barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode)
+}));
 let inventoryLogsCache: InventoryLog[] = [];
 
 // Seed database with full inventory catalog if not already populated
@@ -20,7 +25,8 @@ async function seedInitialProductsIfMissing(existingDocsCount: number) {
         const chunk = INITIAL_PRODUCTS.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(db);
         chunk.forEach(p => {
-          batch.set(doc(db, 'products', p.id), p, { merge: true });
+          const normProduct = { ...p, barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode) };
+          batch.set(doc(db, 'products', p.id), normProduct, { merge: true });
         });
         await batch.commit();
       }
@@ -35,7 +41,11 @@ async function seedInitialProductsIfMissing(existingDocsCount: number) {
 onSnapshot(collection(db, 'products'), (snapshot) => {
   const prods: Product[] = [];
   snapshot.forEach((doc) => {
-    prods.push(doc.data() as Product);
+    const data = doc.data() as Product;
+    prods.push({
+      ...data,
+      barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode)
+    });
   });
 
   seedInitialProductsIfMissing(prods.length);
@@ -43,7 +53,9 @@ onSnapshot(collection(db, 'products'), (snapshot) => {
   if (prods.length > 0) {
     // Merge existing local cache with remote Firestore data to ensure complete set
     const map = new Map<string, Product>();
-    INITIAL_PRODUCTS.forEach(p => map.set(p.id, p));
+    INITIAL_PRODUCTS.forEach(p => {
+      map.set(p.id, { ...p, barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode) });
+    });
     prods.forEach(p => map.set(p.id, p));
     productsCache = Array.from(map.values());
   }
@@ -91,12 +103,13 @@ export const productService = {
   },
 
   getProductByBarcode(barcode: string): Product | undefined {
-    return productsCache.find(p => p.barcode === barcode || p.id === barcode);
+    return findProductByScannedCode(productsCache, barcode).product;
   },
 
   createProduct(product: Omit<Product, 'qrCodeUrl'>): Product {
+    const barcodeNormalized = normalizeBarcode(product.barcode);
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${product.id}`;
-    const newProduct: Product = { ...product, qrCodeUrl };
+    const newProduct: Product = { ...product, barcodeNormalized, qrCodeUrl };
     
     // Update local cache synchronously
     productsCache = productsCache.filter(p => p.id !== product.id);
@@ -113,12 +126,14 @@ export const productService = {
 
   updateProduct(product: Product): Product {
     const oldProduct = productsCache.find(p => p.id === product.id);
+    const barcodeNormalized = normalizeBarcode(product.barcode);
+    const updatedProduct: Product = { ...product, barcodeNormalized };
     
     // Update local cache synchronously
-    productsCache = productsCache.map(p => p.id === product.id ? product : p);
+    productsCache = productsCache.map(p => p.id === product.id ? updatedProduct : p);
 
     // Save to Firestore asynchronously
-    setDoc(doc(db, 'products', product.id), product).catch(console.error);
+    setDoc(doc(db, 'products', product.id), updatedProduct).catch(console.error);
 
     if (oldProduct && oldProduct.stock !== product.stock) {
       this.logInventory(

@@ -5,6 +5,7 @@ import { db } from '../services/firebase';
 import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
 import { Product, UserProfile } from '../types';
+import { findProductByScannedCode, scanBarcodeFromImageFile, scanBarcodeFromLiveVideoSnapshot, applyCameraTrackConstraints, BarcodeDebugInfo } from '../utils/barcode';
 import { 
   Camera, 
   Smartphone, 
@@ -20,7 +21,9 @@ import {
   AlertCircle,
   RefreshCw,
   ShoppingBag,
-  Volume2
+  Volume2,
+  Bug,
+  Info
 } from 'lucide-react';
 
 interface PosScanProps {
@@ -53,9 +56,70 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [scanStatusMsg, setScanStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
+  // Barcode Debug Mode State
+  const [showDebugMode, setShowDebugMode] = useState<boolean>(true);
+  const [debugInfo, setDebugInfo] = useState<BarcodeDebugInfo | null>(null);
+
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isPhotoScanning, setIsPhotoScanning] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [useFrontCamera, setUseFrontCamera] = useState(false);
+  const [posCameraZoom, setPosCameraZoom] = useState<number>(1.5);
+
+  const handleLiveLensSnapPos = async () => {
+    setIsPhotoScanning(true);
+    setScanStatusMsg({ type: 'success', text: '🔍 Performing Google Lens HD Instant Scan from live camera frame...' });
+
+    try {
+      const scannedText = await scanBarcodeFromLiveVideoSnapshot("reader-container");
+      if (scannedText) {
+        await handleScanSuccess(scannedText);
+      } else {
+        setScanStatusMsg({
+          type: 'error',
+          text: 'Could not read barcode from instant frame. Tip: Hold camera ~15cm away (do not place too close to avoid lens focus blur) and tap "📸 Google Lens Live Scan" again!'
+        });
+      }
+    } catch (err) {
+      console.error("POS Live Lens snap error:", err);
+      setScanStatusMsg({ type: 'error', text: 'Error performing live Lens snapshot scan.' });
+    } finally {
+      setIsPhotoScanning(false);
+    }
+  };
+
+  const handlePosZoomChange = async (newZoom: number) => {
+    setPosCameraZoom(newZoom);
+    if (isCameraActive) {
+      await applyCameraTrackConstraints("reader-container", { zoom: newZoom, triggerFocus: true });
+    }
+  };
+
+  const handleGoogleLensPhotoScanPos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsPhotoScanning(true);
+    setScanStatusMsg({ type: 'success', text: '🔍 Analyzing photo with Google Lens barcode scanner...' });
+
+    try {
+      const scannedText = await scanBarcodeFromImageFile(file);
+      if (scannedText) {
+        await handleScanSuccess(scannedText);
+      } else {
+        setScanStatusMsg({
+          type: 'error',
+          text: 'Could not read barcode from photo. Ensure barcode is clear and try taking a closer photo.'
+        });
+      }
+    } catch (err) {
+      console.error("POS Photo scan error:", err);
+      setScanStatusMsg({ type: 'error', text: 'Error analyzing photo barcode.' });
+    } finally {
+      setIsPhotoScanning(false);
+      e.target.value = '';
+    }
+  };
 
   // Manual search state
   const [manualCode, setManualCode] = useState('');
@@ -106,12 +170,12 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         const qrScanner = new Html5Qrcode("reader-container");
         html5QrcodeRef.current = qrScanner;
 
-        const cameraConfig = useFrontCamera ? { facingMode: "user" } : { facingMode: "environment" };
+        const cameraConfig = { facingMode: useFrontCamera ? "user" : "environment" };
 
         await qrScanner.start(
           cameraConfig,
           {
-            fps: 15,
+            fps: 20,
             qrbox: (width, height) => {
               const minDim = Math.min(width, height);
               // Rectangle box fits both 1D Barcodes and 2D QR codes
@@ -126,6 +190,19 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
             // Quiet fail for scan frame failures
           }
         );
+
+        setTimeout(() => {
+          applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true });
+        }, 600);
+
+        // Continuous focus maintenance interval every 4 seconds
+        const focusInterval = setInterval(() => {
+          applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: false });
+        }, 4000);
+
+        return () => {
+          clearInterval(focusInterval);
+        };
       } catch (err: any) {
         console.error("Camera startup error:", err);
         setCameraError(
@@ -155,30 +232,16 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   // 3. Handle a successfully scanned QR code or Barcode
   const handleScanSuccess = async (rawText: string) => {
     if (!rawText) return;
-    const decodedText = rawText.trim();
 
-    // Extract code from URL if present (e.g. /pos/product/{id} or /product/{id})
-    let codeToSearch = decodedText;
-    const indicator = '/pos/product/';
-    const index = decodedText.indexOf(indicator);
-
-    if (index !== -1) {
-      codeToSearch = decodedText.substring(index + indicator.length).trim();
-      codeToSearch = codeToSearch.split('?')[0].split('#')[0].replace(/\/$/, '');
-    } else if (decodedText.includes('/')) {
-      const parts = decodedText.split('/');
-      codeToSearch = parts[parts.length - 1].split('?')[0].split('#')[0];
-    }
-
-    if (!codeToSearch) return;
-
-    // Resolve product in catalog by barcode or ID
-    const product = productService.getProductByBarcode(codeToSearch) || productService.getProductById(codeToSearch);
+    // Use unified lookup function
+    const allProducts = productService.getProducts();
+    const { product, debugInfo: scanDebug } = findProductByScannedCode(allProducts, rawText);
+    setDebugInfo(scanDebug);
 
     if (!product) {
       setScanStatusMsg({
         type: 'error',
-        text: `Unrecognized product code: "${codeToSearch}"`
+        text: `Unrecognized product code: Raw "${scanDebug.rawValue}" -> Normalized "${scanDebug.normalizedValue}"`
       });
       return;
     }
@@ -487,35 +550,94 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                   </div>
                 )}
 
-                <button
-                  onClick={() => setIsCameraActive(true)}
-                  className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-bold px-6 py-2.5 rounded-xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center gap-1.5"
-                >
-                  <Camera size={14} />
-                  <span>Activate Camera Scanner</span>
-                </button>
+                <div className="flex gap-2 flex-wrap justify-center pt-2">
+                  <button
+                    onClick={() => setIsCameraActive(true)}
+                    className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-bold px-5 py-2.5 rounded-xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center gap-1.5"
+                  >
+                    <Camera size={14} />
+                    <span>Live Video Cam</span>
+                  </button>
+
+                  <label className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl cursor-pointer transition shadow-md flex items-center gap-1.5">
+                    <Search size={14} />
+                    <span>{isPhotoScanning ? "Analyzing Photo..." : "🔍 Lens Photo Scan"}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      capture="environment" 
+                      onChange={handleGoogleLensPhotoScanPos}
+                      className="hidden"
+                      disabled={isPhotoScanning}
+                    />
+                  </label>
+                </div>
               </div>
             )}
 
+            {/* Live Camera Controls & Google Lens Live Snapshot */}
             {isCameraActive && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setUseFrontCamera(!useFrontCamera)}
-                  className="bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 text-[10px] font-bold px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1"
-                >
-                  <RefreshCw size={12} />
-                  <span>Switch Camera ({useFrontCamera ? "Front" : "Rear"})</span>
-                </button>
+              <div className="flex flex-col items-center gap-2.5 w-full max-w-xs mx-auto mt-2">
+                <div className="flex items-center gap-2 flex-wrap justify-center">
+                  <div className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded-xl border border-gray-200 text-[10px]">
+                    <span className="text-gray-500 font-bold">Zoom:</span>
+                    {[1.0, 1.5, 2.0, 2.5].map((z) => (
+                      <button
+                        key={z}
+                        type="button"
+                        onClick={() => handlePosZoomChange(z)}
+                        className={`px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold cursor-pointer transition ${
+                          posCameraZoom === z 
+                            ? "bg-[#E91E8C] text-white" 
+                            : "bg-white text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        {z}x
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true })}
+                    className="bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 text-[10px] font-bold px-2.5 py-1 rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1"
+                    title="Force camera focus re-calibration"
+                  >
+                    🎯 Refocus
+                  </button>
+
+                  <button
+                    onClick={() => setUseFrontCamera(!useFrontCamera)}
+                    className="bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1"
+                  >
+                    <RefreshCw size={12} />
+                    <span>Cam ({useFrontCamera ? "Front" : "Rear"})</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      stopScanner();
+                      setIsCameraActive(false);
+                    }}
+                    className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-xs"
+                  >
+                    Pause
+                  </button>
+                </div>
 
                 <button
-                  onClick={() => {
-                    stopScanner();
-                    setIsCameraActive(false);
-                  }}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs"
+                  type="button"
+                  onClick={handleLiveLensSnapPos}
+                  disabled={isPhotoScanning}
+                  className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs py-2 px-3 rounded-xl shadow-md flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
                 >
-                  Pause Camera
+                  <Search size={14} className={isPhotoScanning ? "animate-spin" : ""} />
+                  <span>{isPhotoScanning ? "Scanning Live HD Frame..." : "📸 Google Lens Live Scan (Instant Snap)"}</span>
                 </button>
+
+                <p className="text-[10px] text-gray-500 bg-gray-50 p-2 rounded-xl border border-gray-200 text-center leading-relaxed">
+                  💡 <strong>Clear Scan Tip:</strong> Keep camera ~15cm away and use <strong>1.5x or 2.0x Zoom</strong>. Click <strong>"📸 Google Lens Live Scan"</strong> for instant clear decoding!
+                </p>
               </div>
             )}
 
@@ -535,6 +657,71 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                 </div>
               </div>
             )}
+
+            {/* STEP 4: BARCODE DEBUG MODE PANEL */}
+            <div className="w-full bg-slate-900 text-slate-100 p-3.5 rounded-2xl border border-slate-700 shadow-lg text-[10px] space-y-2 text-left font-mono">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                <span className="font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                  <Bug size={12} />
+                  <span>Barcode Debug Inspector</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowDebugMode(!showDebugMode)}
+                  className="text-slate-400 hover:text-white underline cursor-pointer text-[9px]"
+                >
+                  {showDebugMode ? 'Hide' : 'Show'}
+                </button>
+              </div>
+
+              {showDebugMode && (
+                <div className="space-y-1.5">
+                  {debugInfo ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-slate-950 p-2 rounded-xl border border-slate-800">
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Raw Scanner Value:</span>
+                          <span className="text-pink-300 font-bold truncate block">{JSON.stringify(debugInfo.rawValue)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Normalized Value:</span>
+                          <span className="text-emerald-300 font-bold truncate block">{debugInfo.normalizedValue || '(empty)'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Match Strategy:</span>
+                          <span className="text-sky-300 font-bold block">{debugInfo.matchStrategy}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Match Status:</span>
+                          <span className={debugInfo.matchFound ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                            {debugInfo.matchFound ? "✅ MATCH FOUND" : "❌ NO MATCH"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {debugInfo.matchFound && (
+                        <div className="bg-emerald-950/40 p-2 rounded-xl border border-emerald-800/60 text-emerald-200 space-y-0.5 text-[9px]">
+                          <div><strong>Product:</strong> {debugInfo.matchedProductName}</div>
+                          <div><strong>DB ID:</strong> {debugInfo.matchedProductId}</div>
+                          <div><strong>DB Barcode Raw:</strong> "{debugInfo.matchedProductBarcode}"</div>
+                          <div><strong>DB Barcode Norm:</strong> "{debugInfo.matchedProductNormalizedBarcode}"</div>
+                        </div>
+                      )}
+
+                      {!debugInfo.matchFound && debugInfo.normalizedValue && (
+                        <div className="bg-rose-950/40 p-2 rounded-xl border border-rose-800/60 text-rose-200 text-[9px]">
+                          <strong>Diagnostic Note:</strong> Searched barcodeNormalized, legacy barcode, and Product ID for exact string <code>"{debugInfo.normalizedValue}"</code>. No match found in database catalog.
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-slate-400 italic text-[9px]">
+                      Point camera or enter barcode to inspect real-time raw vs normalized values and database match diagnostic details.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
           </div>
         )}
