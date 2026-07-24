@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { themeService } from '../services/themeService';
+import { HomeThemeSettings, SectionKey, ReelItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
-  ShoppingBag, Search, SlidersHorizontal, Percent, 
-  Wand2, CheckCircle, X 
+  ShoppingBag, Search, SlidersHorizontal, CheckCircle, X,
+  Globe, Store, Zap, ShieldCheck, FileText, ChevronRight, ChevronLeft,
+  ArrowRight, Play, Pause, Star, Sparkles, MapPin, Package, Truck,
+  Award, Heart, RefreshCw, Send, Volume2, VolumeX, ExternalLink,
+  Eye, Share2, Clock, Calendar
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
 
 const CATEGORIES = ['All', 'Cleanser', 'Toner', 'Serum & Essence', 'Moisturizer', 'Sunscreen', 'Lip Care'];
 const SKIN_TYPES = ['All', 'Oily', 'Dry', 'Sensitive', 'Combination', 'Acne-Prone'];
@@ -16,19 +22,61 @@ export const StoreCatalog: React.FC = () => {
   const navigate = useNavigate();
   const { addToCart, language, activeTranslations } = useCart();
   
-  // State
+  // Theme & Products state
+  const [theme, setTheme] = useState<HomeThemeSettings>(themeService.getHomeTheme());
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedSkinType, setSelectedSkinType] = useState('All');
 
+  // Shipping calculator state
+  const [calcWeight, setCalcWeight] = useState<number | ''>(1);
+  const [calcResult, setCalcResult] = useState<number | null>(750);
+
+  // Auto Slide state for Community Live (Reels)
+  const [clActiveIndex, setClActiveIndex] = useState(0);
+  const [clAutoPlay, setClAutoPlay] = useState(true);
+  const [clIsHovered, setClIsHovered] = useState(false);
+
+  // Auto Slide state for Shared Journey (Community Photos)
+  const [sjActiveIndex, setSjActiveIndex] = useState(0);
+  const [sjAutoPlay, setSjAutoPlay] = useState(true);
+  const [sjIsHovered, setSjIsHovered] = useState(false);
+
   useEffect(() => {
-    // Load products from service
-    const prods = productService.getProducts();
-    setProducts(prods);
+    // Subscribe to real-time theme updates
+    const unsubscribeTheme = themeService.subscribe((data) => {
+      setTheme(data);
+    });
+    setProducts(productService.getProducts());
+    return () => unsubscribeTheme();
   }, []);
 
-  // Filter products based on search and selected capsules
+  // Community Live Auto Slide Timer
+  useEffect(() => {
+    const reelsCount = theme.communityLive?.reels?.length || 0;
+    if (!clAutoPlay || clIsHovered || reelsCount <= 1) return;
+
+    const timer = setInterval(() => {
+      setClActiveIndex((prev) => (prev + 1) % reelsCount);
+    }, 3500);
+
+    return () => clearInterval(timer);
+  }, [clAutoPlay, clIsHovered, theme.communityLive?.reels?.length]);
+
+  // Shared Journey Auto Slide Timer
+  useEffect(() => {
+    const photosCount = theme.sharedJourney?.photos?.length || 0;
+    if (!sjAutoPlay || sjIsHovered || photosCount <= 1) return;
+
+    const timer = setInterval(() => {
+      setSjActiveIndex((prev) => (prev + 1) % photosCount);
+    }, 3500);
+
+    return () => clearInterval(timer);
+  }, [sjAutoPlay, sjIsHovered, theme.sharedJourney?.photos?.length]);
+
+  // Filter products based on search and selected filters
   const filteredProducts = products.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           p.brand.toLowerCase().includes(searchQuery.toLowerCase());
@@ -37,236 +85,1021 @@ export const StoreCatalog: React.FC = () => {
     return matchesSearch && matchesCategory && matchesSkinType;
   });
 
+  const handleCalculateShipping = (e: React.FormEvent) => {
+    e.preventDefault();
+    const w = typeof calcWeight === 'number' ? calcWeight : 1;
+    // Calculation logic: Base ৳500 + ৳250 per kg
+    setCalcResult(Math.round(500 + w * 250));
+  };
+
+  // Helper: Render feature icon
+  const renderFeatureIcon = (iconName: string, iconColorClass: string) => {
+    switch (iconName) {
+      case 'language':
+        return <Globe size={20} className={iconColorClass} />;
+      case 'storefront':
+        return <Store size={20} className={iconColorClass} />;
+      case 'speed':
+        return <Zap size={20} className={iconColorClass} />;
+      case 'verified':
+        return <ShieldCheck size={20} className={iconColorClass} />;
+      case 'request_quote':
+        return <FileText size={20} className={iconColorClass} />;
+      default:
+        return <Sparkles size={20} className={iconColorClass} />;
+    }
+  };
+
+  // SECTION 1: HERO BANNER
+  const renderHeroSection = () => {
+    const h = theme.hero;
+    if (!h || !h.enabled) return null;
+
+    return (
+      <div 
+        key="hero" 
+        className="relative w-full min-h-[480px] md:min-h-[560px] overflow-hidden bg-[#fbf2ed] bg-cover bg-center bg-no-repeat border-b border-pink-100 shadow-sm transition-all duration-500 flex items-center"
+        style={{
+          backgroundImage: h.backgroundImageUrl ? `url("${h.backgroundImageUrl}")` : undefined
+        }}
+      >
+        {/* Soft, crisp gradient overlay to showcase the background image clearly */}
+        <div className="absolute inset-0 bg-gradient-to-r from-white/75 via-white/30 to-transparent pointer-events-none z-0" />
+        
+        {/* Subtle ambient lighting glows */}
+        <div className="absolute -top-24 -left-24 w-96 h-96 bg-pink-300/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 right-10 w-96 h-96 bg-purple-300/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 py-12 md:py-20 lg:py-24">
+          <div className="max-w-4xl space-y-7 text-center lg:text-left">
+            {h.badgeText && (
+              <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#E91E8C]/15 via-pink-500/10 to-purple-500/10 text-[#E91E8C] text-xs sm:text-sm font-black uppercase tracking-wider px-4 py-1.5 rounded-full border border-[#E91E8C]/30 shadow-xs backdrop-blur-md">
+                <Sparkles size={14} className="text-[#E91E8C] animate-pulse" />
+                <span>{h.badgeText}</span>
+              </div>
+            )}
+
+            <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-serif font-black text-slate-900 leading-[1.1] tracking-tight">
+              {h.titleLine1}{' '}
+              <span className="bg-gradient-to-r from-[#E91E8C] via-[#FF4B91] to-purple-600 bg-clip-text text-transparent underline decoration-pink-300 decoration-wavy decoration-2">
+                {h.titleHighlight}
+              </span>{' '}
+              {h.titleLine2}
+            </h1>
+
+            <p className="text-slate-700 text-sm sm:text-base md:text-lg font-semibold leading-relaxed max-w-3xl mx-auto lg:mx-0">
+              {h.subtitle}
+            </p>
+
+            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
+              <Link
+                to={h.primaryButtonLink || '/shop'}
+                className="px-8 py-4 bg-gradient-to-r from-[#E91E8C] to-[#C2185B] hover:from-[#FF4B91] hover:to-[#E91E8C] text-white rounded-2xl text-xs sm:text-sm font-black transition-all shadow-xl shadow-[#E91E8C]/25 hover:shadow-pink-400/40 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2.5 cursor-pointer"
+              >
+                <span>{h.primaryButtonText}</span>
+                <ArrowRight size={18} />
+              </Link>
+
+              <Link
+                to={h.secondaryButtonLink || '/about-us'}
+                className="px-7 py-4 bg-white/95 hover:bg-white text-slate-900 rounded-2xl text-xs sm:text-sm font-extrabold transition-all border border-pink-200 shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer backdrop-blur-md"
+              >
+                <span>{h.secondaryButtonText}</span>
+              </Link>
+            </div>
+
+            {/* Premium Trust Cards Grid */}
+            <div className="pt-8 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-left border-t border-pink-200/60 mt-8">
+              <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
+                <ShieldCheck size={20} className="text-[#E91E8C] mb-1.5" />
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">100% Genuine</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Direct Seoul Air Freight</p>
+              </div>
+
+              <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
+                <Truck size={20} className="text-[#E91E8C] mb-1.5" />
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Fast Delivery</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Nationwide BD Express</p>
+              </div>
+
+              <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
+                <Sparkles size={20} className="text-[#E91E8C] mb-1.5" />
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Top Brands</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">COSRX, Anua, BOJ & More</p>
+              </div>
+
+              <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
+                <CheckCircle size={20} className="text-[#E91E8C] mb-1.5" />
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Verified Quality</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">50,000+ BD Customers</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 2: FEATURE ICONS
+  const renderFeatureIconsSection = () => {
+    const fi = theme.featureIcons;
+    if (!fi || !fi.enabled) return null;
+
+    return (
+      <div key="featureIcons" className="bg-white p-6 rounded-[28px] border border-pink-100 shadow-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+          {fi.items.filter(i => i.enabled).map((item) => (
+            <div key={item.id} className="flex flex-col items-center text-center p-3 rounded-2xl hover:bg-pink-50/20 transition">
+              <div className={`w-12 h-12 rounded-2xl ${item.bgColor || 'bg-pink-50'} flex items-center justify-center mb-2 shadow-xs`}>
+                {renderFeatureIcon(item.iconName, item.iconColor || 'text-[#E91E8C]')}
+              </div>
+              <span className="text-xs font-extrabold text-slate-800 leading-tight">{item.title}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 3: FOUNDER STORY
+  const renderFounderStorySection = () => {
+    const fs = theme.founderStory;
+    if (!fs || !fs.enabled) return null;
+
+    return (
+      <div key="founderStory" className="bg-[#fbf2ed] p-8 md:p-12 rounded-[32px] border border-pink-100 shadow-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div className="lg:col-span-5 relative">
+            <div className="aspect-[4/5] rounded-3xl overflow-hidden shadow-lg border border-pink-100">
+              <img
+                src={fs.founderImageUrl}
+                alt="Founders Story"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            {fs.estYear && (
+              <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3.5 py-1.5 rounded-full text-xs font-black text-[#E91E8C] border border-pink-100 shadow-sm">
+                {fs.estYear}
+              </div>
+            )}
+          </div>
+
+          <div className="lg:col-span-7 space-y-4">
+            <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+              {fs.subtitle}
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-serif font-black text-slate-900 leading-tight">
+              {fs.title}
+            </h2>
+            <blockquote className="text-sm font-serif italic text-slate-700 border-l-2 border-[#E91E8C] pl-4 py-1 leading-relaxed">
+              {fs.quote}
+            </blockquote>
+            <p className="text-xs text-slate-600 font-medium leading-relaxed">
+              {fs.body}
+            </p>
+            {fs.councilLabel && (
+              <span className="inline-block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest pt-2">
+                {fs.councilLabel}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 4: BOTANICAL ESSENTIALS
+  const renderBotanicalEssentialsSection = () => {
+    const be = theme.botanicalEssentials;
+    if (!be || !be.enabled) return null;
+
+    return (
+      <div key="botanicalEssentials" className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-pink-100 pb-3">
+          <div>
+            <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+              {be.subtitle}
+            </span>
+            <h2 className="text-2xl font-serif font-black text-slate-900">
+              {be.title}
+            </h2>
+          </div>
+          <Link to="/shop" className="text-xs font-extrabold text-[#E91E8C] hover:underline flex items-center gap-1">
+            <span>View Full Collection</span>
+            <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {filteredProducts.slice(0, 6).map((prod) => (
+            <div
+              key={prod.id}
+              className="bg-white rounded-2xl border border-pink-100 overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-md transition p-3 space-y-2 group"
+            >
+              <div
+                className="aspect-square bg-pink-50/20 rounded-xl overflow-hidden cursor-pointer"
+                onClick={() => navigate(`/product/${prod.id}`)}
+              >
+                <img
+                  src={prod.image}
+                  alt={prod.name}
+                  className="w-full h-full object-cover group-hover:scale-105 transition"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div>
+                <span className="text-[8px] font-extrabold text-[#E91E8C] uppercase">{prod.brand}</span>
+                <h4
+                  onClick={() => navigate(`/product/${prod.id}`)}
+                  className="text-xs font-bold text-slate-900 line-clamp-1 cursor-pointer hover:text-[#E91E8C]"
+                >
+                  {prod.name}
+                </h4>
+                <span className="text-xs font-black text-slate-900 font-mono mt-1 block">৳{prod.price}</span>
+              </div>
+              <button
+                onClick={() => addToCart(prod)}
+                className="w-full py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <ShoppingBag size={11} />
+                <span>{be.buttonText || 'Add to Bag'}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 5: QUALITY ASSURANCE
+  const renderQualityAssuranceSection = () => {
+    const qa = theme.qualityAssurance;
+    if (!qa || !qa.enabled) return null;
+
+    return (
+      <div key="qualityAssurance" className="bg-white p-8 md:p-12 rounded-[32px] border border-pink-100 shadow-sm space-y-8">
+        <div className="max-w-2xl space-y-2">
+          <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+            {qa.subtitle}
+          </span>
+          <h2 className="text-2xl sm:text-3xl font-serif font-black text-slate-900">
+            {qa.title}
+          </h2>
+          <p className="text-xs text-slate-600 font-medium leading-relaxed">
+            {qa.description}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div className="lg:col-span-6 space-y-6">
+            {qa.features.map((f) => (
+              <div key={f.id} className="flex items-start gap-4 p-4 bg-pink-50/20 rounded-2xl border border-pink-100/50">
+                <span className="text-2xl font-serif font-black text-[#E91E8C]">
+                  {f.numberStr}
+                </span>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">{f.title}</h4>
+                  <p className="text-[11px] text-slate-600 mt-1 font-medium leading-relaxed">{f.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="lg:col-span-6 relative">
+            <div className="aspect-[4/3] rounded-3xl overflow-hidden shadow-lg border border-pink-100">
+              <img
+                src={qa.mainImageUrl}
+                alt="Logistics QA"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            {qa.opsNoteQuote && (
+              <div className="absolute bottom-4 left-4 right-4 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-pink-100 shadow-lg text-xs space-y-1">
+                <span className="font-extrabold text-[#E91E8C] text-[10px] uppercase tracking-wider block">
+                  {qa.opsNoteTitle || 'Operations Note'}
+                </span>
+                <p className="italic text-slate-700 font-serif">
+                  {qa.opsNoteQuote}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 6: VALIDATED FORMULATIONS (PRECISION SCIENCE)
+  const renderValidatedFormulationsSection = () => {
+    const vf = theme.validatedFormulations;
+    if (!vf || !vf.enabled) return null;
+
+    return (
+      <div key="validatedFormulations" className="space-y-6">
+        <div className="flex justify-between items-end border-b border-pink-100 pb-3">
+          <div>
+            <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+              {vf.subtitle}
+            </span>
+            <h2 className="text-2xl font-serif font-black text-slate-900">
+              {vf.title}
+            </h2>
+          </div>
+        </div>
+
+        {/* Catalog Search & Filter Controls */}
+        <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div className="relative w-full md:w-80">
+            <Search size={16} className="absolute left-3 top-2.5 text-pink-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search K-beauty catalog..."
+              className="w-full bg-pink-50/10 border border-pink-100 rounded-xl pl-9 pr-3 py-2 text-xs outline-none focus:border-[#E91E8C]"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
+            {CATEGORIES.slice(0, 5).map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold transition cursor-pointer ${
+                  selectedCategory === cat ? 'bg-[#E91E8C] text-white' : 'bg-pink-50/30 text-gray-700 hover:text-[#E91E8C]'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Products Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {filteredProducts.map((prod) => (
+            <div
+              key={prod.id}
+              className="bg-white rounded-2xl border border-pink-100 overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-md transition p-3 space-y-2 group"
+            >
+              <div
+                className="aspect-square bg-pink-50/20 rounded-xl overflow-hidden cursor-pointer"
+                onClick={() => navigate(`/product/${prod.id}`)}
+              >
+                <img
+                  src={prod.image}
+                  alt={prod.name}
+                  className="w-full h-full object-cover group-hover:scale-105 transition"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div>
+                <span className="text-[8px] font-extrabold text-[#E91E8C] uppercase">{prod.brand}</span>
+                <h4
+                  onClick={() => navigate(`/product/${prod.id}`)}
+                  className="text-xs font-bold text-slate-900 line-clamp-1 cursor-pointer hover:text-[#E91E8C]"
+                >
+                  {prod.name}
+                </h4>
+                <span className="text-xs font-black text-slate-900 font-mono mt-1 block">৳{prod.price}</span>
+              </div>
+              <button
+                onClick={() => addToCart(prod)}
+                className="w-full py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <ShoppingBag size={11} />
+                <span>{vf.buttonText || 'Shop Now'}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 7: SHARED JOURNEY (COMMUNITY PHOTOS)
+  const renderSharedJourneySection = () => {
+    const sj = theme.sharedJourney;
+    if (!sj || !sj.enabled) return null;
+
+    const photos = sj.photos || [];
+    if (photos.length === 0) return null;
+
+    const handleNextPhoto = () => {
+      setSjActiveIndex((prev) => (prev + 1) % photos.length);
+    };
+
+    const handlePrevPhoto = () => {
+      setSjActiveIndex((prev) => (prev - 1 + photos.length) % photos.length);
+    };
+
+    // Calculate visible photos slice (displays 4 items starting from active index)
+    const getVisiblePhotos = () => {
+      if (photos.length <= 4) return photos;
+      const visible = [];
+      for (let i = 0; i < Math.min(4, photos.length); i++) {
+        visible.push(photos[(sjActiveIndex + i) % photos.length]);
+      }
+      return visible;
+    };
+
+    const visiblePhotos = getVisiblePhotos();
+
+    return (
+      <div 
+        key="sharedJourney" 
+        className="bg-[#fbf2ed] p-6 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden"
+        onMouseEnter={() => setSjIsHovered(true)}
+        onMouseLeave={() => setSjIsHovered(false)}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-100/80 pb-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+                {sj.subtitle}
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-pink-100/80 border border-pink-200 text-[10px] font-extrabold text-[#E91E8C]">
+                <span className={`w-2 h-2 rounded-full ${sjAutoPlay && !sjIsHovered ? 'bg-[#E91E8C] animate-pulse' : 'bg-slate-400'}`} />
+                <span>{sjAutoPlay ? (sjIsHovered ? 'Paused (Hover)' : 'Auto Sliding') : 'Slide Paused'}</span>
+              </span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-serif font-black text-slate-900">
+              {sj.title}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-center">
+            <button
+              type="button"
+              onClick={() => setSjAutoPlay(!sjAutoPlay)}
+              className="p-2.5 rounded-xl bg-white border border-pink-200 text-[#E91E8C] hover:bg-pink-50 transition shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+              title={sjAutoPlay ? "Pause Auto Slide" : "Start Auto Slide"}
+            >
+              {sjAutoPlay ? <Pause size={14} /> : <Play size={14} />}
+              <span className="hidden md:inline">{sjAutoPlay ? "Pause" : "Auto Play"}</span>
+            </button>
+
+            <div className="flex items-center gap-1.5 bg-white p-1 rounded-2xl border border-pink-200 shadow-xs">
+              <button
+                type="button"
+                onClick={handlePrevPhoto}
+                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                aria-label="Previous Photo"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={handleNextPhoto}
+                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                aria-label="Next Photo"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {visiblePhotos.map((p) => (
+            <motion.div
+              key={`${p.id}-${sjActiveIndex}`}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.35 }}
+              className="relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm group border border-pink-100"
+            >
+              <img
+                src={p.imageUrl}
+                alt={p.altText}
+                className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                referrerPolicy="no-referrer"
+              />
+              {p.hoverText && (
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 text-white text-[10px] font-extrabold opacity-0 group-hover:opacity-100 transition">
+                  {p.hoverText}
+                </div>
+              )}
+            </motion.div>
+          ))}
+        </div>
+
+        {photos.length > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            {photos.map((_, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setSjActiveIndex(idx)}
+                className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${
+                  sjActiveIndex === idx
+                    ? 'w-8 bg-[#E91E8C] shadow-xs'
+                    : 'w-2 bg-pink-200 hover:bg-pink-300'
+                }`}
+                aria-label={`Go to photo ${idx + 1}`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // SECTION 8: REACH & RELIABILITY
+  const renderReachReliabilitySection = () => {
+    const rr = theme.reachReliability;
+    if (!rr || !rr.enabled) return null;
+
+    return (
+      <div key="reachReliability" className="bg-white p-8 md:p-12 rounded-[32px] border border-pink-100 shadow-sm space-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div className="lg:col-span-5 space-y-4">
+            <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+              {rr.subtitle}
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-serif font-black text-slate-900">
+              {rr.title}
+            </h2>
+            <p className="text-xs text-slate-600 font-medium leading-relaxed">
+              {rr.description}
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {rr.stats.map((s) => (
+                <div key={s.id} className="p-3 bg-pink-50/20 rounded-2xl border border-pink-100 space-y-0.5">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">{s.label}</span>
+                  <span className="text-lg font-black text-[#E91E8C] block">{s.value}</span>
+                  <span className="text-[10px] text-slate-600 font-bold block">{s.subValue}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="lg:col-span-7 grid grid-cols-3 gap-3">
+            <div className="aspect-[3/4] rounded-2xl overflow-hidden border border-pink-100 shadow-sm">
+              <img src={rr.image1Url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </div>
+            <div className="aspect-[3/4] rounded-2xl overflow-hidden border border-pink-100 shadow-sm">
+              <img src={rr.image2Url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </div>
+            <div className="aspect-[3/4] rounded-2xl overflow-hidden border border-pink-100 shadow-sm">
+              <img src={rr.image3Url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Helper ReelCard with auto-play muted video capability
+  const ReelCard: React.FC<{ reel: ReelItem }> = ({ reel }) => {
+    const [isMuted, setIsMuted] = useState(true);
+    const [isPlaying, setIsPlaying] = useState(true);
+    const videoRef = React.useRef<HTMLVideoElement>(null);
+
+    useEffect(() => {
+      if (videoRef.current) {
+        videoRef.current.muted = true;
+        videoRef.current.play().catch(() => {
+          // Silent fallback if browser restricts auto-play
+        });
+      }
+    }, [reel.videoUrl]);
+
+    const isDirectVideo = Boolean(
+      reel.videoUrl && (
+        reel.videoUrl.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i) ||
+        reel.videoUrl.includes('cloudinary.com') ||
+        reel.videoUrl.includes('res.cloudinary') ||
+        reel.videoUrl.startsWith('data:video') ||
+        reel.videoUrl.startsWith('blob:')
+      )
+    );
+
+    const isFacebookReel = Boolean(
+      reel.videoUrl && (
+        reel.videoUrl.includes('facebook.com') || reel.videoUrl.includes('fb.watch')
+      )
+    );
+
+    const isInstagramReel = Boolean(
+      reel.videoUrl && (
+        reel.videoUrl.includes('instagram.com') || reel.videoUrl.includes('instagr.am')
+      )
+    );
+
+    const getFacebookEmbedUrl = (url: string) => {
+      let cleanUrl = url.trim();
+      // Transform share/r/ ID to reel/ ID for iframe compatibility
+      if (cleanUrl.includes('facebook.com/share/r/')) {
+        const reelId = cleanUrl.split('share/r/')[1]?.split('/')[0]?.split('?')[0];
+        if (reelId) {
+          cleanUrl = `https://www.facebook.com/reel/${reelId}/`;
+        }
+      } else if (cleanUrl.includes('facebook.com/share/v/')) {
+        const videoId = cleanUrl.split('share/v/')[1]?.split('/')[0]?.split('?')[0];
+        if (videoId) {
+          cleanUrl = `https://www.facebook.com/watch/?v=${videoId}`;
+        }
+      }
+
+      if (cleanUrl.includes('facebook.com/plugins/video.php')) {
+        return cleanUrl.includes('autoplay') ? cleanUrl : `${cleanUrl}&autoplay=true&muted=true`;
+      }
+      return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(cleanUrl)}&show_text=false&autoplay=true&muted=true&container_width=500`;
+    };
+
+    const getInstagramEmbedUrl = (url: string) => {
+      let cleanUrl = url.trim();
+      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+      if (!cleanUrl.endsWith('/embed')) {
+        cleanUrl = `${cleanUrl}/embed`;
+      }
+      return cleanUrl;
+    };
+
+    const isYouTube = Boolean(
+      reel.videoUrl && (
+        reel.videoUrl.includes('youtube.com') || reel.videoUrl.includes('youtu.be')
+      )
+    );
+
+    const getYouTubeEmbedUrl = (url: string) => {
+      let videoId = '';
+      if (url.includes('youtu.be/')) {
+        videoId = url.split('youtu.be/')[1]?.split('?')[0] || '';
+      } else if (url.includes('youtube.com/shorts/')) {
+        videoId = url.split('youtube.com/shorts/')[1]?.split('?')[0] || '';
+      } else if (url.includes('watch?v=')) {
+        videoId = url.split('watch?v=')[1]?.split('&')[0] || '';
+      }
+      return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0`;
+    };
+
+    const toggleMute = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (videoRef.current) {
+        videoRef.current.muted = !isMuted;
+        setIsMuted(!isMuted);
+      }
+    };
+
+    const togglePlay = () => {
+      if (videoRef.current) {
+        if (isPlaying) {
+          videoRef.current.pause();
+          setIsPlaying(false);
+        } else {
+          videoRef.current.play();
+          setIsPlaying(true);
+        }
+      }
+    };
+
+    const shelfLife = getShelfLifeInfo(reel.createdAt);
+
+    return (
+      <div className="bg-white rounded-2xl border border-pink-100 overflow-hidden shadow-xs hover:shadow-md transition space-y-3 p-3 group">
+        <div 
+          className="relative aspect-[9/13] rounded-xl overflow-hidden bg-slate-900 cursor-pointer"
+          onClick={isDirectVideo ? togglePlay : undefined}
+        >
+          {isDirectVideo || (reel.videoUrl && (reel.videoUrl.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i) || reel.videoUrl.includes('cloudinary') || reel.videoUrl.endsWith('.mp4'))) ? (
+            <>
+              <video
+                ref={videoRef}
+                src={reel.videoUrl}
+                poster={reel.coverUrl}
+                autoPlay
+                muted={isMuted}
+                loop
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              <button
+                onClick={toggleMute}
+                type="button"
+                className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center backdrop-blur-md hover:bg-[#E91E8C] transition"
+                title={isMuted ? "Unmute Sound" : "Mute Sound"}
+              >
+                {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              </button>
+              {!isPlaying && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white">
+                  <div className="w-12 h-12 rounded-full bg-[#E91E8C] text-white flex items-center justify-center shadow-lg">
+                    <Play size={22} className="ml-0.5" />
+                  </div>
+                </div>
+              )}
+            </>
+          ) : isYouTube ? (
+            <iframe
+              src={getYouTubeEmbedUrl(reel.videoUrl)}
+              className="w-full h-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          ) : (
+            /* Facebook / Instagram or External Reel Card with Poster & Direct Link */
+            <div className="relative w-full h-full group/reel">
+              <img 
+                src={reel.coverUrl || 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&auto=format&fit=crop'} 
+                alt={reel.title} 
+                className="w-full h-full object-cover group-hover/reel:scale-105 transition duration-500" 
+                referrerPolicy="no-referrer" 
+              />
+              
+              {/* Gradient Overlay */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+
+              {/* Platform & Shelf-Life Badges */}
+              <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between gap-1">
+                <span className="px-2.5 py-1 bg-black/60 backdrop-blur-md text-white text-[10px] font-extrabold rounded-full border border-white/20 flex items-center gap-1">
+                  {isFacebookReel ? (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                      <span>Facebook Reel</span>
+                    </>
+                  ) : isInstagramReel ? (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+                      <span>Instagram Reel</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play size={10} className="fill-current text-[#E91E8C]" />
+                      <span>Video Highlight</span>
+                    </>
+                  )}
+                </span>
+
+                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black backdrop-blur-md shadow-xs flex items-center gap-1 ${shelfLife.badgeColor}`}>
+                  <Clock size={10} />
+                  <span>{shelfLife.label}</span>
+                </span>
+              </div>
+
+              {/* Engagement Metrics Bottom Overlay */}
+              <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center justify-between text-white/90 text-[10px] font-bold bg-black/50 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-white/10">
+                <div className="flex items-center gap-1">
+                  <Eye size={12} className="text-pink-400" />
+                  <span>{formatCompactNumber(reel.viewsCount)}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Heart size={12} className="text-rose-400 fill-rose-400/30" />
+                  <span>{formatCompactNumber(reel.likesCount)}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Share2 size={12} className="text-blue-400" />
+                  <span>{formatCompactNumber(reel.sharesCount)}</span>
+                </div>
+              </div>
+
+              {/* Centered Play / View Post Button & Direct Link */}
+              {(reel.postUrl || reel.videoUrl) && (
+                <a
+                  href={reel.postUrl || reel.videoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="absolute inset-0 flex flex-col items-center justify-center text-white z-10 group/btn"
+                >
+                  <div className="w-14 h-14 rounded-full bg-[#E91E8C] text-white flex items-center justify-center shadow-xl group-hover/btn:scale-110 group-hover/btn:bg-[#FF4B91] transition duration-300">
+                    <Play size={24} className="ml-1 fill-current" />
+                  </div>
+                  <span className="mt-2 text-[10px] font-extrabold bg-black/60 px-3 py-1 rounded-full border border-white/20 backdrop-blur-sm group-hover/btn:bg-[#E91E8C] transition flex items-center gap-1">
+                    <span>{reel.postUrl ? 'View Facebook Post' : 'Watch Reel'}</span>
+                    <ExternalLink size={10} />
+                  </span>
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between px-1">
+            <a
+              href={reel.postUrl || reel.videoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-extrabold text-slate-900 hover:text-[#E91E8C] transition line-clamp-1"
+            >
+              {reel.title || 'Social Reel'}
+            </a>
+            {(reel.postUrl || reel.videoUrl) && (
+              <a
+                href={reel.postUrl || reel.videoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-[#E91E8C] font-extrabold hover:underline flex items-center gap-0.5 shrink-0 ml-1"
+              >
+                <span>{reel.postUrl ? 'View Post' : 'Watch'}</span>
+                <ExternalLink size={10} />
+              </a>
+            )}
+          </div>
+          {reel.createdAt && (
+            <div className="text-[10px] text-slate-500 px-1 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Calendar size={10} className="text-slate-400" />
+                <span>Added {reel.createdAt}</span>
+              </span>
+              <span className="font-extrabold text-slate-600">{shelfLife.status}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // SECTION 9: COMMUNITY LIVE (FACEBOOK REELS)
+  const renderCommunityLiveSection = () => {
+    const cl = theme.communityLive;
+    if (!cl || !cl.enabled) return null;
+
+    const reels = cl.reels || [];
+    if (reels.length === 0) return null;
+
+    const handleNextReel = () => {
+      setClActiveIndex((prev) => (prev + 1) % reels.length);
+    };
+
+    const handlePrevReel = () => {
+      setClActiveIndex((prev) => (prev - 1 + reels.length) % reels.length);
+    };
+
+    // Calculate visible reels slice for carousel (displays 3 items starting from active index)
+    const getVisibleReels = () => {
+      if (reels.length <= 3) return reels;
+      const visible = [];
+      for (let i = 0; i < Math.min(3, reels.length); i++) {
+        visible.push(reels[(clActiveIndex + i) % reels.length]);
+      }
+      return visible;
+    };
+
+    const visibleReels = getVisibleReels();
+
+    return (
+      <div 
+        key="communityLive" 
+        className="bg-[#fbf2ed] p-6 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden"
+        onMouseEnter={() => setClIsHovered(true)}
+        onMouseLeave={() => setClIsHovered(false)}
+      >
+        {/* Header with Title and Auto-Slide Controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-100/80 pb-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
+                {cl.subtitle}
+              </span>
+              {/* Auto-Slide Badge */}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-pink-100/80 border border-pink-200 text-[10px] font-extrabold text-[#E91E8C]">
+                <span className={`w-2 h-2 rounded-full ${clAutoPlay && !clIsHovered ? 'bg-[#E91E8C] animate-pulse' : 'bg-slate-400'}`} />
+                <span>{clAutoPlay ? (clIsHovered ? 'Paused (Hover)' : 'Auto Sliding') : 'Slide Paused'}</span>
+              </span>
+            </div>
+            <h2 className="text-2xl md:text-3xl font-serif font-black text-slate-900">
+              {cl.title}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-center">
+            {/* Play/Pause Auto-Slide Toggle */}
+            <button
+              type="button"
+              onClick={() => setClAutoPlay(!clAutoPlay)}
+              className="p-2.5 rounded-xl bg-white border border-pink-200 text-[#E91E8C] hover:bg-pink-50 transition shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+              title={clAutoPlay ? "Pause Auto Slide" : "Start Auto Slide"}
+            >
+              {clAutoPlay ? <Pause size={14} /> : <Play size={14} />}
+              <span className="hidden md:inline">{clAutoPlay ? "Pause" : "Auto Play"}</span>
+            </button>
+
+            {/* Navigation Arrows */}
+            <div className="flex items-center gap-1.5 bg-white p-1 rounded-2xl border border-pink-200 shadow-xs">
+              <button
+                type="button"
+                onClick={handlePrevReel}
+                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                aria-label="Previous Reel"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={handleNextReel}
+                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                aria-label="Next Reel"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
+            {cl.viewAllLinkUrl && (
+              <a
+                href={cl.viewAllLinkUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-extrabold text-[#E91E8C] hover:underline flex items-center gap-1 ml-1"
+              >
+                <span>{cl.viewAllLinkText || 'View All'}</span>
+                <ChevronRight size={14} />
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Sliding Reels Grid / Carousel */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 transition-all duration-500">
+          {visibleReels.map((reel) => (
+            <motion.div
+              key={`${reel.id}-${clActiveIndex}`}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.4 }}
+            >
+              <ReelCard reel={reel} />
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Pagination Dots */}
+        {reels.length > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            {reels.map((_, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setClActiveIndex(idx)}
+                className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${
+                  clActiveIndex === idx
+                    ? 'w-8 bg-[#E91E8C] shadow-xs'
+                    : 'w-2 bg-pink-200 hover:bg-pink-300'
+                }`}
+                aria-label={`Go to slide ${idx + 1}`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Section router mapper
+  const renderSectionByKey = (secKey: SectionKey) => {
+    switch (secKey) {
+      case 'hero':
+        return renderHeroSection();
+      case 'featureIcons':
+        return renderFeatureIconsSection();
+      case 'founderStory':
+        return renderFounderStorySection();
+      case 'botanicalEssentials':
+        return renderBotanicalEssentialsSection();
+      case 'qualityAssurance':
+        return renderQualityAssuranceSection();
+      case 'validatedFormulations':
+        return renderValidatedFormulationsSection();
+      case 'sharedJourney':
+        return renderSharedJourneySection();
+      case 'reachReliability':
+        return renderReachReliabilitySection();
+      case 'communityLive':
+        return renderCommunityLiveSection();
+      default:
+        return null;
+    }
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.3 }}
-      className="w-full max-w-[1720px] mx-auto space-y-8 px-4 py-6 md:px-8 lg:px-12"
+      className="w-full bg-[#fff8f5] space-y-10 md:space-y-12 pb-12 overflow-x-hidden"
     >
-      
-      {/* 1. BRAND HERO PROMO */}
-      <div className="relative rounded-[32px] overflow-hidden bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] p-6 md:p-12 flex flex-col md:flex-row justify-between items-center gap-8 shadow-xl">
-        <div className="space-y-4 max-w-xl text-center md:text-left z-10">
-          <span className="bg-white/20 text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider border border-white/30 inline-block">
-            K-Beauty Premium BD
-          </span>
-          <h2 className="text-3xl md:text-5xl font-extrabold text-white leading-tight">
-            {language === 'en' ? 'Achieve the Viral' : 'অর্ডার করুন সেই ভাইরাল'} <br/>
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-amber-200">
-              {language === 'en' ? 'Korean Glass Skin' : 'কোরিয়ান গ্লাস স্কিন'}
-            </span>
-          </h2>
-          <p className="text-pink-50 text-xs md:text-sm leading-relaxed font-semibold">
-            {language === 'en' 
-              ? 'Shop 100% authentic skin nourishment formulas imported straight from Seoul. Tailored for Bangladesh weather, prices in BDT (৳) with safe cash on delivery.' 
-              : 'সরাসরি সিউল থেকে আমদানিকৃত ১০০% আসল স্কিন কেয়ার পণ্য কিনুন। বাংলাদেশের আবহাওয়ার উপযোগী পণ্য, দাম টাকা (৳) এবং ক্যাশ অন ডেলিভারিতে শপিং করুন।'}
-          </p>
-          
-          {/* Trust points */}
-          <div className="flex flex-wrap gap-3 pt-2 justify-center md:justify-start">
-            <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-white font-semibold bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/10">
-              <CheckCircle size={13} className="text-white" />
-              <span>{language === 'en' ? '100% Authentic Korean' : '১০০% আসল কোরিয়ান'}</span>
+      {/* Dynamic Sections ordered according to theme settings */}
+      {theme.sectionOrder.map((secKey) => {
+        if (secKey === 'hero') {
+          return (
+            <div key="hero-wrapper" className="w-full">
+              {renderHeroSection()}
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-white font-semibold bg-white/10 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/10">
-              <CheckCircle size={13} className="text-white" />
-              <span>{language === 'en' ? 'Cash on Delivery (COD)' : 'ক্যাশ অন ডেলিভারি'}</span>
-            </div>
+          );
+        }
+        return (
+          <div key={secKey} className="w-full max-w-[1720px] mx-auto px-4 md:px-8 lg:px-12">
+            {renderSectionByKey(secKey)}
           </div>
-        </div>
-
-        <div className="relative w-40 md:w-56 h-40 md:h-56 flex-shrink-0 z-10">
-          <div className="absolute inset-0 bg-white rounded-full opacity-20 blur-2xl animate-pulse animate-duration-[3000ms]"></div>
-          <img 
-            src="https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" 
-            alt="K-beauty Hero" 
-            className="w-full h-full object-cover rounded-3xl border border-white/20 shadow-2xl"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-      </div>
-
-      {/* 2. SEARCH & FILTER CONTROLS */}
-      <div className="bg-white p-5 rounded-[24px] border border-pink-100 shadow-sm flex flex-col gap-4">
-        
-        {/* Search Field */}
-        <div className="relative w-full">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-pink-450" />
-          <input 
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={activeTranslations.searchPlaceholder}
-            className="w-full bg-pink-50/10 text-gray-800 pl-11 pr-4 py-3 rounded-xl border border-pink-100 focus:border-[#E91E8C] focus:ring-2 focus:ring-[#E91E8C]/15 outline-none text-xs transition"
-          />
-          {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-pink-400 hover:text-pink-600 cursor-pointer p-1">
-              <X size={15} />
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Categories select */}
-          <div className="space-y-2">
-            <span className="text-[10px] text-pink-700 uppercase font-bold tracking-wider block">
-              {activeTranslations.categories}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {CATEGORIES.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition ${selectedCategory === cat ? 'bg-[#E91E8C] text-white' : 'bg-pink-50/25 text-gray-700 hover:text-[#E91E8C] border border-pink-100/55'}`}
-                >
-                  {cat === 'All' ? activeTranslations.all : cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Skin suitabilities select */}
-          <div className="space-y-2">
-            <span className="text-[10px] text-pink-700 uppercase font-bold tracking-wider block">
-              {activeTranslations.skinType}
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {SKIN_TYPES.map(st => (
-                <button
-                  key={st}
-                  onClick={() => setSelectedSkinType(st)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition ${selectedSkinType === st ? 'bg-[#E91E8C] text-white' : 'bg-pink-50/25 text-gray-700 hover:text-[#E91E8C] border border-pink-100/55'}`}
-                >
-                  {st === 'All' ? activeTranslations.all : st}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. PRODUCTS GRID */}
-      <div>
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-            <ShoppingBag size={16} className="text-[#E91E8C]" />
-            <span>{language === 'en' ? 'Authentic K-Beauty Catalog' : 'আমাদের স্কিনকেয়ার পণ্যসমূহ'}</span>
-          </h3>
-          <p className="text-[11px] text-gray-500 font-bold bg-pink-50 border border-pink-100/40 px-2.5 py-0.5 rounded-full">
-            {language === 'en' ? `${filteredProducts.length} skincare formulas` : `${filteredProducts.length}টি পণ্য পাওয়া গেছে`}
-          </p>
-        </div>
-
-        {filteredProducts.length === 0 ? (
-          <div className="bg-white py-16 text-center rounded-[24px] border border-pink-100 text-gray-500 shadow-sm space-y-3">
-            <SlidersHorizontal size={36} className="mx-auto text-pink-300 animate-pulse" />
-            <p className="text-xs font-semibold">No skincare products match your active search filters.</p>
-            <button 
-              onClick={() => { setSearchQuery(''); setSelectedCategory('All'); setSelectedSkinType('All'); }}
-              className="px-4 py-1.5 bg-[#E91E8C] text-white rounded-xl text-xs font-bold cursor-pointer hover:bg-[#FF4B91] transition shadow-sm"
-            >
-              Reset Filters
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-            {filteredProducts.map(prod => (
-              <div 
-                key={prod.id}
-                className="bg-white rounded-[24px] border border-pink-50 overflow-hidden flex flex-col justify-between hover:border-pink-200 hover:shadow-md transition duration-300 shadow-sm group relative"
-              >
-                {/* PROMO TAG */}
-                {prod.discountPrice && (
-                  <div className="absolute top-3 left-3 bg-[#E91E8C] text-white text-[9px] uppercase font-black tracking-widest px-2.5 py-0.5 rounded-full z-10 shadow-sm">
-                    Sale
-                  </div>
-                )}
-
-                <div>
-                  {/* Photo graphic */}
-                  <div 
-                    className="aspect-square overflow-hidden bg-pink-50/15 relative cursor-pointer border-b border-pink-50 p-2" 
-                    onClick={() => navigate(`/product/${prod.id}`)}
-                  >
-                    <img 
-                      src={prod.image} 
-                      alt={prod.name} 
-                      className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition duration-300"
-                      referrerPolicy="no-referrer"
-                    />
-                    {prod.stock <= 5 && prod.stock > 0 && (
-                      <div className="absolute bottom-2 right-2 bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full border border-red-600/10 shadow-sm">
-                        Only {prod.stock} left
-                      </div>
-                    )}
-                    {prod.stock === 0 && (
-                      <div className="absolute inset-0 bg-white/85 flex items-center justify-center rounded-xl p-2">
-                        <span className="text-white text-[9px] font-black uppercase tracking-widest bg-red-500 px-2.5 py-1 rounded-lg">
-                          {activeTranslations.outOfStock}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Body description */}
-                  <div className="p-4 space-y-1.5">
-                    <span className="text-[9px] uppercase tracking-wider text-[#E91E8C] font-extrabold bg-pink-50 px-2 py-0.5 rounded border border-pink-100/30">
-                      {prod.brand}
-                    </span>
-                    <h4 
-                      onClick={() => navigate(`/product/${prod.id}`)}
-                      className="font-extrabold text-xs text-gray-800 leading-tight cursor-pointer hover:text-[#E91E8C] transition line-clamp-2"
-                    >
-                      {language === 'en' ? prod.name : prod.nameBN}
-                    </h4>
-                    
-                    {/* Skin suits */}
-                    <div className="flex flex-wrap gap-1 pt-0.5">
-                      {prod.skinTypes.slice(0, 2).map(st => (
-                        <span key={st} className="text-[8px] bg-pink-50/10 text-pink-700 px-1.5 py-0.5 rounded border border-pink-50 font-bold">
-                          {st} Skin
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer price & buy trigger */}
-                <div className="p-4 border-t border-pink-50 bg-pink-50/5 flex items-center justify-between gap-1.5">
-                  <div className="font-mono">
-                    {prod.discountPrice ? (
-                      <div className="leading-none">
-                        <span className="text-gray-400 text-[10px] line-through block">
-                          ৳{prod.price}
-                        </span>
-                        <span className="text-[#E91E8C] font-black text-xs sm:text-sm block mt-0.5">
-                          ৳{prod.discountPrice}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-gray-800 font-black text-xs sm:text-sm block">
-                        ৳{prod.price}
-                      </span>
-                    )}
-                  </div>
-
-                  <button 
-                    onClick={() => addToCart(prod)}
-                    disabled={prod.stock === 0}
-                    className="p-2 bg-pink-50 hover:bg-[#E91E8C] text-[#E91E8C] hover:text-white rounded-xl cursor-pointer transition flex items-center justify-center shadow-sm disabled:opacity-40"
-                  >
-                    <ShoppingBag size={12} />
-                  </button>
-                </div>
-
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
+        );
+      })}
     </motion.div>
   );
 };

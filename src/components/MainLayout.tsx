@@ -26,7 +26,6 @@ export const MainLayout: React.FC = () => {
     calculateGrandTotal, calculatePointsEarned
   } = useCart();
 
-  const [adminSidebarOpen, setAdminSidebarOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
 
@@ -74,16 +73,17 @@ export const MainLayout: React.FC = () => {
 
       {/* 2. Responsive Adaptive Header */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-4 md:px-8 py-3.5 flex items-center justify-between shadow-sm">
-        {/* Left Section: Admin Trigger + Desktop Menus */}
+        {/* Left Section: Desktop Menus & Admin Shortcut */}
         <div className="flex items-center gap-6">
           {user && isAdmin && (
-            <button 
-              onClick={() => setAdminSidebarOpen(!adminSidebarOpen)}
-              className="p-2 hover:bg-pink-50 rounded-xl text-[#E91E8C] transition-all cursor-pointer border border-transparent hover:border-pink-200/50"
-              title="Toggle Admin Controls"
+            <Link 
+              to="/admin"
+              className="px-3 py-1.5 bg-slate-900 text-white rounded-xl text-xs font-bold transition-all hover:bg-[#E91E8C] flex items-center gap-1.5 shadow-xs"
+              title="Go to Admin Dashboard"
             >
-              <Menu size={18} />
-            </button>
+              <ShieldCheck size={14} className="text-pink-400" />
+              <span className="hidden sm:inline">Admin Panel</span>
+            </Link>
           )}
 
           {/* Menus: Home, Shop, About Us, Contact Us */}
@@ -220,102 +220,10 @@ export const MainLayout: React.FC = () => {
         </div>
       </header>
 
-      {/* 3. Render Storefront with Admin Sidebar integration if appropriate */}
-      <div className="flex-1 flex min-h-0 relative">
-        <AnimatePresence>
-          {user && isAdmin && (
-            <>
-              {/* Mobile overlay */}
-              {adminSidebarOpen && (
-                <div 
-                  className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
-                  onClick={() => setAdminSidebarOpen(false)}
-                />
-              )}
-
-              {/* Sidebar Element */}
-              <aside className={`
-                fixed inset-y-0 left-0 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 z-50 flex flex-col justify-between border-r border-slate-800/80 shadow-2xl transition-all duration-300 p-4 shrink-0
-                lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:translate-x-0 lg:z-20 overflow-y-auto scrollbar-none
-                ${adminSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0 lg:w-16'}
-              `}>
-                <div className="space-y-6">
-                  {/* Collapsible Header */}
-                  <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 bg-gradient-to-tr from-[#E91E8C] to-purple-600 rounded-xl flex items-center justify-center text-white shadow-md border border-pink-400/40 shrink-0">
-                        <ShieldCheck size={16} />
-                      </div>
-                      {adminSidebarOpen && (
-                        <div className="truncate">
-                          <h4 className="font-extrabold text-xs text-white leading-none truncate">KSF Admin Deck</h4>
-                          <span className="text-[9px] text-pink-400 font-extrabold uppercase tracking-wider block mt-1">Quick Access</span>
-                        </div>
-                      )}
-                    </div>
-                    <button 
-                      onClick={() => setAdminSidebarOpen(false)}
-                      className="lg:hidden p-1 text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-
-                  {/* Sidebar Navigation items */}
-                  <nav className="space-y-1.5">
-                    {[
-                      { to: '/admin', label: 'Dashboard Overview', icon: BarChart3 },
-                      { to: '/admin/pos', label: 'POS Register', icon: CreditCard },
-                      { to: '/admin/products', label: 'Skincare Catalog', icon: Boxes },
-                      { to: '/admin/seo', label: 'SEO Optimizer', icon: TrendingUp },
-                      { to: '/admin/social', label: 'Social Copy Studio', icon: Wand2 },
-                      { to: '/admin/chat-leads', label: 'WhatsApp Leads', icon: MessageCircle },
-                    ].map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <Link
-                          key={item.to}
-                          to={item.to}
-                          onClick={() => {
-                            if (window.innerWidth < 1024) {
-                              setAdminSidebarOpen(false);
-                            }
-                          }}
-                          className="group flex items-center gap-3 px-2.5 py-2.5 rounded-xl text-xs font-bold transition-all hover:bg-slate-850/80 text-slate-300 hover:text-white cursor-pointer border border-transparent hover:border-slate-800"
-                        >
-                          <div className="w-7 h-7 rounded-lg bg-slate-800/90 border border-slate-700/50 flex items-center justify-center text-pink-400 group-hover:bg-[#E91E8C] group-hover:text-white group-hover:border-pink-400 transition-colors shrink-0">
-                            <Icon size={14} />
-                          </div>
-                          {adminSidebarOpen && <span className="truncate">{item.label}</span>}
-                        </Link>
-                      );
-                    })}
-                  </nav>
-                </div>
-
-                {/* Sidebar footer meta */}
-                {adminSidebarOpen && (
-                  <div className="pt-4 border-t border-slate-800/80 flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#E91E8C] to-purple-600 p-0.5 text-xs font-black text-white shrink-0">
-                      <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center text-pink-300 font-extrabold">
-                        {profile?.name?.slice(0, 1) || 'A'}
-                      </div>
-                    </div>
-                    <div className="truncate text-[10px] text-slate-400">
-                      <p className="font-extrabold text-white truncate leading-none mb-0.5">{profile?.name || 'Admin'}</p>
-                      <p className="truncate text-pink-400 font-mono text-[9px] uppercase font-bold">{profile?.role}</p>
-                    </div>
-                  </div>
-                )}
-              </aside>
-            </>
-          )}
-        </AnimatePresence>
-
-        <main className="flex-1 min-w-0">
-          <Outlet />
-        </main>
-      </div>
+      {/* 3. Render Storefront Content */}
+      <main className="flex-1 min-w-0">
+        <Outlet />
+      </main>
 
       {/* 4. Footer */}
       <Footer />
@@ -583,13 +491,13 @@ export const MainLayout: React.FC = () => {
           <span className="text-[9px] font-bold">{language === 'bn' ? 'প্রোফাইল' : 'Profile'}</span>
         </Link>
         {user && isAdmin && (
-          <button 
-            onClick={() => setAdminSidebarOpen(!adminSidebarOpen)}
-            className="flex flex-col items-center gap-1 text-[#E91E8C] animate-pulse cursor-pointer animate-duration-[2000ms]"
+          <Link 
+            to="/admin"
+            className="flex flex-col items-center gap-1 text-[#E91E8C] transition-all cursor-pointer"
           >
             <ShieldCheck size={18} />
             <span className="text-[9px] font-bold">Admin</span>
-          </button>
+          </Link>
         )}
       </div>
 

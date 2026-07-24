@@ -6,6 +6,7 @@ export interface CloudinaryImage {
   url: string;
   name: string;
   createdAt: string;
+  type?: 'image' | 'video';
 }
 
 const DEFAULT_SEEDED_IMAGES: CloudinaryImage[] = [
@@ -91,12 +92,13 @@ export const cloudinaryService = {
     return cloudinaryImagesCache.length > 0 ? cloudinaryImagesCache : DEFAULT_SEEDED_IMAGES;
   },
 
-  async uploadImage(name: string, url: string): Promise<CloudinaryImage> {
+  async uploadImage(name: string, url: string, type: 'image' | 'video' = 'image'): Promise<CloudinaryImage> {
     const id = 'img-' + Math.random().toString(36).substring(2, 11);
     const newImage: CloudinaryImage = {
       id,
       name,
       url,
+      type,
       createdAt: new Date().toISOString()
     };
 

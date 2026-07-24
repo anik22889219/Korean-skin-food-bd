@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart3, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
-  LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck 
+  LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, Palette 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -14,6 +14,7 @@ export const AdminLayout: React.FC = () => {
 
   const navItems = [
     { to: '/admin', label: 'Dashboard Overview', badge: 'Live', icon: BarChart3, end: true },
+    { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
     { to: '/admin/pos', label: 'POS Register', badge: 'Terminal', icon: CreditCard },
     { to: '/admin/products', label: 'Skincare Catalog', badge: 'Stock', icon: Boxes },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },

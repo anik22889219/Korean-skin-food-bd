@@ -21,7 +21,7 @@ import {
   ArrowLeft, 
   CheckCircle,
   Truck,
-  Sparkles,
+  Wand2,
   Search,
   X,
   Receipt,
@@ -137,7 +137,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     });
 
     return Object.keys(counts).map((pId) => {
-      const prod = productService.getProductById(pId);
+      const prod = productService.getProductByBarcode(pId) || productService.getProductById(pId);
       return {
         product: prod || {
           id: pId,
@@ -898,7 +898,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
               <div className="space-y-3 pt-3 border-t border-pink-50">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles size={14} className="text-[#E91E8C]" />
+                    <Wand2 size={14} className="text-[#E91E8C]" />
                     <span>Quick Catalog ({filteredProducts.length})</span>
                   </span>
                   {searchQuery && (

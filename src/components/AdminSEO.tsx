@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { productService } from '../services/productService';
 import { agentService } from '../services/agentService';
 import { Product } from '../types';
-import { Search, Sparkles, Save, CheckCircle, AlertCircle, FileText, Globe, Key } from 'lucide-react';
+import { Search, Wand2, Save, CheckCircle, AlertCircle, FileText, Globe, Key } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export const AdminSEO: React.FC = () => {
@@ -184,7 +184,7 @@ export const AdminSEO: React.FC = () => {
               disabled={isGenerating || !selectedProduct}
               className="px-3 py-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] text-[10px] font-bold border border-pink-200 rounded-lg cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
             >
-              <Sparkles size={11} className={isGenerating ? "animate-spin" : ""} />
+              <Wand2 size={11} className={isGenerating ? "animate-spin" : ""} />
               <span>{isGenerating ? "Gemini Drafting..." : "Draft with Gemini"}</span>
             </button>
           </div>

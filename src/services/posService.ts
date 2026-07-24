@@ -107,10 +107,13 @@ export async function addProductToSession(
     return { success: false, message: 'Invalid session or product ID' };
   }
 
-  const product = productService.getProductById(productId);
+  // Lookup product by barcode or by ID
+  const product = productService.getProductByBarcode(productId) || productService.getProductById(productId);
   if (!product) {
-    return { success: false, message: 'Product not found in inventory.' };
+    return { success: false, message: `Product not found in inventory for code "${productId}".` };
   }
+
+  const canonicalProductId = product.id;
 
   if (product.stock <= 0) {
     return { success: false, message: `Product "${product.name}" is out of stock!` };
@@ -123,7 +126,8 @@ export async function addProductToSession(
       const snapshot = await getDocs(q);
       let count = 0;
       snapshot.forEach((docSnap) => {
-        if (docSnap.data().product_id === productId) {
+        const data = docSnap.data();
+        if (data.product_id === canonicalProductId || data.product_id === productId) {
           count++;
         }
       });
@@ -144,7 +148,7 @@ export async function addProductToSession(
   try {
     const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
     await addDoc(scansColRef, {
-      product_id: productId,
+      product_id: canonicalProductId,
       scanned_at: new Date().toISOString()
     });
 
@@ -152,7 +156,7 @@ export async function addProductToSession(
       lastScanTime: new Date().toISOString()
     }, { merge: true }).catch(() => {});
 
-    posService.scanProductIntoSession(sessionId, productId);
+    posService.scanProductIntoSession(sessionId, canonicalProductId);
 
     return {
       success: true,
