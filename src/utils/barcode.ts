@@ -1,5 +1,6 @@
 import { Product } from '../types';
-import { Html5Qrcode } from 'html5-qrcode';
+import { BrowserMultiFormatReader, BarcodeFormat, IScannerControls } from '@zxing/browser';
+import { DecodeHintType } from '@zxing/library';
 
 export interface BarcodeDebugInfo {
   rawValue: string;
@@ -23,8 +24,22 @@ export interface BarcodeAuditReport {
   differingBarcodes: { product: Product; raw: string; normalized: string }[];
 }
 
+export interface ScannerStartOptions {
+  containerId: string;
+  useFrontCamera?: boolean;
+  onScanSuccess: (scannedText: string) => void;
+  onError?: (errorMessage: string) => void;
+  debounceMs?: number;
+}
+
+export interface ScannerController {
+  stop: () => Promise<void>;
+  applyZoom: (zoom: number) => Promise<boolean>;
+  triggerRefocus: () => Promise<boolean>;
+}
+
 /**
- * STEP 2: Single, reusable barcode normalization function.
+ * Single, reusable barcode normalization function.
  * All barcode operations across AI import, creation, editing, mobile scanner,
  * manual input, lookups, POS scanning, and duplicate validation MUST use this.
  *
@@ -40,29 +55,20 @@ export function normalizeBarcode(value: unknown): string {
     return '';
   }
 
-  // Convert to string safely without losing leading zeros or turning numbers to scientific notation
   let str = typeof value === 'string' ? value : String(value);
-
-  // Remove invisible unicode control characters (e.g., \u200B zero-width space, \uFEFF BOM, \u0000-\u001F)
   str = str.replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, '');
-
-  // Trim whitespace
   str = str.trim();
-
-  // Remove accidental spaces and hyphens
   str = str.replace(/[\s\-]/g, '');
-
-  // Uppercase for Code 128 / QR codes
   return str.toUpperCase();
 }
 
 /**
- * STEP 9: Barcode Format Validation
- * Supports EAN-13, EAN-8, UPC-A, Code 128, and custom alphanumeric QR codes.
+ * Barcode Format Validation
+ * Supports EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, and custom QR codes.
  */
 export function validateBarcodeFormat(value: unknown): {
   isValid: boolean;
-  format: 'EAN-13' | 'EAN-8' | 'UPC-A' | 'CODE-128' | 'QR-CODE' | 'EMPTY' | 'UNKNOWN';
+  format: 'EAN-13' | 'EAN-8' | 'UPC-A' | 'UPC-E' | 'CODE-128' | 'CODE-39' | 'QR-CODE' | 'EMPTY' | 'UNKNOWN';
   warning?: string;
 } {
   const normalized = normalizeBarcode(value);
@@ -76,9 +82,9 @@ export function validateBarcodeFormat(value: unknown): {
     return { isValid: true, format: 'EAN-13' };
   }
 
-  // UPC-A: 12 digits (Common in US/Canada or 12-digit legacy)
+  // UPC-A: 12 digits
   if (/^\d{12}$/.test(normalized)) {
-    return { isValid: true, format: 'UPC-A', warning: '12-digit code detected (UPC-A or legacy format)' };
+    return { isValid: true, format: 'UPC-A', warning: '12-digit code detected (UPC-A format)' };
   }
 
   // EAN-8: 8 digits
@@ -86,7 +92,12 @@ export function validateBarcodeFormat(value: unknown): {
     return { isValid: true, format: 'EAN-8' };
   }
 
-  // Code 128 or Alphanumeric Retail Barcode (3 to 32 alphanumeric chars)
+  // UPC-E: 6 digits
+  if (/^\d{6}$/.test(normalized)) {
+    return { isValid: true, format: 'UPC-E' };
+  }
+
+  // Code 128 / Code 39 or Alphanumeric Retail Barcode (3 to 32 alphanumeric chars)
   if (/^[A-Z0-9_\.]{3,32}$/.test(normalized)) {
     return { isValid: true, format: 'CODE-128' };
   }
@@ -110,7 +121,6 @@ export function extractCodeFromScanText(rawText: string): string {
   if (!rawText) return '';
   let trimmed = rawText.trim();
 
-  // Handle URLs like /pos/product/{id} or /product/{id} or https://example.com/item/123
   const indicator = '/pos/product/';
   const index = trimmed.indexOf(indicator);
 
@@ -133,7 +143,7 @@ export function extractCodeFromScanText(rawText: string): string {
 }
 
 /**
- * STEP 5: Product Lookup Logic
+ * Product Lookup Logic
  * 1. Extract and normalize scanned barcode.
  * 2. Search barcodeNormalized first (exact match).
  * 3. Fall back to normalized legacy barcode values (exact match).
@@ -201,7 +211,7 @@ export function findProductByScannedCode(
 }
 
 /**
- * STEP 7: Duplicate Barcode Validation
+ * Duplicate Barcode Validation
  * Checks if a normalized barcode already exists on another product.
  */
 export function checkDuplicateBarcode(
@@ -230,8 +240,7 @@ export function checkDuplicateBarcode(
 }
 
 /**
- * STEP 8: Barcode Data Audit Tool
- * Generates audit statistics and flags invalid, missing, unnormalized or duplicate barcodes.
+ * Barcode Data Audit Tool
  */
 export function auditProductsBarcodes(products: Product[]): BarcodeAuditReport {
   const missingBarcodes: Product[] = [];
@@ -256,17 +265,14 @@ export function auditProductsBarcodes(products: Product[]): BarcodeAuditReport {
       barcodeMap.set(norm, existing);
     }
 
-    // Check if raw barcode differs from normalized
     if (raw !== norm) {
       differingBarcodes.push({ product: p, raw, normalized: norm });
     }
 
-    // Check if raw has leading/trailing spaces or hyphens or unnormalized format
     if (raw.trim() !== raw || raw.includes('-') || raw.includes(' ')) {
       unnormalizedBarcodes.push({ product: p, raw, normalized: norm });
     }
 
-    // Check format validation
     const valResult = validateBarcodeFormat(raw);
     if (!valResult.isValid) {
       invalidFormatBarcodes.push({ product: p, raw, reason: valResult.warning || 'Invalid format' });
@@ -291,39 +297,38 @@ export function auditProductsBarcodes(products: Product[]): BarcodeAuditReport {
 }
 
 /**
- * Google Lens style photo barcode scanner.
- * Decodes barcodes directly from high-resolution, focused static photos / uploaded image files.
- * Bypasses video motion blur issues completely!
+ * Helper to create ZXing MultiFormat hints focusing on 1D barcodes and 2D QR codes
+ */
+function createZXingHints(): Map<DecodeHintType, any> {
+  const hints = new Map<DecodeHintType, any>();
+  const possibleFormats = [
+    BarcodeFormat.EAN_13,
+    BarcodeFormat.EAN_8,
+    BarcodeFormat.UPC_A,
+    BarcodeFormat.UPC_E,
+    BarcodeFormat.CODE_128,
+    BarcodeFormat.CODE_39,
+    BarcodeFormat.QR_CODE,
+    BarcodeFormat.DATA_MATRIX,
+    BarcodeFormat.ITF,
+    BarcodeFormat.CODABAR,
+  ];
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, possibleFormats);
+  hints.set(DecodeHintType.TRY_HARDER, true);
+  return hints;
+}
+
+/**
+ * Photo image file barcode scanner powered by ZXing and native BarcodeDetector.
  */
 export async function scanBarcodeFromImageFile(file: File): Promise<string | null> {
   if (!file) return null;
 
-  // 1. Try Html5Qrcode scanFile
-  try {
-    let element = document.getElementById("temp-photo-scan-node");
-    if (!element) {
-      element = document.createElement("div");
-      element.id = "temp-photo-scan-node";
-      element.style.display = "none";
-      document.body.appendChild(element);
-    }
-
-    const html5QrCode = new Html5Qrcode("temp-photo-scan-node");
-    const scannedResult = await html5QrCode.scanFile(file, false);
-    if (scannedResult) {
-      const extracted = extractCodeFromScanText(scannedResult);
-      const norm = normalizeBarcode(extracted);
-      if (norm) return norm;
-    }
-  } catch (err) {
-    console.warn("Html5Qrcode.scanFile image decode error:", err);
-  }
-
-  // 2. Native BarcodeDetector API fallback
+  // 1. Native BarcodeDetector API (fastest hardware acceleration)
   if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
     try {
       const barcodeDetector = new (window as any).BarcodeDetector({
-        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix']
+        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
       });
       const img = new Image();
       const objectUrl = URL.createObjectURL(file);
@@ -336,18 +341,79 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
       URL.revokeObjectURL(objectUrl);
       if (detected && detected.length > 0 && detected[0].rawValue) {
         const extracted = extractCodeFromScanText(detected[0].rawValue);
-        return normalizeBarcode(extracted);
+        const norm = normalizeBarcode(extracted);
+        if (norm) return norm;
       }
     } catch (err) {
-      console.warn("Native BarcodeDetector image decode error:", err);
+      console.warn("Native BarcodeDetector photo decode error:", err);
     }
+  }
+
+  // 2. ZXing BrowserMultiFormatReader decode via Blob Object URL
+  try {
+    const hints = createZXingHints();
+    const reader = new BrowserMultiFormatReader(hints);
+    const objectUrl = URL.createObjectURL(file);
+    const result = await reader.decodeFromImageUrl(objectUrl);
+    URL.revokeObjectURL(objectUrl);
+    if (result && result.getText()) {
+      const extracted = extractCodeFromScanText(result.getText());
+      const norm = normalizeBarcode(extracted);
+      if (norm) return norm;
+    }
+  } catch (err) {
+    console.warn("ZXing decodeFromImageUrl error:", err);
+  }
+
+  // 3. Fallback: Draw on high-contrast canvas & decode via ZXing
+  try {
+    const hints = createZXingHints();
+    const reader = new BrowserMultiFormatReader(hints);
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = objectUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(objectUrl);
+
+      // Contrast enhancement for dark/blurry photos
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imageData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const avg = (d[i] + d[i + 1] + d[i + 2]) / 3;
+        const v = avg > 115 ? 255 : 0;
+        d[i] = v;
+        d[i + 1] = v;
+        d[i + 2] = v;
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      const result = await reader.decodeFromCanvas(canvas);
+      if (result && result.getText()) {
+        const extracted = extractCodeFromScanText(result.getText());
+        return normalizeBarcode(extracted);
+      }
+    } else {
+      URL.revokeObjectURL(objectUrl);
+    }
+  } catch (err) {
+    console.warn("ZXing canvas enhancement decode error:", err);
   }
 
   return null;
 }
 
 /**
- * Applies hardware zoom and focus constraints to the active video track in a container
+ * Applies hardware zoom and focus constraints to the active video track in a container.
  */
 export async function applyCameraTrackConstraints(
   containerId: string, 
@@ -364,13 +430,11 @@ export async function applyCameraTrackConstraints(
     const mainConstraints: any = {};
     const advancedConstraints: any = {};
 
-    // 1. High Resolution constraints (1080p ideal) to avoid pixelated/blurry barcodes
     if (options.highRes !== false) {
       mainConstraints.width = { ideal: 1920, min: 1280 };
       mainConstraints.height = { ideal: 1080, min: 720 };
     }
 
-    // 2. Continuous Auto-Focus and Hardware Zoom constraints
     if (track.getCapabilities) {
       const caps = track.getCapabilities() as any;
       if (options.zoom !== undefined && caps.zoom) {
@@ -396,7 +460,6 @@ export async function applyCameraTrackConstraints(
     if (Object.keys(finalConstraints).length > 0) {
       await track.applyConstraints(finalConstraints);
 
-      // Trigger re-focus calibration if requested
       if (options.triggerFocus && track.getCapabilities) {
         const caps = track.getCapabilities() as any;
         if (caps.focusMode && caps.focusMode.includes('single-shot') && caps.focusMode.includes('continuous')) {
@@ -421,9 +484,7 @@ export async function applyCameraTrackConstraints(
 }
 
 /**
- * Google Lens Live Video Snapshot barcode scanner.
- * Captures a high-resolution, sharp frame directly from the active live video stream,
- * eliminating motion blur and decoding instantly without opening any file dialog!
+ * Captures a high-resolution, sharp frame directly from the active live video stream.
  */
 export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Promise<string | null> {
   try {
@@ -436,11 +497,11 @@ export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Pro
     const videoWidth = videoEl.videoWidth || 1280;
     const videoHeight = videoEl.videoHeight || 720;
 
-    // 1. Try Native BarcodeDetector directly on <video> element (Instant hardware acceleration)
+    // 1. Try Native BarcodeDetector directly on <video> element
     if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
       try {
         const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix']
+          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
         });
         const detected = await barcodeDetector.detect(videoEl);
         if (detected && detected.length > 0 && detected[0].rawValue) {
@@ -453,7 +514,7 @@ export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Pro
       }
     }
 
-    // 2. Draw canvas frame at full resolution & enhance contrast
+    // 2. Draw canvas frame at full resolution & decode via scanBarcodeFromImageFile
     const canvas = document.createElement("canvas");
     canvas.width = videoWidth;
     canvas.height = videoHeight;
@@ -462,7 +523,6 @@ export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Pro
 
     ctx.drawImage(videoEl, 0, 0, videoWidth, videoHeight);
 
-    // Convert canvas to File blob and decode via scanBarcodeFromImageFile
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) return null;
 
@@ -472,4 +532,223 @@ export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Pro
     console.error("Live video snapshot error:", err);
     return null;
   }
+}
+
+/**
+ * Start Unified Real-time Camera Barcode Scanner using ZXing + native BarcodeDetector hybrid engine.
+ * Includes complete stream lifecycle management, track release, camera switching, and debounce protection.
+ */
+export async function startUnifiedCameraScanner(options: ScannerStartOptions): Promise<ScannerController> {
+  const { containerId, useFrontCamera = false, onScanSuccess, onError, debounceMs = 1200 } = options;
+
+  const container = document.getElementById(containerId);
+  if (!container) {
+    throw new Error(`Container element #${containerId} not found`);
+  }
+
+  // Clear existing children from container
+  container.innerHTML = '';
+
+  // Create video element
+  const videoEl = document.createElement('video');
+  videoEl.autoplay = true;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  videoEl.style.width = '100%';
+  videoEl.style.height = '100%';
+  videoEl.style.objectFit = 'cover';
+  container.appendChild(videoEl);
+
+  let mediaStream: MediaStream | null = null;
+  let isStopped = false;
+  let animationFrameId: number | null = null;
+  let nativeDetector: any = null;
+  let lastScannedCode = '';
+  let lastScanTime = 0;
+
+  // Initialize Native BarcodeDetector if available
+  if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+    try {
+      nativeDetector = new (window as any).BarcodeDetector({
+        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
+      });
+    } catch (e) {
+      console.warn("BarcodeDetector init error:", e);
+    }
+  }
+
+  // Setup ZXing BrowserMultiFormatReader
+  const hints = createZXingHints();
+  const reader = new BrowserMultiFormatReader(hints);
+  let zxingControls: IScannerControls | null = null;
+
+  // Request Camera Stream
+  try {
+    const targetFacingMode = useFrontCamera ? "user" : "environment";
+    const videoConstraints: MediaTrackConstraints = {
+      facingMode: { ideal: targetFacingMode },
+      width: { ideal: 1920, min: 1280 },
+      height: { ideal: 1080, min: 720 }
+    };
+
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+    } catch (firstErr: any) {
+      console.warn("First camera getUserMedia attempt failed, retrying with basic video constraint:", firstErr);
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: targetFacingMode }, audio: false });
+    }
+
+    if (isStopped) {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+      }
+      return {
+        stop: async () => {},
+        applyZoom: async () => false,
+        triggerRefocus: async () => false
+      };
+    }
+
+    videoEl.srcObject = mediaStream;
+    await videoEl.play().catch(() => {});
+
+    // Apply auto-focus & zoom constraints after track starts
+    setTimeout(() => {
+      if (!isStopped) {
+        applyCameraTrackConstraints(containerId, { zoom: 1.5, triggerFocus: true });
+      }
+    }, 500);
+
+    // Process scan result with debounce
+    const processScannedResult = (rawText: string) => {
+      if (!rawText || isStopped) return;
+      const extracted = extractCodeFromScanText(rawText);
+      const norm = normalizeBarcode(extracted);
+      if (!norm) return;
+
+      const now = Date.now();
+      if (norm === lastScannedCode && (now - lastScanTime) < debounceMs) {
+        return; // Skip duplicate scan within debounce window
+      }
+
+      lastScannedCode = norm;
+      lastScanTime = now;
+      onScanSuccess(norm);
+    };
+
+    // 1. Hybrid Native Loop (runs on requestAnimationFrame when native BarcodeDetector is available)
+    let isDecodingFrame = false;
+    const scanNativeFrame = async () => {
+      if (isStopped) return;
+      if (nativeDetector && videoEl.readyState >= 2 && !isDecodingFrame) {
+        isDecodingFrame = true;
+        try {
+          const detected = await nativeDetector.detect(videoEl);
+          if (detected && detected.length > 0 && detected[0].rawValue) {
+            processScannedResult(detected[0].rawValue);
+          }
+        } catch (e) {
+          // ignore frame detect errors
+        } finally {
+          isDecodingFrame = false;
+        }
+      }
+      if (!isStopped) {
+        animationFrameId = requestAnimationFrame(scanNativeFrame);
+      }
+    };
+
+    if (nativeDetector) {
+      animationFrameId = requestAnimationFrame(scanNativeFrame);
+    }
+
+    // 2. ZXing Continuous Decoder on Video Element
+    try {
+      zxingControls = await reader.decodeFromVideoElement(videoEl, (result, error) => {
+        if (isStopped) return;
+        if (result && result.getText()) {
+          processScannedResult(result.getText());
+        }
+      });
+    } catch (e) {
+      console.warn("ZXing decodeFromVideoElement error:", e);
+    }
+
+  } catch (err: any) {
+    console.error("Camera scanner startup failed:", err);
+    let errMsg = "Unable to access camera.";
+
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      errMsg = "Camera access permission was denied. Please allow camera access in browser settings and reload.";
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      errMsg = "No camera hardware detected on this device.";
+    } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+      errMsg = "Camera is currently in use by another application or tab. Please close other camera apps and try again.";
+    } else if (err.name === 'OverconstrainedError') {
+      errMsg = "Requested camera configuration is not supported by your device camera.";
+    }
+
+    if (onError) {
+      onError(errMsg);
+    }
+    throw new Error(errMsg);
+  }
+
+  // Define stop cleanup function
+  const stop = async () => {
+    if (isStopped) return;
+    isStopped = true;
+
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+
+    if (zxingControls) {
+      try {
+        zxingControls.stop();
+      } catch (e) {
+        // ignore zxing stop error
+      }
+      zxingControls = null;
+    }
+
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (e) {
+          // quiet fail
+        }
+      });
+      mediaStream = null;
+    }
+
+    if (videoEl) {
+      videoEl.srcObject = null;
+    }
+
+    container.innerHTML = '';
+  };
+
+  // Visibility change listener to stop tracks if page is hidden
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      stop();
+    }
+  };
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  return {
+    stop: async () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      await stop();
+    },
+    applyZoom: async (zoom: number) => {
+      return await applyCameraTrackConstraints(containerId, { zoom, triggerFocus: true });
+    },
+    triggerRefocus: async () => {
+      return await applyCameraTrackConstraints(containerId, { triggerFocus: true });
+    }
+  };
 }

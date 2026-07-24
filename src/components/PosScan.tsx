@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, doc, setDoc, onSnapshot, query, addDoc, deleteDoc } from 'firebase/firestore';
-import { Html5Qrcode } from 'html5-qrcode';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
 import { Product, UserProfile } from '../types';
-import { findProductByScannedCode, scanBarcodeFromImageFile, scanBarcodeFromLiveVideoSnapshot, applyCameraTrackConstraints, BarcodeDebugInfo } from '../utils/barcode';
+import { 
+  findProductByScannedCode, 
+  scanBarcodeFromImageFile, 
+  scanBarcodeFromLiveVideoSnapshot, 
+  applyCameraTrackConstraints, 
+  startUnifiedCameraScanner,
+  ScannerController,
+  BarcodeDebugInfo 
+} from '../utils/barcode';
 import { 
   Camera, 
   Smartphone, 
@@ -132,9 +139,9 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   const [emailInput, setEmailInput] = useState('');
   const [roleInput, setRoleInput] = useState<'admin' | 'inventory_manager' | 'customer_support'>('admin');
 
-  // Debounce refs
+  // Scanner Controller Ref
   const lastScanRef = useRef<{ productId: string; time: number } | null>(null);
-  const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+  const scannerControllerRef = useRef<ScannerController | null>(null);
 
   // Check if current user is a staff member
   const isUserStaff = currentUser && ['admin', 'inventory_manager', 'customer_support', 'super_admin'].includes(currentUser.role);
@@ -156,77 +163,76 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
     return () => unsubscribe();
   }, [sessionId, isUserStaff]);
 
-  // 2. Initialize QR / Barcode Scanner
+  // 2. Initialize ZXing Unified Scanner
   useEffect(() => {
-    if (!isUserStaff || !isCameraActive) return;
+    if (!isUserStaff || !isCameraActive) {
+      if (scannerControllerRef.current) {
+        scannerControllerRef.current.stop();
+        scannerControllerRef.current = null;
+      }
+      return;
+    }
+
+    let active = true;
 
     const startScanner = async () => {
       setCameraError(null);
+      if (scannerControllerRef.current) {
+        await scannerControllerRef.current.stop();
+        scannerControllerRef.current = null;
+      }
+
+      // Small delay to ensure DOM node is rendered
+      await new Promise(r => setTimeout(r, 50));
+      if (!active) return;
+
       try {
-        if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
-          await html5QrcodeRef.current.stop().catch(() => {});
-        }
-
-        const qrScanner = new Html5Qrcode("reader-container");
-        html5QrcodeRef.current = qrScanner;
-
-        const cameraConfig = { facingMode: useFrontCamera ? "user" : "environment" };
-
-        await qrScanner.start(
-          cameraConfig,
-          {
-            fps: 20,
-            qrbox: (width, height) => {
-              const minDim = Math.min(width, height);
-              // Rectangle box fits both 1D Barcodes and 2D QR codes
-              return { width: Math.floor(minDim * 0.85), height: Math.floor(minDim * 0.55) };
-            },
-            experimentalFeatures: {
-              useBarCodeDetectorIfSupported: true
+        const controller = await startUnifiedCameraScanner({
+          containerId: "reader-container",
+          useFrontCamera,
+          onScanSuccess: (rawCode) => {
+            if (active) handleScanSuccess(rawCode);
+          },
+          onError: (errMsg) => {
+            if (active) {
+              setCameraError(errMsg);
+              setIsCameraActive(false);
             }
-          } as any,
-          handleScanSuccess,
-          (errorMessage) => {
-            // Quiet fail for scan frame failures
-          }
-        );
+          },
+          debounceMs: 1200
+        });
 
-        setTimeout(() => {
-          applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true });
-        }, 600);
-
-        // Continuous focus maintenance interval every 4 seconds
-        const focusInterval = setInterval(() => {
-          applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: false });
-        }, 4000);
-
-        return () => {
-          clearInterval(focusInterval);
-        };
+        if (active) {
+          scannerControllerRef.current = controller;
+        } else {
+          controller.stop();
+        }
       } catch (err: any) {
         console.error("Camera startup error:", err);
-        setCameraError(
-          "Camera access standard blocked or unavailable. Ensure camera permission is granted in browser settings or try manual code entry below."
-        );
-        setIsCameraActive(false);
+        if (active) {
+          setCameraError(err.message || "Camera access blocked or unavailable.");
+          setIsCameraActive(false);
+        }
       }
     };
 
     startScanner();
 
     return () => {
-      stopScanner();
+      active = false;
+      if (scannerControllerRef.current) {
+        scannerControllerRef.current.stop();
+        scannerControllerRef.current = null;
+      }
     };
   }, [isCameraActive, isUserStaff, useFrontCamera]);
 
   const stopScanner = () => {
-    if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
-      html5QrcodeRef.current.stop().then(() => {
-        html5QrcodeRef.current = null;
-      }).catch(err => {
-        console.error("Error stopping scanner:", err);
-      });
+    if (scannerControllerRef.current) {
+      scannerControllerRef.current.stop();
+      scannerControllerRef.current = null;
     }
+    setIsCameraActive(false);
   };
 
   // 3. Handle a successfully scanned QR code or Barcode

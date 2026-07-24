@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Html5Qrcode } from 'html5-qrcode';
 import { productService } from '../services/productService';
 import { agentService } from '../services/agentService';
 import { cloudinaryService } from '../services/cloudinaryService';
@@ -15,6 +14,8 @@ import {
   scanBarcodeFromImageFile,
   scanBarcodeFromLiveVideoSnapshot,
   applyCameraTrackConstraints,
+  startUnifiedCameraScanner,
+  ScannerController,
   BarcodeAuditReport 
 } from '../utils/barcode';
 import { 
@@ -54,8 +55,7 @@ export const ProductManagement: React.FC = () => {
   const [formCameraError, setFormCameraError] = useState<string | null>(null);
   const [useFormFrontCamera, setUseFormFrontCamera] = useState(false);
   const [formCameraZoom, setFormCameraZoom] = useState<number>(1.5);
-  const formHtml5QrcodeRef = useRef<Html5Qrcode | null>(null);
-  const isFormScannerStoppingRef = useRef<boolean>(false);
+  const formScannerControllerRef = useRef<ScannerController | null>(null);
 
   const handleLiveLensSnap = async (containerId: string) => {
     setIsPhotoScanning(true);
@@ -129,121 +129,69 @@ export const ProductManagement: React.FC = () => {
   };
 
   const stopFormCameraScanner = async () => {
-    const scanner = formHtml5QrcodeRef.current;
-    if (!scanner) {
-      setIsFormCameraActive(false);
-      return;
+    if (formScannerControllerRef.current) {
+      await formScannerControllerRef.current.stop();
+      formScannerControllerRef.current = null;
     }
-
-    if (isFormScannerStoppingRef.current) return;
-    isFormScannerStoppingRef.current = true;
-
-    try {
-      if (scanner.isScanning) {
-        await scanner.stop().catch(() => {});
-      }
-      scanner.clear();
-    } catch (e) {
-      console.warn("Form camera stop error:", e);
-    } finally {
-      formHtml5QrcodeRef.current = null;
-      isFormScannerStoppingRef.current = false;
-      setIsFormCameraActive(false);
-    }
+    setIsFormCameraActive(false);
   };
 
   useEffect(() => {
-    if (!isFormCameraActive || !editingProduct) return;
+    if (!isFormCameraActive || !editingProduct) {
+      if (formScannerControllerRef.current) {
+        formScannerControllerRef.current.stop();
+        formScannerControllerRef.current = null;
+      }
+      return;
+    }
 
     let isCancelled = false;
-    let localScanner: Html5Qrcode | null = null;
 
     const startScanner = async () => {
       setFormCameraError(null);
 
-      // Wait 100ms for React to mount the DOM container element
-      await new Promise(res => setTimeout(res, 100));
-      if (isCancelled) return;
-
-      const element = document.getElementById("edit-form-barcode-scanner-container");
-      if (!element) return;
-
-      // Safely stop and clear previous scanner instance if present
-      if (formHtml5QrcodeRef.current) {
-        try {
-          if (formHtml5QrcodeRef.current.isScanning) {
-            await formHtml5QrcodeRef.current.stop().catch(() => {});
-          }
-          formHtml5QrcodeRef.current.clear();
-        } catch (e) {
-          // ignore cleanup errors from previous state
-        }
-        formHtml5QrcodeRef.current = null;
+      if (formScannerControllerRef.current) {
+        await formScannerControllerRef.current.stop();
+        formScannerControllerRef.current = null;
       }
 
+      await new Promise(res => setTimeout(res, 80));
       if (isCancelled) return;
 
       try {
-        localScanner = new Html5Qrcode("edit-form-barcode-scanner-container");
-        formHtml5QrcodeRef.current = localScanner;
-
-        const cameraConfig = { facingMode: useFormFrontCamera ? "user" : "environment" };
-
-        await localScanner.start(
-          cameraConfig,
-          {
-            fps: 20,
-            qrbox: (width, height) => {
-              const minDim = Math.min(width, height);
-              return { width: Math.floor(minDim * 0.85), height: Math.floor(minDim * 0.55) };
-            },
-            experimentalFeatures: {
-              useBarCodeDetectorIfSupported: true
-            }
-          } as any,
-          (scannedText) => {
-            if (!scannedText || isCancelled) return;
-            const extracted = extractCodeFromScanText(scannedText);
-            const norm = normalizeBarcode(extracted);
-            if (norm) {
+        const controller = await startUnifiedCameraScanner({
+          containerId: "edit-form-barcode-scanner-container",
+          useFrontCamera: useFormFrontCamera,
+          onScanSuccess: (scannedBc) => {
+            if (isCancelled) return;
+            if (scannedBc) {
               setEditingProduct(prev => prev ? { 
                 ...prev, 
-                barcode: norm, 
-                barcodeNormalized: norm 
+                barcode: scannedBc, 
+                barcodeNormalized: scannedBc 
               } : null);
-              setAlertMsg({ type: 'success', text: `Scanned Barcode: "${norm}" applied to product form!` });
+              setAlertMsg({ type: 'success', text: `Scanned Barcode: "${scannedBc}" applied to product form!` });
               setTimeout(() => setAlertMsg(null), 4000);
               stopFormCameraScanner();
             }
           },
-          () => {}
-        );
+          onError: (errMsg) => {
+            if (isCancelled) return;
+            setFormCameraError(errMsg);
+            setIsFormCameraActive(false);
+          },
+          debounceMs: 1200
+        });
 
-        // Apply hardware track zoom & focus constraints shortly after stream starts
-        setTimeout(() => {
-          if (!isCancelled) {
-            applyCameraTrackConstraints("edit-form-barcode-scanner-container", { zoom: formCameraZoom, triggerFocus: true });
-          }
-        }, 600);
-
-        const focusInterval = setInterval(() => {
-          if (!isCancelled) {
-            applyCameraTrackConstraints("edit-form-barcode-scanner-container", { zoom: formCameraZoom, triggerFocus: false });
-          }
-        }, 4000);
-
-        return () => {
-          clearInterval(focusInterval);
-        };
+        if (isCancelled) {
+          controller.stop();
+        } else {
+          formScannerControllerRef.current = controller;
+        }
       } catch (err: any) {
         if (isCancelled) return;
-        const errStr = String(err?.message || err);
-        if (errStr.includes("already under transition")) {
-          console.warn("Camera transition in progress, skipping start...");
-          return;
-        }
         console.error("Edit form camera startup error:", err);
-        setFormCameraError("Camera permission blocked or unavailable. Ensure camera access is allowed in browser settings.");
+        setFormCameraError(err.message || "Camera permission blocked or unavailable.");
       }
     };
 
@@ -251,20 +199,12 @@ export const ProductManagement: React.FC = () => {
 
     return () => {
       isCancelled = true;
-      if (localScanner) {
-        try {
-          if (localScanner.isScanning) {
-            localScanner.stop().then(() => localScanner?.clear()).catch(() => {});
-          } else {
-            localScanner.clear();
-          }
-        } catch (e) {}
-        if (formHtml5QrcodeRef.current === localScanner) {
-          formHtml5QrcodeRef.current = null;
-        }
+      if (formScannerControllerRef.current) {
+        formScannerControllerRef.current.stop();
+        formScannerControllerRef.current = null;
       }
     };
-  }, [isFormCameraActive, useFormFrontCamera]);
+  }, [isFormCameraActive, editingProduct, useFormFrontCamera]);
 
   // AI automation states
   const [isTranslatingName, setIsTranslatingName] = useState(false);
