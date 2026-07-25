@@ -62,6 +62,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /stock_movements/{movementId} {
+      allow read, write: if true;
+    }
+
     match /product_reviews/{reviewId} {
       allow read, write: if true;
     }

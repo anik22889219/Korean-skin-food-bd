@@ -1,6 +1,31 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { HomeThemeSettings } from '../types/theme';
+import { HomeThemeSettings, GlobalThemeSettings } from '../types/theme';
+
+export const DEFAULT_GLOBAL_THEME: GlobalThemeSettings = {
+  faviconUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDV9JqR2f8TTBJG32wqldTxeJQRLC1xolU3UBXhjlG8xqiFFHmPa8s7VOmDWPNYjyf-t6OqEzaveZ7B4b0qSnfSfsjMLerSO2S0r_L5h7hWtHIb0PQcNOU9xzM5hr44aKCbKYO0mcXsLe818N0R-AA3Zj14exAmZCen73zfHV8MVDMbR9l4MQjyLLTF_Ar2OIbFnMMc-hSVV4yFDshte5KzLe5iLA2SY-A8gSFkM3MlXUpPyZu37-bDXliWJF5e0ujz-d6-bUCf01w',
+  logoUrl: '',
+  logoText: 'Korean Skin Food BD',
+  logoTagline: 'K-BEAUTY COSMECEUTICALS',
+  primaryColor: '#E91E8C',
+  secondaryColor: '#FF62B2',
+  accentColor: '#0F172A',
+  backgroundColor: '#FFF5F8',
+  headingFont: 'Playfair Display',
+  bodyFont: 'Plus Jakarta Sans',
+  siteTitle: 'Korean Skin Food BD',
+  siteTagline: '100% Authentic Korean Cosmeceuticals straight from Seoul',
+  contactPhone: '+880 1700-000000',
+  contactEmail: 'koreanskinfood.bd@gmail.com',
+  currencySymbol: '৳',
+  facebookUrl: 'https://www.facebook.com/Koreanskinfood',
+  instagramUrl: 'https://www.instagram.com/korean_skin_food_2579/',
+  youtubeUrl: 'https://youtube.com',
+  messengerUrl: 'https://m.me/651561268050601',
+  announcementText: '✨ FREE shipping inside Dhaka for orders over ৳2,000! ✨',
+  enableAnnouncement: true,
+  footerText: 'Korean Skin Food BD © 2026. All rights reserved. Premium Korean Cosmeceuticals.',
+};
 
 export const DEFAULT_HOME_THEME: HomeThemeSettings = {
   sectionOrder: [
@@ -223,10 +248,95 @@ export const DEFAULT_HOME_THEME: HomeThemeSettings = {
 };
 
 const STORAGE_KEY = 'ksf_home_theme_settings';
+const GLOBAL_STORAGE_KEY = 'ksf_global_theme_settings';
+
+function loadGoogleFont(fontName: string) {
+  if (!fontName || typeof document === 'undefined') return;
+  const fontId = `google-font-${fontName.replace(/\s+/g, '-').toLowerCase()}`;
+  if (document.getElementById(fontId)) return;
+  const link = document.createElement('link');
+  link.id = fontId;
+  link.rel = 'stylesheet';
+  link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontName)}:wght@300;400;500;600;700;800;900&display=swap`;
+  document.head.appendChild(link);
+}
+
+export function applyGlobalThemeToDOM(globalTheme: GlobalThemeSettings) {
+  if (typeof document === 'undefined') return;
+
+  // 1. Favicon
+  if (globalTheme.faviconUrl) {
+    let faviconElem = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+    if (!faviconElem) {
+      faviconElem = document.createElement('link');
+      faviconElem.rel = 'icon';
+      document.head.appendChild(faviconElem);
+    }
+    faviconElem.href = globalTheme.faviconUrl;
+  }
+
+  // 2. Document Title
+  if (globalTheme.siteTitle) {
+    document.title = globalTheme.siteTagline
+      ? `${globalTheme.siteTitle} | ${globalTheme.siteTagline}`
+      : globalTheme.siteTitle;
+  }
+
+  // 3. Load Google Fonts
+  if (globalTheme.headingFont) {
+    loadGoogleFont(globalTheme.headingFont);
+  }
+  if (globalTheme.bodyFont) {
+    loadGoogleFont(globalTheme.bodyFont);
+  }
+
+  // 4. Inject Dynamic CSS Variables
+  let styleTag = document.getElementById('global-theme-dynamic-styles') as HTMLStyleElement;
+  if (!styleTag) {
+    styleTag = document.createElement('style');
+    styleTag.id = 'global-theme-dynamic-styles';
+    document.head.appendChild(styleTag);
+  }
+
+  const primary = globalTheme.primaryColor || '#E91E8C';
+  const secondary = globalTheme.secondaryColor || '#FF62B2';
+  const accent = globalTheme.accentColor || '#0F172A';
+  const bg = globalTheme.backgroundColor || '#FFF5F8';
+  const headingFont = globalTheme.headingFont || 'Playfair Display';
+  const bodyFont = globalTheme.bodyFont || 'Plus Jakarta Sans';
+
+  styleTag.innerHTML = `
+    :root {
+      --primary-color: ${primary};
+      --secondary-color: ${secondary};
+      --accent-color: ${accent};
+      --bg-color: ${bg};
+      --font-heading: '${headingFont}', serif;
+      --font-body: '${bodyFont}', sans-serif;
+    }
+    body {
+      font-family: var(--font-body) !important;
+    }
+    h1, h2, h3, h4, .font-serif {
+      font-family: var(--font-heading) !important;
+    }
+    .theme-primary-bg {
+      background-color: ${primary} !important;
+    }
+    .theme-primary-text {
+      color: ${primary} !important;
+    }
+    .theme-primary-border {
+      border-color: ${primary} !important;
+    }
+  `;
+}
 
 class ThemeService {
   private currentTheme: HomeThemeSettings = DEFAULT_HOME_THEME;
+  private currentGlobalTheme: GlobalThemeSettings = DEFAULT_GLOBAL_THEME;
   private listeners: ((theme: HomeThemeSettings) => void)[] = [];
+  private globalListeners: ((globalTheme: GlobalThemeSettings) => void)[] = [];
 
   constructor() {
     this.init();
@@ -260,7 +370,7 @@ class ThemeService {
   }
 
   private init() {
-    // 1. Try loading cached local theme
+    // 1. Try loading cached local home theme
     try {
       const cached = localStorage.getItem(STORAGE_KEY);
       if (cached) {
@@ -269,10 +379,23 @@ class ThemeService {
         this.currentTheme = this.sanitizeTheme(DEFAULT_HOME_THEME);
       }
     } catch (err) {
-      console.warn('[ThemeService] LocalStorage load error:', err);
+      console.warn('[ThemeService] LocalStorage home load error:', err);
     }
 
-    // 2. Subscribe to Firestore real-time updates for site_settings/theme_home
+    // 2. Try loading cached local global theme
+    try {
+      const cachedGlobal = localStorage.getItem(GLOBAL_STORAGE_KEY);
+      if (cachedGlobal) {
+        this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME, ...JSON.parse(cachedGlobal) };
+      } else {
+        this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME };
+      }
+      applyGlobalThemeToDOM(this.currentGlobalTheme);
+    } catch (err) {
+      console.warn('[ThemeService] LocalStorage global load error:', err);
+    }
+
+    // 3. Subscribe to Firestore real-time updates for site_settings/theme_home
     try {
       const docRef = doc(db, 'site_settings', 'theme_home');
       onSnapshot(
@@ -290,12 +413,38 @@ class ThemeService {
         }
       );
     } catch (err) {
-      console.warn('[ThemeService] Firestore listener init warning:', err);
+      console.warn('[ThemeService] Firestore home listener init warning:', err);
+    }
+
+    // 4. Subscribe to Firestore real-time updates for site_settings/theme_global
+    try {
+      const globalDocRef = doc(db, 'site_settings', 'theme_global');
+      onSnapshot(
+        globalDocRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data() as GlobalThemeSettings;
+            this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME, ...data };
+            localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(this.currentGlobalTheme));
+            applyGlobalThemeToDOM(this.currentGlobalTheme);
+            this.notifyGlobalListeners();
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'site_settings/theme_global', false);
+        }
+      );
+    } catch (err) {
+      console.warn('[ThemeService] Firestore global listener init warning:', err);
     }
   }
 
   public getHomeTheme(): HomeThemeSettings {
     return this.currentTheme;
+  }
+
+  public getGlobalTheme(): GlobalThemeSettings {
+    return this.currentGlobalTheme;
   }
 
   public async saveHomeTheme(settings: HomeThemeSettings): Promise<void> {
@@ -315,8 +464,30 @@ class ThemeService {
     }
   }
 
+  public async saveGlobalTheme(settings: GlobalThemeSettings): Promise<void> {
+    const updated: GlobalThemeSettings = {
+      ...settings,
+      updatedAt: new Date().toISOString()
+    };
+    this.currentGlobalTheme = updated;
+    localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(updated));
+    applyGlobalThemeToDOM(updated);
+    this.notifyGlobalListeners();
+
+    try {
+      const docRef = doc(db, 'site_settings', 'theme_global');
+      await setDoc(docRef, updated, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'site_settings/theme_global', false);
+    }
+  }
+
   public async resetToDefault(): Promise<void> {
     await this.saveHomeTheme(DEFAULT_HOME_THEME);
+  }
+
+  public async resetGlobalToDefault(): Promise<void> {
+    await this.saveGlobalTheme(DEFAULT_GLOBAL_THEME);
   }
 
   public subscribe(listener: (theme: HomeThemeSettings) => void): () => void {
@@ -327,8 +498,20 @@ class ThemeService {
     };
   }
 
+  public subscribeGlobal(listener: (globalTheme: GlobalThemeSettings) => void): () => void {
+    this.globalListeners.push(listener);
+    listener(this.currentGlobalTheme);
+    return () => {
+      this.globalListeners = this.globalListeners.filter((l) => l !== listener);
+    };
+  }
+
   private notifyListeners() {
     this.listeners.forEach((l) => l(this.currentTheme));
+  }
+
+  private notifyGlobalListeners() {
+    this.globalListeners.forEach((l) => l(this.currentGlobalTheme));
   }
 }
 

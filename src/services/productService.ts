@@ -1,4 +1,4 @@
-import { Product, InventoryLog } from '../types';
+import { Product, InventoryLog, StockMovement } from '../types';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
@@ -10,6 +10,20 @@ let productsCache: Product[] = INITIAL_PRODUCTS.map(p => ({
   barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode)
 }));
 let inventoryLogsCache: InventoryLog[] = [];
+let stockMovementsCache: StockMovement[] = [];
+
+// Subscribers for real-time UI synchronization
+const subscribers = new Set<(products: Product[]) => void>();
+
+function notifySubscribers() {
+  subscribers.forEach(cb => {
+    try {
+      cb(productsCache);
+    } catch (e) {
+      console.error('[ProductService] Subscriber error:', e);
+    }
+  });
+}
 
 // Seed database with full inventory catalog if not already populated
 let isSeedingDone = false;
@@ -40,24 +54,21 @@ async function seedInitialProductsIfMissing(existingDocsCount: number) {
 // Subscribe to real-time changes in products
 onSnapshot(collection(db, 'products'), (snapshot) => {
   const prods: Product[] = [];
-  snapshot.forEach((doc) => {
-    const data = doc.data() as Product;
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data() as Product;
     prods.push({
       ...data,
+      id: docSnap.id || data.id,
       barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode)
     });
   });
 
-  seedInitialProductsIfMissing(prods.length);
-
-  if (prods.length > 0) {
-    // Merge existing local cache with remote Firestore data to ensure complete set
-    const map = new Map<string, Product>();
-    INITIAL_PRODUCTS.forEach(p => {
-      map.set(p.id, { ...p, barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode) });
-    });
-    prods.forEach(p => map.set(p.id, p));
-    productsCache = Array.from(map.values());
+  if (snapshot.empty && !isSeedingDone) {
+    seedInitialProductsIfMissing(0);
+  } else {
+    isSeedingDone = true;
+    productsCache = prods;
+    notifySubscribers();
   }
 }, (err) => {
   console.warn('[Firebase] products onSnapshot warning:', err);
@@ -80,13 +91,33 @@ onSnapshot(query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc'))
   }
 });
 
+// Subscribe to real-time changes in stock movements
+onSnapshot(query(collection(db, 'stock_movements'), orderBy('createdAt', 'desc')), (snapshot) => {
+  const movements: StockMovement[] = [];
+  snapshot.forEach((docSnap) => {
+    movements.push(docSnap.data() as StockMovement);
+  });
+  stockMovementsCache = movements;
+}, (err) => {
+  console.warn('[Firebase] stock_movements onSnapshot warning:', err);
+});
+
 export const productService = {
   getProducts(): Product[] {
     return productsCache;
   },
 
+  subscribe(callback: (products: Product[]) => void): () => void {
+    subscribers.add(callback);
+    callback(productsCache);
+    return () => {
+      subscribers.delete(callback);
+    };
+  },
+
   async saveProducts(products: Product[]) {
     productsCache = products;
+    notifySubscribers();
     const BATCH_SIZE = 40;
     for (let i = 0; i < products.length; i += BATCH_SIZE) {
       const chunk = products.slice(i, i + BATCH_SIZE);
@@ -114,12 +145,24 @@ export const productService = {
     // Update local cache synchronously
     productsCache = productsCache.filter(p => p.id !== product.id);
     productsCache.push(newProduct);
+    notifySubscribers();
 
     // Save to Firestore asynchronously
     setDoc(doc(db, 'products', product.id), newProduct).catch(console.error);
     
     // log inventory creation
     this.logInventory(product.id, 'stock_in', product.stock, 0, product.stock, 'Initial creation');
+    this.logStockMovement({
+      productId: product.id,
+      productName: product.name,
+      quantity: product.stock,
+      type: 'stock_in',
+      source: 'MANUAL',
+      performedBy: 'Staff Member',
+      previousStock: 0,
+      newStock: product.stock,
+      reason: 'Initial catalog registration'
+    });
     
     return newProduct;
   },
@@ -131,30 +174,99 @@ export const productService = {
     
     // Update local cache synchronously
     productsCache = productsCache.map(p => p.id === product.id ? updatedProduct : p);
+    notifySubscribers();
 
     // Save to Firestore asynchronously
     setDoc(doc(db, 'products', product.id), updatedProduct).catch(console.error);
 
     if (oldProduct && oldProduct.stock !== product.stock) {
+      const diff = product.stock - oldProduct.stock;
       this.logInventory(
         product.id,
         'adjustment',
-        Math.abs(product.stock - oldProduct.stock),
+        Math.abs(diff),
         oldProduct.stock,
         product.stock,
         'Manual dashboard adjustment'
       );
+      this.logStockMovement({
+        productId: product.id,
+        productName: product.name,
+        quantity: diff,
+        type: 'adjustment',
+        source: 'MANUAL',
+        performedBy: 'Staff Member',
+        previousStock: oldProduct.stock,
+        newStock: product.stock,
+        reason: 'Manual inventory adjustment'
+      });
     }
     return product;
   },
 
-  deleteProduct(id: string) {
+  async deleteProduct(id: string): Promise<boolean> {
     productsCache = productsCache.filter(p => p.id !== id);
-    deleteDoc(doc(db, 'products', id)).catch(console.error);
+    notifySubscribers();
+    try {
+      await deleteDoc(doc(db, 'products', id));
+      return true;
+    } catch (err: any) {
+      console.error("Failed to delete product from Firestore:", err);
+      if (err?.code === 'permission-denied' || err?.message?.includes('permission') || err?.message?.includes('Permission')) {
+        handleFirestoreError(err, OperationType.DELETE, `products/${id}`, false);
+      }
+      return false;
+    }
   },
 
   getInventoryLogs(): InventoryLog[] {
     return inventoryLogsCache;
+  },
+
+  getStockMovements(): StockMovement[] {
+    return stockMovementsCache;
+  },
+
+  logStockMovement(movement: Omit<StockMovement, 'id' | 'createdAt'>): StockMovement {
+    const id = 'sm-' + Math.random().toString(36).substring(2, 11);
+    const newMovement: StockMovement = {
+      ...movement,
+      id,
+      createdAt: new Date().toISOString()
+    };
+    stockMovementsCache = [newMovement, ...stockMovementsCache];
+    setDoc(doc(db, 'stock_movements', id), newMovement).catch(console.error);
+    return newMovement;
+  },
+
+  restockProduct(productId: string, addQuantity: number, reason: string = 'Manual Restock', performedBy: string = 'Staff Member'): { success: boolean; message: string; newStock?: number } {
+    const prod = this.getProductById(productId);
+    if (!prod) {
+      return { success: false, message: 'Product not found' };
+    }
+    if (addQuantity <= 0) {
+      return { success: false, message: 'Restock quantity must be greater than zero' };
+    }
+
+    const prevStock = prod.stock;
+    const newStock = prevStock + addQuantity;
+    const updatedProduct = { ...prod, stock: newStock };
+    this.updateProduct(updatedProduct);
+
+    this.logInventory(productId, 'stock_in', addQuantity, prevStock, newStock, reason);
+    this.logStockMovement({
+      productId,
+      productName: prod.name,
+      quantity: addQuantity,
+      type: 'restock',
+      source: 'MANUAL',
+      performedBy,
+      previousStock: prevStock,
+      newStock,
+      reason
+    });
+
+    return { success: true, message: `Successfully restocked ${addQuantity} units of ${prod.name}. New stock: ${newStock}`, newStock };
   },
 
   logInventory(

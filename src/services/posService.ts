@@ -2,6 +2,7 @@ import { PosSession, Order, Product } from '../types';
 import { productService } from './productService';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { collection, onSnapshot, doc, setDoc, query, orderBy, addDoc, getDocs } from 'firebase/firestore';
+import { findProductByScannedCode } from '../utils/barcode';
 
 const DEFAULT_ORDERS: Order[] = [
   {
@@ -11,11 +12,13 @@ const DEFAULT_ORDERS: Order[] = [
     customerEmail: 'koreanskinfood.bd@gmail.com',
     address: 'House 42, Road 11, Banani, Dhaka',
     items: [
-      { productId: 'cosrx-snail-96', name: 'COSRX Advanced Snail 96 Mucin Power Essence', price: 1850, quantity: 1 },
-      { productId: 'boj-sunscreen-rice', name: 'Beauty of Joseon Relief Sun : Rice + Probiotics SPF50+', price: 1650, quantity: 1 }
+      { productId: 'cosrx-snail-96', name: 'COSRX Advanced Snail 96 Mucin Power Essence', price: 1850, quantity: 1, scannedQuantity: 0, barcode: '8809598450123' },
+      { productId: 'boj-sunscreen-rice', name: 'Beauty of Joseon Relief Sun : Rice + Probiotics SPF50+', price: 1650, quantity: 1, scannedQuantity: 0, barcode: '8809530040101' }
     ],
     totalAmount: 3500,
     status: 'pending',
+    order_source: 'WEBSITE',
+    stock_deducted: false,
     createdAt: new Date(Date.now() - 4 * 3600000).toISOString(),
     paymentMethod: 'COD',
     sessionType: 'Online',
@@ -28,13 +31,32 @@ const DEFAULT_ORDERS: Order[] = [
     customerEmail: 'koreanskinfood.bd@gmail.com',
     address: 'Sector 4, Uttara, Dhaka',
     items: [
-      { productId: 'cosrx-cleanser-goodmorning', name: 'COSRX Low pH Good Morning Gel Cleanser', price: 1050, quantity: 2 }
+      { productId: 'cosrx-cleanser-goodmorning', name: 'COSRX Low pH Good Morning Gel Cleanser', price: 1050, quantity: 2, scannedQuantity: 2, barcode: '880980010101' }
     ],
     totalAmount: 2100,
     status: 'delivered',
+    order_source: 'WEBSITE',
+    stock_deducted: true,
     createdAt: new Date(Date.now() - 24 * 3600000).toISOString(),
     paymentMethod: 'COD',
     sessionType: 'Online',
+    isPaid: true
+  },
+  {
+    id: 'POS-774012',
+    customerName: 'Walk-In Customer',
+    customerPhone: 'Walk-In',
+    address: 'In-Store Checkout',
+    items: [
+      { productId: 'skin1004-[#E91E8C]-ampoule', name: 'SKIN1004 Madagascar Centella Ampoule', price: 1650, quantity: 1, scannedQuantity: 1, barcode: '8809530040101' }
+    ],
+    totalAmount: 1650,
+    status: 'delivered',
+    order_source: 'POS',
+    stock_deducted: true,
+    createdAt: new Date(Date.now() - 2 * 3600000).toISOString(),
+    paymentMethod: 'POS_In_Person',
+    sessionType: 'POS',
     isPaid: true
   }
 ];
@@ -66,8 +88,18 @@ onSnapshot(query(collection(db, 'draft_orders'), orderBy('createdAt', 'desc')), 
 
 onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snapshot) => {
   const ords: Order[] = [];
-  snapshot.forEach((doc) => {
-    ords.push(doc.data() as Order);
+  snapshot.forEach((docSnap) => {
+    const raw = docSnap.data() as Order;
+    const normOrder: Order = {
+      ...raw,
+      order_source: raw.order_source || (raw.sessionType === 'POS' ? 'POS' : 'WEBSITE'),
+      stock_deducted: raw.stock_deducted ?? (raw.status === 'delivered' || raw.status === 'processing' || raw.status === 'shipped'),
+      items: (raw.items || []).map(item => ({
+        ...item,
+        scannedQuantity: item.scannedQuantity ?? (raw.status === 'delivered' ? item.quantity : 0)
+      }))
+    };
+    ords.push(normOrder);
   });
   if (ords.length > 0) {
     ordersCache = ords;
@@ -292,7 +324,7 @@ export const posService = {
       }
     }
 
-    // Decrement stock & log inventory
+    // Decrement stock & log inventory & stock movement
     for (const item of sessionItems) {
       const prod = products.find(p => p.id === item.productId)!;
       const prevStock = prod.stock;
@@ -307,6 +339,17 @@ export const posService = {
         prod.stock,
         `POS Sale - Session ${session.id}`
       );
+      productService.logStockMovement({
+        productId: prod.id,
+        productName: prod.name,
+        quantity: -item.quantity,
+        type: 'sale',
+        source: 'POS',
+        performedBy: 'POS Register Operator',
+        previousStock: prevStock,
+        newStock: prod.stock,
+        reason: `POS Sale - Register Checkout`
+      });
     }
 
     // Create Order
@@ -317,9 +360,14 @@ export const posService = {
       customerName: customerName || 'In-Person Customer',
       customerPhone: customerPhone || 'Walk-In',
       address: 'In-Store Checkout',
-      items: sessionItems,
+      items: sessionItems.map(item => ({
+        ...item,
+        scannedQuantity: item.quantity
+      })),
       totalAmount,
       status: 'delivered',
+      order_source: 'POS',
+      stock_deducted: true,
       createdAt: new Date().toISOString(),
       paymentMethod: 'POS_In_Person',
       sessionType: 'POS',
@@ -347,42 +395,285 @@ export const posService = {
     return draftOrdersCache;
   },
 
-  createOnlineOrder(order: Omit<Order, 'id' | 'createdAt' | 'status' | 'isPaid' | 'sessionType'>): Order {
+  createOnlineOrder(order: Omit<Order, 'id' | 'createdAt' | 'status' | 'isPaid' | 'sessionType' | 'order_source' | 'stock_deducted'>): Order {
     const orderId = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
+    const formattedItems = (order.items || []).map(item => {
+      const prod = productService.getProductById(item.productId);
+      return {
+        ...item,
+        scannedQuantity: 0,
+        barcode: item.barcode || (prod ? prod.barcode : '')
+      };
+    });
+
     const newOrder: Order = {
       ...order,
+      items: formattedItems,
       id: orderId,
       createdAt: new Date().toISOString(),
       status: 'pending',
+      order_source: 'WEBSITE',
+      stock_deducted: false,
       sessionType: 'Online',
       isPaid: false
     };
 
-    // Decrement stock for online orders
-    const products = productService.getProducts();
-    for (const item of order.items) {
-      const prod = products.find(p => p.id === item.productId);
-      if (prod) {
-        const prevStock = prod.stock;
-        prod.stock = Math.max(0, prod.stock - item.quantity);
-        productService.updateProduct(prod);
-        
-        productService.logInventory(
-          prod.id,
-          'sale',
-          item.quantity,
-          prevStock,
-          prod.stock,
-          `Online Order - ${newOrder.id}`
-        );
-      }
-    }
+    // Note: Stock is NOT deducted on online order creation.
+    // Stock is only deducted when staff scans and confirms fulfillment in Admin Order Management.
 
     // Update cache and Firestore
     ordersCache = [newOrder, ...ordersCache];
     setDoc(doc(db, 'orders', orderId), newOrder).catch(console.error);
 
     return newOrder;
+  },
+
+  startFulfillment(orderId: string): { success: boolean; message: string; order?: Order } {
+    const idx = ordersCache.findIndex(o => o.id === orderId);
+    if (idx === -1) {
+      return { success: false, message: 'Order not found' };
+    }
+    const order = { ...ordersCache[idx] };
+    if (order.status !== 'pending' && order.status !== 'packing') {
+      return { success: false, message: `Cannot start fulfillment for order with status "${order.status}".` };
+    }
+
+    order.status = 'packing';
+    // Ensure all items have scannedQuantity initialized
+    order.items = order.items.map(item => ({
+      ...item,
+      scannedQuantity: item.scannedQuantity || 0
+    }));
+
+    ordersCache[idx] = order;
+    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+
+    return { success: true, message: 'Fulfillment started! Order status updated to PACKING.', order };
+  },
+
+  verifyItemScan(orderId: string, scannedCode: string): {
+    success: boolean;
+    message: string;
+    order?: Order;
+    matchedProduct?: Product;
+    isComplete?: boolean;
+  } {
+    const idx = ordersCache.findIndex(o => o.id === orderId);
+    if (idx === -1) {
+      return { success: false, message: 'Order not found' };
+    }
+
+    const order = { ...ordersCache[idx] };
+    const products = productService.getProducts();
+    const searchResult = findProductByScannedCode(products, scannedCode);
+    const matchedProd = searchResult.product;
+
+    if (!matchedProd) {
+      return {
+        success: false,
+        message: `This product is not included in this order. (Unrecognized code: "${scannedCode}")`,
+        order
+      };
+    }
+
+    // Find item in order by productId or normalized barcode
+    const itemIndex = order.items.findIndex(item => {
+      if (item.productId === matchedProd.id) return true;
+      if (item.barcode && matchedProd.barcode && item.barcode.trim() === matchedProd.barcode.trim()) return true;
+      const itemProd = productService.getProductById(item.productId);
+      if (itemProd && itemProd.barcodeNormalized && matchedProd.barcodeNormalized && itemProd.barcodeNormalized === matchedProd.barcodeNormalized) return true;
+      return false;
+    });
+
+    if (itemIndex === -1) {
+      return {
+        success: false,
+        message: 'This product is not included in this order.',
+        order,
+        matchedProduct: matchedProd
+      };
+    }
+
+    const item = { ...order.items[itemIndex] };
+    const currentScanned = item.scannedQuantity || 0;
+
+    if (currentScanned >= item.quantity) {
+      return {
+        success: false,
+        message: 'Required quantity already scanned.',
+        order,
+        matchedProduct: matchedProd
+      };
+    }
+
+    // Increment scanned quantity
+    item.scannedQuantity = currentScanned + 1;
+    order.items = order.items.map((it, i) => i === itemIndex ? item : it);
+
+    // Check if entire order is fully verified
+    const isComplete = order.items.every(it => (it.scannedQuantity || 0) === it.quantity);
+
+    ordersCache[idx] = order;
+    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+
+    return {
+      success: true,
+      message: `Verified: ${item.name} (${item.scannedQuantity}/${item.quantity})`,
+      order,
+      matchedProduct: matchedProd,
+      isComplete
+    };
+  },
+
+  confirmOrderFulfillment(orderId: string, staffName: string = 'Admin Staff'): { success: boolean; message: string; order?: Order } {
+    const idx = ordersCache.findIndex(o => o.id === orderId);
+    if (idx === -1) {
+      return { success: false, message: 'Order not found' };
+    }
+
+    const order = { ...ordersCache[idx] };
+
+    // Strict safety check 1: Duplicate stock deduction prevention
+    if (order.stock_deducted) {
+      return { success: false, message: 'Stock has already been deducted for this order. Duplicate deduction prevented.' };
+    }
+
+    // Strict safety check 2: All items must be fully scanned
+    const incompleteItem = order.items.find(item => (item.scannedQuantity || 0) < item.quantity);
+    if (incompleteItem) {
+      return {
+        success: false,
+        message: `Cannot confirm fulfillment. Product "${incompleteItem.name}" requires ${incompleteItem.quantity} scanned units, but only ${incompleteItem.scannedQuantity || 0} scanned.`
+      };
+    }
+
+    // Strict safety check 3: Database stock availability re-verification
+    const products = productService.getProducts();
+    for (const item of order.items) {
+      const prod = products.find(p => p.id === item.productId);
+      if (!prod) {
+        return { success: false, message: `Product "${item.name}" not found in inventory catalog.` };
+      }
+      if (prod.stock < item.quantity) {
+        return {
+          success: false,
+          message: `Insufficient stock for "${prod.name}". Available in stock: ${prod.stock}, Required: ${item.quantity}. Fulfillment blocked.`
+        };
+      }
+    }
+
+    // All checks passed! Deduct stock atomically and log movements
+    for (const item of order.items) {
+      const prod = products.find(p => p.id === item.productId)!;
+      const prevStock = prod.stock;
+      prod.stock -= item.quantity;
+      productService.updateProduct(prod);
+
+      productService.logInventory(
+        prod.id,
+        'sale',
+        item.quantity,
+        prevStock,
+        prod.stock,
+        `Website Order Fulfillment - Order #${order.id}`
+      );
+
+      productService.logStockMovement({
+        productId: prod.id,
+        productName: prod.name,
+        orderId: order.id,
+        quantity: -item.quantity,
+        type: 'sale',
+        source: 'WEBSITE',
+        performedBy: staffName,
+        previousStock: prevStock,
+        newStock: prod.stock,
+        reason: `Website Order Verification & Fulfillment`
+      });
+    }
+
+    // Mark order as fulfilled & stock deducted
+    order.stock_deducted = true;
+    order.status = 'delivered';
+    order.isPaid = true;
+
+    ordersCache[idx] = order;
+    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+
+    return {
+      success: true,
+      message: `Order #${order.id} verified and fulfilled successfully! Stock deducted and logged.`,
+      order
+    };
+  },
+
+  cancelOrder(orderId: string, reason: string = 'Cancelled by Staff', staffName: string = 'Admin Staff'): { success: boolean; message: string; order?: Order } {
+    const idx = ordersCache.findIndex(o => o.id === orderId);
+    if (idx === -1) {
+      return { success: false, message: 'Order not found' };
+    }
+
+    const order = { ...ordersCache[idx] };
+
+    if (order.status === 'cancelled') {
+      return { success: false, message: 'Order is already cancelled.' };
+    }
+
+    // Check if stock was previously deducted
+    if (order.stock_deducted) {
+      // Prevent duplicate stock restoration
+      if (order.stock_restored) {
+        return { success: false, message: 'Stock for this order was already restored previously. Duplicate restoration prevented.' };
+      }
+
+      // Restore stock for all items
+      const products = productService.getProducts();
+      for (const item of order.items) {
+        const prod = products.find(p => p.id === item.productId);
+        if (prod) {
+          const prevStock = prod.stock;
+          prod.stock += item.quantity;
+          productService.updateProduct(prod);
+
+          productService.logInventory(
+            prod.id,
+            'stock_in',
+            item.quantity,
+            prevStock,
+            prod.stock,
+            `Cancelled Order Return - #${order.id} (${reason})`
+          );
+
+          productService.logStockMovement({
+            productId: prod.id,
+            productName: prod.name,
+            orderId: order.id,
+            quantity: item.quantity,
+            type: 'return',
+            source: order.order_source || 'WEBSITE',
+            performedBy: staffName,
+            previousStock: prevStock,
+            newStock: prod.stock,
+            reason: `Order Cancelled Return - ${reason}`
+          });
+        }
+      }
+
+      order.stock_deducted = false;
+      order.stock_restored = true;
+    }
+
+    order.status = 'cancelled';
+    ordersCache[idx] = order;
+    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+
+    return {
+      success: true,
+      message: order.stock_restored
+        ? `Order #${order.id} cancelled. Stock restored to inventory.`
+        : `Order #${order.id} cancelled. Stock was not deducted previously.`,
+      order
+    };
   },
 
   updateOrderStatus(orderId: string, status: Order['status']): Order | undefined {

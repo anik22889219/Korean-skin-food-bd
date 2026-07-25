@@ -1,21 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { themeService } from '../services/themeService';
 import { HomeThemeSettings, SectionKey, ReelItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { useNavigate, Link } from 'react-router-dom';
+import { KOREAN_BRANDS } from '../data/brands';
 import { 
   ShoppingBag, Search, SlidersHorizontal, CheckCircle, X,
   Globe, Store, Zap, ShieldCheck, FileText, ChevronRight, ChevronLeft,
   ArrowRight, Play, Pause, Star, Sparkles, MapPin, Package, Truck,
   Award, Heart, RefreshCw, Send, Volume2, VolumeX, ExternalLink,
-  Eye, Share2, Clock, Calendar
+  Eye, Share2, Clock, Calendar, Filter, Tag
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
 
-const CATEGORIES = ['All', 'Cleanser', 'Toner', 'Serum & Essence', 'Moisturizer', 'Sunscreen', 'Lip Care'];
+const CATEGORIES = [
+  'All', 
+  'Cleanser', 
+  'Toner', 
+  'Serum & Essence', 
+  'Cream & Moisturizer', 
+  'Sunscreen', 
+  'Lip Care', 
+  'Eye Care', 
+  'Mask & Pack', 
+  'Exfoliator', 
+  'Body & Hair Care', 
+  'Oral Care', 
+  'Supplements', 
+  'Spot Treatment',
+  'Makeup & Tone-Up'
+];
 const SKIN_TYPES = ['All', 'Oily', 'Dry', 'Sensitive', 'Combination', 'Acne-Prone'];
 
 export const StoreCatalog: React.FC = () => {
@@ -27,7 +44,39 @@ export const StoreCatalog: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedBrand, setSelectedBrand] = useState('All');
   const [selectedSkinType, setSelectedSkinType] = useState('All');
+  const [brandSearchTerm, setBrandSearchTerm] = useState('');
+  const [isBrandDrawerOpen, setIsBrandDrawerOpen] = useState(false);
+
+  // Available brands list combining static catalog & active store products
+  const availableBrands = useMemo(() => {
+    const brandSet = new Set<string>();
+    KOREAN_BRANDS.forEach(b => brandSet.add(b));
+    products.forEach(p => {
+      if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
+    });
+    return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  // Product counts per brand for badges
+  const brandProductCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    products.forEach(p => {
+      if (p.brand) {
+        const key = p.brand.trim().toLowerCase();
+        counts[key] = (counts[key] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [products]);
+
+  // Filtered brands for brand modal/search
+  const filteredBrandList = useMemo(() => {
+    if (!brandSearchTerm.trim()) return availableBrands;
+    const term = brandSearchTerm.trim().toLowerCase();
+    return availableBrands.filter(b => b.toLowerCase().includes(term));
+  }, [availableBrands, brandSearchTerm]);
 
   // Shipping calculator state
   const [calcWeight, setCalcWeight] = useState<number | ''>(1);
@@ -49,7 +98,13 @@ export const StoreCatalog: React.FC = () => {
       setTheme(data);
     });
     setProducts(productService.getProducts());
-    return () => unsubscribeTheme();
+    const unsubscribeProducts = productService.subscribe((prods) => {
+      setProducts([...prods]);
+    });
+    return () => {
+      unsubscribeTheme();
+      unsubscribeProducts();
+    };
   }, []);
 
   // Community Live Auto Slide Timer
@@ -76,14 +131,30 @@ export const StoreCatalog: React.FC = () => {
     return () => clearInterval(timer);
   }, [sjAutoPlay, sjIsHovered, theme.sharedJourney?.photos?.length]);
 
-  // Filter products based on search and selected filters
-  const filteredProducts = products.filter((p) => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.brand.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
-    const matchesSkinType = selectedSkinType === 'All' || p.skinTypes.includes(selectedSkinType);
-    return matchesSearch && matchesCategory && matchesSkinType;
-  });
+  // Filter products based on search and selected brand, category, and skin type
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return products.filter((p) => {
+      const matchesSearch = !q || 
+        (p.name && p.name.toLowerCase().includes(q)) || 
+        (p.nameBN && p.nameBN.toLowerCase().includes(q)) || 
+        (p.brand && p.brand.toLowerCase().includes(q)) ||
+        (p.category && p.category.toLowerCase().includes(q)) ||
+        (p.description && p.description.toLowerCase().includes(q)) ||
+        (p.barcode && p.barcode.includes(q));
+
+      const matchesCategory = selectedCategory === 'All' || 
+        (p.category && p.category.toLowerCase() === selectedCategory.toLowerCase());
+
+      const matchesBrand = selectedBrand === 'All' || 
+        (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+
+      const matchesSkinType = selectedSkinType === 'All' || 
+        (p.skinTypes && p.skinTypes.some(s => s.toLowerCase() === selectedSkinType.toLowerCase()));
+
+      return matchesSearch && matchesCategory && matchesBrand && matchesSkinType;
+    });
+  }, [products, searchQuery, selectedCategory, selectedBrand, selectedSkinType]);
 
   const handleCalculateShipping = (e: React.FormEvent) => {
     e.preventDefault();
@@ -397,9 +468,35 @@ export const StoreCatalog: React.FC = () => {
     const vf = theme.validatedFormulations;
     if (!vf || !vf.enabled) return null;
 
+    const hasActiveFilters = searchQuery.trim() || selectedCategory !== 'All' || selectedBrand !== 'All' || selectedSkinType !== 'All';
+
+    const clearAllFilters = () => {
+      setSearchQuery('');
+      setSelectedCategory('All');
+      setSelectedBrand('All');
+      setSelectedSkinType('All');
+      setBrandSearchTerm('');
+    };
+
+    const POPULAR_BRANDS_SHORTCUTS = [
+      'All',
+      'Anua',
+      'COSRX',
+      'SKIN1004',
+      'Beauty of Joseon',
+      'Atomy',
+      'Medicube',
+      'Care:Nel',
+      'MISSHA',
+      'AXIS-Y',
+      'iUNIK',
+      '3W Clinic',
+      'SOME BY MI'
+    ];
+
     return (
       <div key="validatedFormulations" className="space-y-6">
-        <div className="flex justify-between items-end border-b border-pink-100 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-pink-100 pb-3">
           <div>
             <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
               {vf.subtitle}
@@ -408,74 +505,328 @@ export const StoreCatalog: React.FC = () => {
               {vf.title}
             </h2>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-500 bg-pink-50 px-3 py-1 rounded-full border border-pink-100">
+              {filteredProducts.length} {filteredProducts.length === 1 ? 'Product' : 'Products'} Found
+            </span>
+          </div>
         </div>
 
-        {/* Catalog Search & Filter Controls */}
-        <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
-          <div className="relative w-full md:w-80">
-            <Search size={16} className="absolute left-3 top-2.5 text-pink-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search K-beauty catalog..."
-              className="w-full bg-pink-50/10 border border-pink-100 rounded-xl pl-9 pr-3 py-2 text-xs outline-none focus:border-[#E91E8C]"
-            />
-          </div>
+        {/* Main Catalog Search & Filter Controls Bar */}
+        <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            
+            {/* Search Input */}
+            <div className="relative md:col-span-4">
+              <Search size={16} className="absolute left-3 top-2.5 text-pink-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by product name, brand, barcode..."
+                className="w-full bg-pink-50/10 border border-pink-100 rounded-xl pl-9 pr-8 py-2 text-xs outline-none focus:border-[#E91E8C]"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-2.5 text-gray-400 hover:text-pink-600"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
 
-          <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
-            {CATEGORIES.slice(0, 5).map((cat) => (
+            {/* Category Filter Select */}
+            <div className="md:col-span-3 flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-gray-500 whitespace-nowrap">Category:</span>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full bg-pink-50/20 border border-pink-100 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#E91E8C] cursor-pointer"
+              >
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat === 'All' ? 'All Categories' : cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Brand Filter Selector Button */}
+            <div className="md:col-span-3 flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-gray-500 whitespace-nowrap">Brand:</span>
               <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold transition cursor-pointer ${
-                  selectedCategory === cat ? 'bg-[#E91E8C] text-white' : 'bg-pink-50/30 text-gray-700 hover:text-[#E91E8C]'
+                type="button"
+                onClick={() => setIsBrandDrawerOpen(!isBrandDrawerOpen)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                  selectedBrand !== 'All'
+                    ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
+                    : 'bg-pink-50/20 text-slate-800 border-pink-100 hover:border-pink-300'
                 }`}
               >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Products Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {filteredProducts.map((prod) => (
-            <div
-              key={prod.id}
-              className="bg-white rounded-2xl border border-pink-100 overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-md transition p-3 space-y-2 group"
-            >
-              <div
-                className="aspect-square bg-pink-50/20 rounded-xl overflow-hidden cursor-pointer"
-                onClick={() => navigate(`/product/${prod.id}`)}
-              >
-                <img
-                  src={prod.image}
-                  alt={prod.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-              <div>
-                <span className="text-[8px] font-extrabold text-[#E91E8C] uppercase">{prod.brand}</span>
-                <h4
-                  onClick={() => navigate(`/product/${prod.id}`)}
-                  className="text-xs font-bold text-slate-900 line-clamp-1 cursor-pointer hover:text-[#E91E8C]"
-                >
-                  {prod.name}
-                </h4>
-                <span className="text-xs font-black text-slate-900 font-mono mt-1 block">৳{prod.price}</span>
-              </div>
-              <button
-                onClick={() => addToCart(prod)}
-                className="w-full py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-              >
-                <ShoppingBag size={11} />
-                <span>{vf.buttonText || 'Shop Now'}</span>
+                <div className="flex items-center gap-1.5 truncate">
+                  <Tag size={13} />
+                  <span className="truncate">{selectedBrand === 'All' ? 'All Brands (60+)' : selectedBrand}</span>
+                </div>
+                <ChevronRight size={14} className={`transform transition ${isBrandDrawerOpen ? 'rotate-90' : ''}`} />
               </button>
             </div>
-          ))}
+
+            {/* Skin Type Select */}
+            <div className="md:col-span-2 flex items-center gap-1.5">
+              <select
+                value={selectedSkinType}
+                onChange={(e) => setSelectedSkinType(e.target.value)}
+                className="w-full bg-pink-50/20 border border-pink-100 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-[#E91E8C] cursor-pointer"
+              >
+                {SKIN_TYPES.map((st) => (
+                  <option key={st} value={st}>
+                    {st === 'All' ? 'All Skin Types' : `${st} Skin`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Quick Brand Shortcut Pills Bar */}
+          <div className="pt-2 border-t border-pink-50/60 flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider whitespace-nowrap flex items-center gap-1">
+              <Filter size={11} className="text-[#E91E8C]" />
+              <span>Top Brands:</span>
+            </span>
+            {POPULAR_BRANDS_SHORTCUTS.map((bName) => {
+              const count = bName === 'All' ? products.length : (brandProductCounts[bName.toLowerCase()] || 0);
+              const isActive = selectedBrand === bName;
+              return (
+                <button
+                  key={bName}
+                  type="button"
+                  onClick={() => setSelectedBrand(bName)}
+                  className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 ${
+                    isActive
+                      ? 'bg-[#E91E8C] text-white shadow-xs'
+                      : 'bg-pink-50/40 text-gray-700 border border-pink-100/60 hover:border-pink-300 hover:text-[#E91E8C]'
+                  }`}
+                >
+                  <span>{bName === 'All' ? 'All Brands' : bName}</span>
+                  {count > 0 && (
+                    <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-extrabold ${isActive ? 'bg-white/20 text-white' : 'bg-pink-100 text-pink-700'}`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setIsBrandDrawerOpen(!isBrandDrawerOpen)}
+              className="px-3 py-1 rounded-full text-[10px] font-black text-[#E91E8C] bg-pink-100/50 hover:bg-pink-100 whitespace-nowrap transition cursor-pointer"
+            >
+              {isBrandDrawerOpen ? 'Close Brand List ✕' : 'View All Brands (60+) →'}
+            </button>
+          </div>
+
+          {/* Expandable Full Brand Selector Drawer */}
+          {isBrandDrawerOpen && (
+            <div className="bg-pink-50/20 p-4 rounded-2xl border border-pink-200/80 space-y-3 animate-fadeIn">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-pink-200/50 pb-2">
+                <div className="flex items-center gap-2">
+                  <Tag size={15} className="text-[#E91E8C]" />
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                    Filter by Brand ({filteredBrandList.length} Korean Brands)
+                  </h4>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search size={14} className="absolute left-2.5 top-2 text-pink-400" />
+                  <input
+                    type="text"
+                    value={brandSearchTerm}
+                    onChange={(e) => setBrandSearchTerm(e.target.value)}
+                    placeholder="Search 60+ Korean brand names..."
+                    className="w-full bg-white border border-pink-200 rounded-lg pl-8 pr-3 py-1 text-xs outline-none focus:border-[#E91E8C]"
+                  />
+                  {brandSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setBrandSearchTerm('')}
+                      className="absolute right-2 top-1.5 text-gray-400 hover:text-pink-600"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Brands Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-60 overflow-y-auto pr-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedBrand('All');
+                    setIsBrandDrawerOpen(false);
+                  }}
+                  className={`p-2 rounded-xl text-xs font-bold text-left transition border cursor-pointer flex items-center justify-between ${
+                    selectedBrand === 'All'
+                      ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
+                      : 'bg-white text-gray-800 border-pink-100 hover:border-pink-300'
+                  }`}
+                >
+                  <span>All Brands</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${selectedBrand === 'All' ? 'bg-white/20 text-white' : 'bg-pink-50 text-pink-600'}`}>
+                    {products.length}
+                  </span>
+                </button>
+
+                {filteredBrandList.map((brandName) => {
+                  const pCount = brandProductCounts[brandName.toLowerCase()] || 0;
+                  const isSelected = selectedBrand.toLowerCase() === brandName.toLowerCase();
+                  return (
+                    <button
+                      key={brandName}
+                      type="button"
+                      onClick={() => {
+                        setSelectedBrand(brandName);
+                        setIsBrandDrawerOpen(false);
+                      }}
+                      className={`p-2 rounded-xl text-xs font-bold text-left transition border cursor-pointer flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
+                          : 'bg-white text-gray-800 border-pink-100 hover:border-pink-300'
+                      }`}
+                    >
+                      <span className="truncate mr-1">{brandName}</span>
+                      {pCount > 0 && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-mono ${isSelected ? 'bg-white/20 text-white' : 'bg-pink-50 text-pink-700 font-bold'}`}>
+                          {pCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Active Filters Pills & Clear Button */}
+          {hasActiveFilters && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-pink-100/80 text-xs">
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Active Filters:</span>
+
+              {selectedBrand !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#E91E8C] text-white text-[10px] font-bold">
+                  Brand: {selectedBrand}
+                  <button type="button" onClick={() => setSelectedBrand('All')} className="hover:text-pink-200 cursor-pointer">
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+
+              {selectedCategory !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-800 text-white text-[10px] font-bold">
+                  Category: {selectedCategory}
+                  <button type="button" onClick={() => setSelectedCategory('All')} className="hover:text-pink-200 cursor-pointer">
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+
+              {selectedSkinType !== 'All' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-pink-600 text-white text-[10px] font-bold">
+                  Skin: {selectedSkinType}
+                  <button type="button" onClick={() => setSelectedSkinType('All')} className="hover:text-pink-200 cursor-pointer">
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+
+              {searchQuery.trim() && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500 text-white text-[10px] font-bold">
+                  Search: "{searchQuery}"
+                  <button type="button" onClick={() => setSearchQuery('')} className="hover:text-amber-200 cursor-pointer">
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="text-[10px] font-black text-[#E91E8C] hover:underline cursor-pointer ml-auto flex items-center gap-1"
+              >
+                <RefreshCw size={11} />
+                <span>Reset All Filters</span>
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Products Grid or Empty State */}
+        {filteredProducts.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {filteredProducts.map((prod) => (
+              <div
+                key={prod.id}
+                className="bg-white rounded-2xl border border-pink-100 overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-md transition p-3 space-y-2 group"
+              >
+                <div
+                  className="aspect-square bg-pink-50/20 rounded-xl overflow-hidden cursor-pointer relative"
+                  onClick={() => navigate(`/product/${prod.id}`)}
+                >
+                  <img
+                    src={prod.image}
+                    alt={prod.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition"
+                    referrerPolicy="no-referrer"
+                  />
+                  {prod.category && (
+                    <span className="absolute top-1.5 left-1.5 bg-slate-900/80 backdrop-blur-xs text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-md">
+                      {prod.category}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <span className="text-[8px] font-black text-[#E91E8C] uppercase tracking-wider block">{prod.brand}</span>
+                  <h4
+                    onClick={() => navigate(`/product/${prod.id}`)}
+                    className="text-xs font-bold text-slate-900 line-clamp-1 cursor-pointer hover:text-[#E91E8C]"
+                  >
+                    {prod.name}
+                  </h4>
+                  <span className="text-xs font-black text-slate-900 font-mono mt-1 block">৳{prod.price}</span>
+                </div>
+                <button
+                  onClick={() => addToCart(prod)}
+                  className="w-full py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <ShoppingBag size={11} />
+                  <span>{vf.buttonText || 'Shop Now'}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white p-12 rounded-3xl border border-pink-100 text-center space-y-4">
+            <div className="w-16 h-16 bg-pink-50 rounded-full flex items-center justify-center mx-auto text-[#E91E8C]">
+              <Search size={28} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">No Products Found</h3>
+              <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                We couldn't find any items matching your selected brand or category filters.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="px-5 py-2.5 bg-[#E91E8C] text-white font-bold text-xs rounded-xl shadow-sm hover:bg-[#FF4B91] transition cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <RefreshCw size={14} />
+              <span>Reset All Filters</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   };

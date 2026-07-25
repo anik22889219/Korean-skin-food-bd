@@ -27,13 +27,17 @@ export interface Product {
   isSlowMoving?: boolean;
 }
 
-export type OrderStatus = 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+export type OrderStatus = 'pending' | 'packing' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+
+export type OrderSource = 'WEBSITE' | 'POS';
 
 export interface OrderItem {
   productId: string;
   name: string;
   price: number;
   quantity: number;
+  scannedQuantity?: number;
+  barcode?: string;
 }
 
 export interface Order {
@@ -49,10 +53,28 @@ export interface Order {
   pointsEarned?: number;
   pointsRedeemed?: number;
   status: OrderStatus;
+  order_source: OrderSource;
+  stock_deducted: boolean;
+  stock_restored?: boolean;
   createdAt: string;
   paymentMethod: 'COD' | 'POS_In_Person';
   sessionType: 'Online' | 'POS';
   isPaid: boolean;
+}
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  orderId?: string;
+  quantity: number; // Negative for sale/deduction, positive for return/restock
+  type: 'sale' | 'return' | 'restock' | 'adjustment' | 'stock_in';
+  source: 'WEBSITE' | 'POS' | 'MANUAL';
+  createdAt: string;
+  performedBy: string;
+  previousStock?: number;
+  newStock?: number;
+  reason?: string;
 }
 
 export interface InventoryLog {

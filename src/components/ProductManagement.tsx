@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { productService } from '../services/productService';
 import { agentService } from '../services/agentService';
@@ -22,11 +22,28 @@ import {
   Plus, Wand2, QrCode, Search, 
   Trash2, Edit, AlertCircle, CheckCircle, X, 
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
-  Barcode, ShieldAlert, Check, RefreshCw, Camera
+  Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { KOREAN_BRANDS } from '../data/brands';
 
-const CATEGORIES = ['All', 'Cleanser', 'Toner', 'Serum & Essence', 'Moisturizer', 'Sunscreen', 'Lip Care'];
+const CATEGORIES = [
+  'All', 
+  'Cleanser', 
+  'Toner', 
+  'Serum & Essence', 
+  'Cream & Moisturizer', 
+  'Sunscreen', 
+  'Lip Care',
+  'Eye Care',
+  'Mask & Pack',
+  'Exfoliator',
+  'Body & Hair Care',
+  'Oral Care',
+  'Supplements',
+  'Spot Treatment',
+  'Makeup & Tone-Up'
+];
 
 export const ProductManagement: React.FC = () => {
   const navigate = useNavigate();
@@ -34,6 +51,8 @@ export const ProductManagement: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [selectedProductForPopup, setSelectedProductForPopup] = useState<Product | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Barcode Audit Modal State
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
@@ -42,8 +61,19 @@ export const ProductManagement: React.FC = () => {
   // Search and filters
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [brandFilter, setBrandFilter] = useState('All');
   const [isAiGeneratingContent, setIsAiGeneratingContent] = useState<string | null>(null);
-  const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+
+  // Memoized unique brands for filter
+  const availableBrandsForFilter = useMemo(() => {
+    const brandSet = new Set<string>();
+    KOREAN_BRANDS.forEach(b => brandSet.add(b));
+    products.forEach(p => {
+      if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
+    });
+    return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+  }, [products]);
 
   // Cloudinary media library popup states
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
@@ -57,6 +87,144 @@ export const ProductManagement: React.FC = () => {
   const [formCameraZoom, setFormCameraZoom] = useState<number>(1.5);
   const formScannerControllerRef = useRef<ScannerController | null>(null);
 
+  const handleBarcodeScanResult = async (rawBarcode: string) => {
+    if (!rawBarcode || !rawBarcode.trim()) return;
+    const cleanBc = normalizeBarcode(rawBarcode);
+
+    if (isAddingProduct && (!editingProduct || !editingProduct.name || editingProduct.name.trim() === '')) {
+      // Adding NEW product mode with empty name -> run Identify system to populate product details
+      await handleIdentifyProductByBarcode(cleanBc);
+    } else {
+      // Editing product or product name already set -> ONLY set the barcode field in form! Do NOT touch other fields!
+      setEditingProduct(prev => prev ? {
+        ...prev,
+        barcode: cleanBc,
+        barcodeNormalized: cleanBc
+      } : null);
+      setAlertMsg({
+        type: 'success',
+        text: `✅ Barcode code "${cleanBc}" scanned and assigned to product!`
+      });
+      setTimeout(() => setAlertMsg(null), 4000);
+    }
+  };
+
+  const handleIdentifyProductByBarcode = async (rawBarcode: string) => {
+    if (!rawBarcode || !rawBarcode.trim()) return;
+    const cleanBc = normalizeBarcode(rawBarcode);
+
+    // If editing an existing product OR product name is already set, DO NOT perform AI/catalog identify auto-fill! Just set barcode code.
+    if (!isAddingProduct || (editingProduct && editingProduct.name && editingProduct.name.trim() !== '')) {
+      setEditingProduct(prev => prev ? {
+        ...prev,
+        barcode: cleanBc,
+        barcodeNormalized: cleanBc
+      } : null);
+      setAlertMsg({
+        type: 'success',
+        text: `✅ Barcode code "${cleanBc}" set for this product.`
+      });
+      setTimeout(() => setAlertMsg(null), 4000);
+      return;
+    }
+
+    setIsPhotoScanning(true);
+    setAlertMsg({ type: 'info', text: `🔍 Identifying product for barcode "${cleanBc}"...` });
+
+    try {
+      // 1. Check local catalog first (productService & allProducts)
+      const localMatch = productService.getProductByBarcode(cleanBc) || 
+        productService.getProducts().find(p => p.barcodeNormalized === cleanBc || normalizeBarcode(p.barcode) === cleanBc);
+
+      if (localMatch) {
+        setEditingProduct({
+          id: 'prod_' + Date.now(), // generate fresh ID for new product entry
+          name: localMatch.name,
+          nameBN: localMatch.nameBN || localMatch.name,
+          brand: localMatch.brand,
+          category: localMatch.category,
+          price: localMatch.price,
+          importPrice: localMatch.importPrice,
+          discountPrice: localMatch.discountPrice,
+          ml: localMatch.ml || '100ml',
+          stock: 20,
+          description: localMatch.description || '',
+          descriptionBN: localMatch.descriptionBN || '',
+          image: localMatch.image || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60',
+          images: localMatch.images || [],
+          skinTypes: localMatch.skinTypes || ['All'],
+          rating: localMatch.rating || 4.8,
+          reviewsCount: localMatch.reviewsCount || 1,
+          barcode: cleanBc,
+          barcodeNormalized: cleanBc,
+          sku: localMatch.sku || '',
+          lowStockThreshold: localMatch.lowStockThreshold || 5
+        } as any);
+        setAlertMsg({ 
+          type: 'success', 
+          text: `✅ Found in catalog: "${localMatch.name}" (${localMatch.brand})! Form auto-filled.` 
+        });
+        setTimeout(() => setAlertMsg(null), 5000);
+        return localMatch;
+      }
+
+      // 2. Query Gemini & Barcode Identification API
+      const res = await fetch('/api/gemini/identify-barcode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ barcode: cleanBc })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.name) {
+          setEditingProduct({
+            id: 'prod_' + Date.now(),
+            name: data.name || '',
+            nameBN: data.nameBN || data.name || '',
+            brand: data.brand || 'Korean Skincare',
+            category: data.category || 'Serum & Essence',
+            ml: data.ml || '100ml',
+            price: data.price ? Number(data.price) : 1500,
+            stock: 20,
+            description: data.description || '',
+            descriptionBN: 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট।',
+            image: data.imageUrl || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60',
+            images: [],
+            skinTypes: ['All'],
+            rating: 4.8,
+            reviewsCount: 1,
+            barcode: cleanBc,
+            barcodeNormalized: cleanBc,
+            sku: '',
+            lowStockThreshold: 5
+          } as any);
+
+          setAlertMsg({
+            type: 'success',
+            text: `✨ Identified Product: "${data.name}" (${data.brand})! Form auto-filled.`
+          });
+          setTimeout(() => setAlertMsg(null), 5000);
+          return data;
+        }
+      }
+
+      // Fallback: Apply barcode if AI/network offline
+      setEditingProduct(prev => prev ? {
+        ...prev,
+        barcode: cleanBc,
+        barcodeNormalized: cleanBc
+      } : null);
+      setAlertMsg({ type: 'warning', text: `Barcode "${cleanBc}" applied to new product form. Please enter title and specs.` });
+      setTimeout(() => setAlertMsg(null), 4000);
+    } catch (err) {
+      console.error("Barcode identification error:", err);
+      setAlertMsg({ type: 'error', text: 'Error identifying product by barcode.' });
+    } finally {
+      setIsPhotoScanning(false);
+    }
+  };
+
   const handleLiveLensSnap = async (containerId: string) => {
     setIsPhotoScanning(true);
     setAlertMsg({ type: 'info', text: '🔍 Performing Google Lens HD Instant Scan from live camera frame...' });
@@ -64,14 +232,8 @@ export const ProductManagement: React.FC = () => {
     try {
       const scannedBc = await scanBarcodeFromLiveVideoSnapshot(containerId);
       if (scannedBc) {
-        setEditingProduct(prev => prev ? {
-          ...prev,
-          barcode: scannedBc,
-          barcodeNormalized: scannedBc
-        } : null);
-        setAlertMsg({ type: 'success', text: `Scanned Barcode: "${scannedBc}" applied to product form!` });
-        setTimeout(() => setAlertMsg(null), 4000);
         stopFormCameraScanner();
+        await handleBarcodeScanResult(scannedBc);
       } else {
         setAlertMsg({ 
           type: 'error', 
@@ -104,14 +266,8 @@ export const ProductManagement: React.FC = () => {
     try {
       const scannedBc = await scanBarcodeFromImageFile(file);
       if (scannedBc) {
-        setEditingProduct(prev => prev ? {
-          ...prev,
-          barcode: scannedBc,
-          barcodeNormalized: scannedBc
-        } : null);
-        setAlertMsg({ type: 'success', text: `Scanned Barcode: "${scannedBc}" applied to product form!` });
-        setTimeout(() => setAlertMsg(null), 4000);
         stopFormCameraScanner();
+        await handleBarcodeScanResult(scannedBc);
       } else {
         setAlertMsg({ 
           type: 'error', 
@@ -162,17 +318,11 @@ export const ProductManagement: React.FC = () => {
         const controller = await startUnifiedCameraScanner({
           containerId: "edit-form-barcode-scanner-container",
           useFrontCamera: useFormFrontCamera,
-          onScanSuccess: (scannedBc) => {
+          onScanSuccess: async (scannedBc) => {
             if (isCancelled) return;
             if (scannedBc) {
-              setEditingProduct(prev => prev ? { 
-                ...prev, 
-                barcode: scannedBc, 
-                barcodeNormalized: scannedBc 
-              } : null);
-              setAlertMsg({ type: 'success', text: `Scanned Barcode: "${scannedBc}" applied to product form!` });
-              setTimeout(() => setAlertMsg(null), 4000);
               stopFormCameraScanner();
+              await handleBarcodeScanResult(scannedBc);
             }
           },
           onError: (errMsg) => {
@@ -218,6 +368,21 @@ export const ProductManagement: React.FC = () => {
   const [nameSearchQuery, setNameSearchQuery] = useState('');
   const [nameSuggestions, setNameSuggestions] = useState<any[]>([]);
   const [isSearchingNames, setIsSearchingNames] = useState(false);
+
+  // Debounce search by product name
+  useEffect(() => {
+    if (uploadSelectorMode !== 'name') return;
+    const trimmed = nameSearchQuery.trim();
+    if (trimmed.length < 2) {
+      setNameSuggestions([]);
+      setIsSearchingNames(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      handleSearchProductsByName(trimmed);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [nameSearchQuery, uploadSelectorMode]);
 
   // Image/Camera upload states
   const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
@@ -311,14 +476,13 @@ export const ProductManagement: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  // Automatically process product name selection, upload image to Cloudinary, and save directly to database
+  // Process product name selection: populate the edit form and open camera barcode scanner so the user can scan barcode before saving
   const handleSelectNameSuggestion = async (sug: any) => {
     setIsSearchingNames(true);
-    setAlertMsg({ type: 'success', text: 'Connecting... Uploading product image to Cloudinary and registering in database...' });
+    setAlertMsg({ type: 'info', text: 'Fetching product details and preparing form...' });
     
     try {
       const newId = 'p' + Math.floor(100 + Math.random() * 900);
-      // AI Product Import Rule: Do NOT invent fake barcodes. Set to empty if not provided.
       const barcode = sug.barcode ? normalizeBarcode(sug.barcode) : '';
       
       // 1. Store the representative product image in Cloudinary mock/real system
@@ -332,24 +496,27 @@ export const ProductManagement: React.FC = () => {
         console.warn("Cloudinary upload failed, using original URL:", cloudErr);
       }
 
-      // 2. Fetch automatic Bangla translation
-      let nameBN = '';
-      try {
-        const transRes = await fetch('/api/gemini/translate-name', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: sug.name })
-        });
-        if (transRes.ok) {
-          const transData = await transRes.json();
-          nameBN = transData.translatedName || '';
+      // 2. Fetch automatic Bangla translation if not present
+      let nameBN = sug.nameBN || '';
+      if (!nameBN) {
+        try {
+          const transRes = await fetch('/api/gemini/translate-name', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: sug.name })
+          });
+          if (transRes.ok) {
+            const transData = await transRes.json();
+            nameBN = transData.translatedName || '';
+          }
+        } catch (transErr) {
+          console.warn("Translation failed:", transErr);
         }
-      } catch (transErr) {
-        console.warn("Translation failed:", transErr);
       }
 
-      // 3. Assemble full Product object
-      const completeProduct = {
+      // 3. Populate product form for editing and barcode scanning instead of saving directly
+      setIsAddingProduct(true);
+      setEditingProduct({
         id: newId,
         name: sug.name || 'Authentic K-Beauty Skincare',
         nameBN: nameBN,
@@ -365,26 +532,22 @@ export const ProductManagement: React.FC = () => {
         descriptionBN: 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের যত্নে অত্যন্ত কার্যকরী।',
         rating: 4.8,
         reviewsCount: 1,
-        barcode,
-      };
-
-      // 4. Save directly to Firestore database!
-      await productService.createProduct(completeProduct);
-
-      // 5. Try generating marketing content right away as well!
-      try {
-        await agentService.generateProductMarketingContent(newId);
-      } catch (e) {
-        console.warn("Background marketing content generation failed:", e);
-      }
+        barcode: barcode,
+        barcodeNormalized: barcode,
+        sku: '',
+        lowStockThreshold: 5
+      } as any);
 
       setShowUploadSelector(false);
-      refreshProducts();
-      setAlertMsg({ type: 'success', text: `✨ "${sug.name}" registered successfully! Image stored on Cloudinary and product stored in your inventory.` });
-      setTimeout(() => setAlertMsg(null), 5000);
+      setIsFormCameraActive(false); // Keep camera closed until user explicitly clicks scan button
+      setAlertMsg({ 
+        type: 'success', 
+        text: `✨ Details for "${sug.name}" auto-filled! Click "📷 Live Cam" or "🔍 Lens Photo Scan" if you wish to attach a barcode.` 
+      });
+      setTimeout(() => setAlertMsg(null), 7000);
     } catch (err: any) {
-      console.error("Auto registration by product name failed:", err);
-      setAlertMsg({ type: 'error', text: 'Auto registration failed: ' + err.message });
+      console.error("Auto population by product name failed:", err);
+      setAlertMsg({ type: 'error', text: 'Failed to populate product details: ' + err.message });
       setTimeout(() => setAlertMsg(null), 5000);
     } finally {
       setIsSearchingNames(false);
@@ -489,6 +652,10 @@ export const ProductManagement: React.FC = () => {
 
   useEffect(() => {
     refreshProducts();
+    const unsubscribe = productService.subscribe((prods) => {
+      setProducts([...prods]);
+    });
+    return () => unsubscribe();
   }, []);
 
   const refreshProducts = () => {
@@ -585,11 +752,22 @@ export const ProductManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteProduct = (id: string) => {
-    if (confirm('Are you sure you want to delete this product from the inventory? This cannot be undone.')) {
-      productService.deleteProduct(id);
-      setAlertMsg({ type: 'success', text: 'Product successfully removed.' });
+  const handleDeleteProduct = (p: Product) => {
+    setProductToDelete(p);
+  };
+
+  const handleConfirmDeleteProduct = async () => {
+    if (!productToDelete) return;
+    setIsDeleting(true);
+    try {
+      await productService.deleteProduct(productToDelete.id);
+      setAlertMsg({ type: 'success', text: `Product "${productToDelete.name}" successfully removed.` });
       refreshProducts();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: err?.message || 'Failed to delete product.' });
+    } finally {
+      setIsDeleting(false);
+      setProductToDelete(null);
       setTimeout(() => setAlertMsg(null), 3000);
     }
   };
@@ -754,7 +932,8 @@ export const ProductManagement: React.FC = () => {
                           p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           p.barcode?.includes(searchQuery);
     const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter;
-    return matchesSearch && matchesCategory;
+    const matchesBrand = brandFilter === 'All' || p.brand.toLowerCase() === brandFilter.toLowerCase();
+    return matchesSearch && matchesCategory && matchesBrand;
   });
 
   return (
@@ -812,8 +991,8 @@ export const ProductManagement: React.FC = () => {
       )}
 
       {/* Filters bar */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-pink-50/10 p-4 rounded-2xl border border-pink-100/30">
-        <div className="relative w-full sm:w-72">
+      <div className="flex flex-col md:flex-row gap-3 justify-between items-center bg-pink-50/10 p-4 rounded-2xl border border-pink-100/30">
+        <div className="relative w-full md:w-72">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-pink-300" />
           <input
             type="text"
@@ -824,17 +1003,52 @@ export const ProductManagement: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-center">
-          <span className="text-[11px] font-bold text-gray-500 uppercase">Category:</span>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="bg-white border border-pink-100 text-xs text-gray-800 rounded-lg px-2.5 py-1.5 outline-none focus:border-[#E91E8C]"
-          >
-            {CATEGORIES.map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {/* Brand Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-bold text-gray-500 uppercase flex items-center gap-1">
+              <Tag size={12} className="text-[#E91E8C]" />
+              <span>Brand:</span>
+            </span>
+            <select
+              value={brandFilter}
+              onChange={(e) => setBrandFilter(e.target.value)}
+              className="bg-white border border-pink-100 text-xs text-gray-800 font-semibold rounded-lg px-2.5 py-1.5 outline-none focus:border-[#E91E8C] max-w-[150px]"
+            >
+              <option value="All">All Brands ({availableBrandsForFilter.length})</option>
+              {availableBrandsForFilter.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Category Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-bold text-gray-500 uppercase">Category:</span>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="bg-white border border-pink-100 text-xs text-gray-800 font-semibold rounded-lg px-2.5 py-1.5 outline-none focus:border-[#E91E8C]"
+            >
+              {CATEGORIES.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          {(brandFilter !== 'All' || categoryFilter !== 'All' || searchQuery) && (
+            <button
+              type="button"
+              onClick={() => {
+                setBrandFilter('All');
+                setCategoryFilter('All');
+                setSearchQuery('');
+              }}
+              className="text-[10px] font-bold text-[#E91E8C] hover:underline cursor-pointer bg-pink-50 px-2 py-1 rounded-md"
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -930,8 +1144,12 @@ export const ProductManagement: React.FC = () => {
                           <Edit size={12} />
                         </button>
                         <button 
-                          onClick={() => handleDeleteProduct(p.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteProduct(p);
+                          }}
                           className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg cursor-pointer transition text-[11px] font-bold"
+                          title="Delete product"
                         >
                           <Trash2 size={12} />
                         </button>
@@ -1025,8 +1243,12 @@ export const ProductManagement: React.FC = () => {
                   </button>
 
                   <button 
-                    onClick={() => handleDeleteProduct(p.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteProduct(p);
+                    }}
                     className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg cursor-pointer transition text-[10px]"
+                    title="Delete product"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -1426,20 +1648,56 @@ export const ProductManagement: React.FC = () => {
                       </div>
                     )}
 
-                    <input 
-                      type="text" 
-                      placeholder="e.g. 8809598450123"
-                      value={editingProduct.barcode || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEditingProduct({ 
-                          ...editingProduct, 
-                          barcode: val,
-                          barcodeNormalized: normalizeBarcode(val)
-                        });
-                      }}
-                      className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold"
-                    />
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="e.g. 8809598450123"
+                        value={editingProduct.barcode || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditingProduct({ 
+                            ...editingProduct, 
+                            barcode: val,
+                            barcodeNormalized: normalizeBarcode(val)
+                          });
+                        }}
+                        className="flex-1 bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold"
+                      />
+                      {isAddingProduct ? (
+                        <button
+                          type="button"
+                          onClick={() => handleIdentifyProductByBarcode(editingProduct.barcode || '')}
+                          disabled={!editingProduct.barcode || isPhotoScanning}
+                          className="px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1 disabled:opacity-40 cursor-pointer flex-shrink-0"
+                          title="Search K-Beauty database & Gemini to auto-fill product details for this barcode"
+                        >
+                          <Search size={13} className={isPhotoScanning ? "animate-spin" : ""} />
+                          <span>Find / Auto-Fill</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingProduct.barcode) {
+                              const norm = normalizeBarcode(editingProduct.barcode);
+                              setEditingProduct({
+                                ...editingProduct,
+                                barcode: norm,
+                                barcodeNormalized: norm
+                              });
+                              setAlertMsg({ type: 'success', text: `✅ Barcode code "${norm}" set for product.` });
+                              setTimeout(() => setAlertMsg(null), 3000);
+                            }
+                          }}
+                          disabled={!editingProduct.barcode}
+                          className="px-3 py-2 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1 disabled:opacity-40 cursor-pointer flex-shrink-0"
+                          title="Save barcode code to this product without overwriting details"
+                        >
+                          <Check size={13} />
+                          <span>Code Set</span>
+                        </button>
+                      )}
+                    </div>
                     {editingProduct.barcode ? (
                       <span className="text-[9px] text-gray-500 font-mono block mt-1">
                         Normalized: <strong className="text-pink-600">"{normalizeBarcode(editingProduct.barcode)}"</strong>
@@ -1529,11 +1787,17 @@ export const ProductManagement: React.FC = () => {
                   <label className="block text-gray-500 font-bold mb-1">Brand Name</label>
                   <input 
                     type="text" 
-                    placeholder="AI Auto-filled"
+                    list="korean-brands-list"
+                    placeholder="e.g. COSRX, Anua"
                     value={editingProduct.brand}
                     onChange={(e) => setEditingProduct({ ...editingProduct, brand: e.target.value })}
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                   />
+                  <datalist id="korean-brands-list">
+                    {KOREAN_BRANDS.map((brandName) => (
+                      <option key={brandName} value={brandName} />
+                    ))}
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-gray-500 font-bold mb-1">Category</label>
@@ -1725,20 +1989,24 @@ export const ProductManagement: React.FC = () => {
                     </div>
                   </button>
 
-                  {/* Option 3: By Image */}
+                  {/* Option 4: By Barcode Scan */}
                   <button
                     onClick={() => {
-                      setCapturedImageBase64(null);
-                      setUploadSelectorMode('image');
+                      setShowUploadSelector(false);
+                      handleStartAddProduct();
+                      setIsFormCameraActive(true);
                     }}
-                    className="group p-4 bg-white hover:bg-pink-50/15 border border-gray-150 hover:border-pink-200 rounded-2xl transition text-left flex items-start gap-3.5 cursor-pointer shadow-sm hover:shadow"
+                    className="group p-4 bg-white hover:bg-pink-50/15 border border-pink-200 hover:border-[#E91E8C] rounded-2xl transition text-left flex items-start gap-3.5 cursor-pointer shadow-sm hover:shadow"
                   >
-                    <div className="p-3 bg-gray-50 group-hover:bg-pink-50 rounded-xl text-gray-500 group-hover:text-[#E91E8C] transition flex-shrink-0">
-                      <ImageIcon size={16} />
+                    <div className="p-3 bg-pink-50 group-hover:bg-[#E91E8C] rounded-xl text-[#E91E8C] group-hover:text-white transition flex-shrink-0">
+                      <Barcode size={16} />
                     </div>
                     <div>
-                      <span className="font-bold text-gray-800 text-xs block group-hover:text-[#E91E8C] transition">Upload by Product Image / Camera</span>
-                      <span className="text-[10px] text-gray-400 block mt-0.5 leading-relaxed">Take a live photo of your skincare bottle using your camera or upload a file. Gemini auto-completes the entire details.</span>
+                      <span className="font-bold text-gray-800 text-xs block group-hover:text-[#E91E8C] transition flex items-center gap-1.5">
+                        <span>Upload by Barcode Scan</span>
+                        <span className="px-1.5 py-0.5 bg-pink-100 text-[#E91E8C] text-[9px] font-black rounded uppercase">Instant Auto-Identify</span>
+                      </span>
+                      <span className="text-[10px] text-gray-400 block mt-0.5 leading-relaxed">Scan product EAN/UPC barcode with camera or photo. Automatically identifies brand, product name, category, BDT price, and auto-fills details!</span>
                     </div>
                   </button>
                 </div>
@@ -1771,14 +2039,7 @@ export const ProductManagement: React.FC = () => {
                     <input
                       type="text"
                       value={nameSearchQuery}
-                      onChange={(e) => {
-                        setNameSearchQuery(e.target.value);
-                        if (e.target.value.length >= 2) {
-                          handleSearchProductsByName(e.target.value);
-                        } else {
-                          setNameSuggestions([]);
-                        }
-                      }}
+                      onChange={(e) => setNameSearchQuery(e.target.value)}
                       placeholder="Type e.g. COSRX Snail, Beauty of Joseon, Anua..."
                       className="flex-1 bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] text-xs font-medium"
                     />
@@ -2180,6 +2441,41 @@ export const ProductManagement: React.FC = () => {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* DELETE PRODUCT CONFIRMATION MODAL */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[24px] border border-red-100 overflow-hidden max-w-md w-full shadow-2xl p-6 text-center space-y-4">
+            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 size={24} />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-black text-gray-900">Delete Product?</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Are you sure you want to delete <strong className="text-gray-900">"{productToDelete.name}"</strong>? This will permanently remove the product from your store inventory.
+              </p>
+            </div>
+            <div className="flex gap-3 justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => setProductToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteProduct}
+                disabled={isDeleting}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-xl text-xs transition shadow-md cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Yes, Delete Product'}
+              </button>
+            </div>
           </div>
         </div>
       )}

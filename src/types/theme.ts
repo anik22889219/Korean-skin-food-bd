@@ -148,6 +148,32 @@ export type SectionKey =
   | 'reachReliability'
   | 'communityLive';
 
+export interface GlobalThemeSettings {
+  faviconUrl: string;
+  logoUrl: string;
+  logoText: string;
+  logoTagline: string;
+  primaryColor: string; // e.g. '#E91E8C'
+  secondaryColor: string; // e.g. '#FF62B2'
+  accentColor: string; // e.g. '#0F172A'
+  backgroundColor: string; // e.g. '#FFF5F8'
+  headingFont: string; // e.g. 'Playfair Display'
+  bodyFont: string; // e.g. 'Plus Jakarta Sans'
+  siteTitle: string;
+  siteTagline: string;
+  contactPhone: string;
+  contactEmail: string;
+  currencySymbol: string;
+  facebookUrl: string;
+  instagramUrl: string;
+  youtubeUrl: string;
+  messengerUrl: string;
+  announcementText: string;
+  enableAnnouncement: boolean;
+  footerText: string;
+  updatedAt?: string;
+}
+
 export interface HomeThemeSettings {
   sectionOrder: SectionKey[];
   hero: HeroSection;

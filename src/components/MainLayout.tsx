@@ -13,6 +13,8 @@ import { motion, AnimatePresence } from 'motion/react';
 
 import { WhatsAppChatBot } from './WhatsAppChatBot';
 import { Footer } from './Footer';
+import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
+import { GlobalThemeSettings } from '../types/theme';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -28,20 +30,32 @@ export const MainLayout: React.FC = () => {
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
+  const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
 
-  const announcements = [
+  useEffect(() => {
+    const unsubscribe = themeService.subscribeGlobal((gt) => {
+      setGlobalTheme(gt);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const defaultAnnouncements = [
     "✨ FREE shipping inside Dhaka for orders over ৳2,000! ✨",
     "🛍️ 100% Genuine Imported Cosmeceuticals straight from Seoul, South Korea!",
     "📞 Need professional skincare advice? Click WhatsApp below for a free consultation!",
     "🌟 Cash on Delivery (COD) services available nationwide across Bangladesh!"
   ];
 
+  const announcements = globalTheme.announcementText 
+    ? [globalTheme.announcementText, ...defaultAnnouncements.slice(1)]
+    : defaultAnnouncements;
+
   useEffect(() => {
     const interval = setInterval(() => {
       setAnnouncementIndex((prev) => (prev + 1) % announcements.length);
     }, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [announcements.length]);
 
   const handleLogout = async () => {
     try {
@@ -56,20 +70,22 @@ export const MainLayout: React.FC = () => {
     <div className="min-h-screen bg-[#FFF5F8]/40 text-gray-800 font-sans selection:bg-[#E91E8C] selection:text-white flex flex-col pb-16 md:pb-0">
       
       {/* 1. Dynamic Auto-Sliding Announcement Bar */}
-      <div className="bg-[#E91E8C] text-white py-2 px-4 text-center text-[10px] sm:text-xs font-bold tracking-wider relative overflow-hidden z-20 min-h-[36px] flex items-center justify-center shadow-sm">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={announcementIndex}
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -20, opacity: 0 }}
-            transition={{ duration: 0.5, ease: 'easeInOut' }}
-            className="w-full text-center px-4"
-          >
-            {announcements[announcementIndex]}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+      {globalTheme.enableAnnouncement !== false && (
+        <div className="bg-[#E91E8C] text-white py-2 px-4 text-center text-[10px] sm:text-xs font-bold tracking-wider relative overflow-hidden z-20 min-h-[36px] flex items-center justify-center shadow-sm">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={announcementIndex}
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -20, opacity: 0 }}
+              transition={{ duration: 0.5, ease: 'easeInOut' }}
+              className="w-full text-center px-4"
+            >
+              {announcements[announcementIndex]}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      )}
 
       {/* 2. Responsive Adaptive Header */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-4 md:px-8 py-3.5 flex items-center justify-between shadow-sm">
@@ -97,15 +113,21 @@ export const MainLayout: React.FC = () => {
 
         {/* Center Section: Branding Logo */}
         <Link to="/" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 bg-[#E91E8C] rounded-full flex items-center justify-center shadow-md shadow-[#E91E8C]/25 border border-[#FF62B2] group-hover:scale-105 transition-transform duration-300">
-            <Wand2 className="text-white" size={14} />
-          </div>
-          <div>
-            <h1 className="text-sm md:text-base font-extrabold text-gray-900 tracking-tight leading-none">Korean Skin Food BD</h1>
-            <p className="text-[9px] text-pink-600 mt-0.5 font-bold tracking-wider hidden sm:block">
-              {activeTranslations.tagline}
-            </p>
-          </div>
+          {globalTheme.logoUrl ? (
+            <img src={globalTheme.logoUrl} alt={globalTheme.logoText} className="h-9 object-contain" />
+          ) : (
+            <>
+              <div className="w-8 h-8 bg-[#E91E8C] rounded-full flex items-center justify-center shadow-md shadow-[#E91E8C]/25 border border-[#FF62B2] group-hover:scale-105 transition-transform duration-300">
+                <Wand2 className="text-white" size={14} />
+              </div>
+              <div>
+                <h1 className="text-sm md:text-base font-extrabold text-gray-900 tracking-tight leading-none">{globalTheme.logoText || 'Korean Skin Food BD'}</h1>
+                <p className="text-[9px] text-pink-600 mt-0.5 font-bold tracking-wider hidden sm:block uppercase">
+                  {globalTheme.logoTagline || activeTranslations.tagline}
+                </p>
+              </div>
+            </>
+          )}
         </Link>
 
         {/* Right Section: Language Switcher, Cart Trigger, Login or Profile avatar */}

@@ -160,20 +160,20 @@ export const RAW_PRODUCT_LIST = [
   { name: 'AXIS-Y Dark Spot Correcting Glow Cream 50ml', brand: 'AXIS-Y', category: 'Cream & Moisturizer', price: 1750, ml: '50ml', stock: 18, barcode: '880970070103' },
 
   // Lip Masks & Care
-  { name: 'CARE:NEL Lip Night Mask 5g', brand: 'CARE:NEL', category: 'Lip Care', price: 350, ml: '5g', stock: 40, barcode: '880980080101' },
-  { name: 'JIGOTT Lip Sleeping Mask', brand: 'JIGOTT', category: 'Lip Care', price: 450, ml: '15g', stock: 30, barcode: '880980080102' },
+  { name: 'CARE:NEL Lip Night Mask 5g', brand: 'Care:Nel', category: 'Lip Care', price: 350, ml: '5g', stock: 40, barcode: '880980080101' },
+  { name: 'JIGOTT Lip Sleeping Mask', brand: 'Jigott', category: 'Lip Care', price: 450, ml: '15g', stock: 30, barcode: '880980080102' },
   { name: 'Mediheal Panteno Lips', brand: 'Mediheal', category: 'Lip Care', price: 550, ml: '10ml', stock: 35, barcode: '880980080103' },
 
   // Care:Nel
-  { name: 'CARE:NEL Anti-Melasma Cica Cream 40ml', brand: 'CARE:NEL', category: 'Cream & Moisturizer', price: 1250, ml: '40ml', stock: 15, barcode: '880980080104' },
-  { name: 'Care:Nel Anti-Melasma Cica Intensive Serum 30ml', brand: 'CARE:NEL', category: 'Serum & Essence', price: 1350, ml: '30ml', stock: 15, barcode: '880980080105' },
-  { name: 'Care:Nel Ceramide Vita B5 Double Barrier Cream 50ml', brand: 'CARE:NEL', category: 'Cream & Moisturizer', price: 1450, ml: '50ml', stock: 12, barcode: '880980080106' },
-  { name: 'Care:Nel Cicavita B5 Salicylic Acid Gentle Cleanser 150ml', brand: 'CARE:NEL', category: 'Cleanser', price: 1150, ml: '150ml', stock: 20, barcode: '880980080107' },
-  { name: 'Care:Nel High Intensity Anti Hair Loss Scalp Tonic 150ml', brand: 'CARE:NEL', category: 'Body & Hair Care', price: 1650, ml: '150ml', stock: 10, barcode: '880980080108' },
+  { name: 'CARE:NEL Anti-Melasma Cica Cream 40ml', brand: 'Care:Nel', category: 'Cream & Moisturizer', price: 1250, ml: '40ml', stock: 15, barcode: '880980080104' },
+  { name: 'Care:Nel Anti-Melasma Cica Intensive Serum 30ml', brand: 'Care:Nel', category: 'Serum & Essence', price: 1350, ml: '30ml', stock: 15, barcode: '880980080105' },
+  { name: 'Care:Nel Ceramide Vita B5 Double Barrier Cream 50ml', brand: 'Care:Nel', category: 'Cream & Moisturizer', price: 1450, ml: '50ml', stock: 12, barcode: '880980080106' },
+  { name: 'Care:Nel Cicavita B5 Salicylic Acid Gentle Cleanser 150ml', brand: 'Care:Nel', category: 'Cleanser', price: 1150, ml: '150ml', stock: 20, barcode: '880980080107' },
+  { name: 'Care:Nel High Intensity Anti Hair Loss Scalp Tonic 150ml', brand: 'Care:Nel', category: 'Body & Hair Care', price: 1650, ml: '150ml', stock: 10, barcode: '880980080108' },
 
-  // IUNIK
-  { name: 'IUNIK Centella Calming Gel Cream 60ml', brand: 'IUNIK', category: 'Cream & Moisturizer', price: 1450, ml: '60ml', stock: 18, barcode: '880990090101' },
-  { name: 'IUNIK Centella Calming Daily Sunscreen 60ml', brand: 'IUNIK', category: 'Sunscreen', price: 1550, ml: '60ml', stock: 20, barcode: '880990090102' },
+  // iUNIK
+  { name: 'IUNIK Centella Calming Gel Cream 60ml', brand: 'iUNIK', category: 'Cream & Moisturizer', price: 1450, ml: '60ml', stock: 18, barcode: '880990090101' },
+  { name: 'IUNIK Centella Calming Daily Sunscreen 60ml', brand: 'iUNIK', category: 'Sunscreen', price: 1550, ml: '60ml', stock: 20, barcode: '880990090102' },
 
   // SOME BY MI
   { name: 'SOME BY MI AHA BHA PHA 30 Days Miracle Serum 50ml', brand: 'SOME BY MI', category: 'Serum & Essence', price: 1750, ml: '50ml', stock: 22, barcode: '880910100101' },
@@ -189,9 +189,9 @@ export const RAW_PRODUCT_LIST = [
   { name: 'I\'m From Rice Toner 150ml', brand: 'I\'m From', category: 'Toner', price: 2250, ml: '150ml', stock: 18, barcode: '880930300102' },
   { name: 'I\'m From Rice Toner 30ml', brand: 'I\'m From', category: 'Toner', price: 750, ml: '30ml', stock: 25, barcode: '880930300103' },
 
-  // KERASYS
-  { name: 'KERASYS Extra Damage Care Shampoo', brand: 'KERASYS', category: 'Body & Hair Care', price: 1150, ml: '600ml', stock: 15, barcode: '880940400101' },
-  { name: 'KERASYS Extra Damage Care Conditioner', brand: 'KERASYS', category: 'Body & Hair Care', price: 1150, ml: '600ml', stock: 15, barcode: '880940400102' },
+  // Kerasys
+  { name: 'KERASYS Extra Damage Care Shampoo', brand: 'Kerasys', category: 'Body & Hair Care', price: 1150, ml: '600ml', stock: 15, barcode: '880940400101' },
+  { name: 'KERASYS Extra Damage Care Conditioner', brand: 'Kerasys', category: 'Body & Hair Care', price: 1150, ml: '600ml', stock: 15, barcode: '880940400102' },
 
   // Mary & May / Farmstay / PURITO / RAIP
   { name: 'Mary & May Glutathione Eye Cream 30ml', brand: 'Mary & May', category: 'Eye Care', price: 1450, ml: '30ml', stock: 14, barcode: '880950500101' },

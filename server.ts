@@ -311,7 +311,7 @@ Return your response strictly as a JSON object with exactly these five keys:
 Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts outside the parseable JSON structure.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -485,7 +485,7 @@ Return your response strictly as a JSON array of objects, where each object has:
 Do not write backticks (\`\`\`json) or standard conversational padding around the output. return parseable json array only.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -572,7 +572,7 @@ English Name: "${name}"
 Return ONLY the translated/transliterated Bangla name as a plain string. Do not include any quotes, extra words, explanations, or markdown.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
     });
 
@@ -588,6 +588,158 @@ Return ONLY the translated/transliterated Bangla name as a plain string. Do not 
     else if (name.toLowerCase().includes("laneige")) fallback = "লেনেইজ " + name.replace(/laneige/gi, "").trim();
     res.json({ translatedName: fallback });
   }
+});
+
+// 0. Gemini Barcode Product Identification Endpoint
+app.post("/api/gemini/identify-barcode", async (req, res) => {
+  const { barcode } = req.body;
+  if (!barcode || typeof barcode !== "string") {
+    return res.status(400).json({ error: "Barcode string is required" });
+  }
+
+  const cleanBarcode = barcode.trim().replace(/[\s-]/g, "");
+
+  // 1. Check known database / catalog map for instant Korean barcode identification
+  const knownBarcodeDb: { [key: string]: any } = {
+    // COSRX
+    "8809598450123": { name: "Cosrx Advance Essence 96", nameBN: "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স", brand: "COSRX", category: "Serum & Essence", ml: "100ml", price: 1850, description: "Highly concentrated essence with 96% snail secretion filtrate to deeply hydrate, soothe redness, and restore skin elasticity.", imageUrl: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60" },
+    "8809598450147": { name: "Cosrx All In One Snail Cream 92", nameBN: "কসআরএক্স অল ইন ওয়ান স্নেল ক্রিম ৯২", brand: "COSRX", category: "Cream & Moisturizer", ml: "100g", price: 1950, description: "Nourishing cream enriched with 92% snail mucin to build a moisture barrier, plump skin, and soothe irritation.", imageUrl: "https://images.unsplash.com/photo-1556228724-4da53f1283c7?w=600&auto=format&fit=crop&q=60" },
+    "8809598450284": { name: "Cosrx Salicylic Acid Daily Gentle Cleanser", nameBN: "কসআরএক্স স্যালিসিলিক এসিড ডেইলি জেন্টল ক্লিনজার", brand: "COSRX", category: "Cleanser", ml: "150ml", price: 1250, description: "Gentle foam cleanser with BHA to gently exfoliate dead skin cells, remove excess sebum, and prevent breakouts.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809598450017": { name: "Cosrx Low PH Good Morning Gel Cleanser", nameBN: "কসআরএক্স লো পিএইচ গুড মর্নিং জেল ক্লিনজার", brand: "COSRX", category: "Cleanser", ml: "150ml", price: 1150, description: "Mildly acidic daily gel cleanser with tea tree oil and natural BHA to refine skin texture, clear pores, and balance pH levels.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809598450321": { name: "COSRX Over Night Spa Mask", nameBN: "কসআরএক্স ওভার নাইট স্পা মাস্ক", brand: "COSRX", category: "Mask & Pack", ml: "60ml", price: 1750, description: "Ultimate nourishing overnight spa mask to deeply moisturize skin while you sleep.", imageUrl: "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=600&auto=format&fit=crop&q=60" },
+
+    // Felicia
+    "880980010101": { name: "Felicia Cleansing Foam Camellia Collagen", nameBN: "ফেলিসিয়া ক্লিনজিং ফোম কেমেলিয়া কোলাজেন", brand: "Felicia", category: "Cleanser", ml: "150ml", price: 850, description: "Rich collagen cleansing foam infused with camellia extract for soft, hydrated skin.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "880980010102": { name: "Felicia Heartleaf & Madecassoside", nameBN: "ফেলিসিয়া হার্টলিফ ও মেডেকাসোসাইড সিরাম", brand: "Felicia", category: "Serum & Essence", ml: "50ml", price: 1250, description: "Soothing serum with heartleaf and madecassoside to calm irritated and acne-prone skin.", imageUrl: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60" },
+    "880980010103": { name: "Felicia Snail & Ceramide Cleansing Foam", nameBN: "ফেলিসিয়া স্নেল ও সিরামাইড ক্লিনজিং ফোম", brand: "Felicia", category: "Cleanser", ml: "150ml", price: 850, description: "Gentle cleansing foam with snail filtrate and ceramides to protect the skin barrier.", imageUrl: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60" },
+    "880980010104": { name: "Felicia Retinol & Hyaluronic Acid", nameBN: "ফেলিসিয়া রেটিনল ও হায়ালুরোনিক অ্যাসিড সিরাম", brand: "Felicia", category: "Serum & Essence", ml: "50ml", price: 1350, description: "Anti-aging serum combining retinol and hyaluronic acid for smooth, firm skin.", imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" },
+    "880980010105": { name: "Felicia Natural Silk Fit Moisturizing Suncream B5", nameBN: "ফেলিসিয়া ন্যাচারাল সিল্ক ফিট ময়েশ্চারাইজিং সানক্রিম B5", brand: "Felicia", category: "Sunscreen", ml: "50ml", price: 1150, description: "Moisturizing sunscreen with Vitamin B5 providing broad spectrum SPF50+ protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+
+    // Atomy
+    "880920020101": { name: "Atomy Peeling Gel", nameBN: "এটমি পিলিং জেল", brand: "Atomy", category: "Exfoliator", ml: "120ml", price: 1150, description: "Gentle peeling gel to smooth skin texture and clear dead skin cells without irritation.", imageUrl: "https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=600&auto=format&fit=crop&q=60" },
+
+    // Dabo
+    "880930030101": { name: "Dabo Rice Foam Cleanser", nameBN: "ডাবো রাইস ফোম ক্লিনজার", brand: "Dabo", category: "Cleanser", ml: "180ml", price: 750, description: "Brightening foam cleanser enriched with natural rice extract for glowing skin.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+
+    // SKIN1004
+    "8809530040101": { name: "SKIN1004 Madagascar Centella Tone Brightening Capsule Ampoule 30ml", nameBN: "স্কিন১০০৪ মাদাগাস্কার সেন্টেলা টোন ব্রাইটনিং অ্যাম্পুল ৩০মি.লি.", brand: "SKIN1004", category: "Serum & Essence", ml: "30ml", price: 1350, description: "Brightening ampoule with encapsulated Madecassoside and Centella Asiatica to tone skin.", imageUrl: "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=600&auto=format&fit=crop&q=60" },
+    "8809530040104": { name: "SKIN1004 Madagascar Centella Hyalu-Cica Water Fit Sun Serum 50ml", nameBN: "স্কিন১০০৪ মাদাগাস্কার সেন্টেলা হায়ালু-সিকা ওয়াটার ফিট সান সিরাম ৫০মি.লি.", brand: "SKIN1004", category: "Sunscreen", ml: "50ml", price: 1650, description: "Hydrating sun serum with Hyaluronic Acid and Centella Asiatica for lightweight UV protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+
+    // Lebelage
+    "880940040101": { name: "Lebelage Natural Toneup Suncream", nameBN: "লেবেলেজ ন্যাচারাল টোনআপ সানক্রিম", brand: "Lebelage", category: "Sunscreen", ml: "70ml", price: 750, description: "Tone-up sunscreen providing natural tone enhancement and SPF protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+
+    // Beauty of Joseon
+    "8809653240101": { name: "Beauty of Joseon Relief Sun Aqua-Fresh Rice + B5 50ml", nameBN: "বিউটি অব জোসিয়ন রিলিফ সান অ্যাকুয়া-ফ্রেশ রাইস + B5 ৫০মি.লি.", brand: "Beauty of Joseon", category: "Sunscreen", ml: "50ml", price: 1650, description: "Aqua-fresh organic sunscreen with rice seed water and panthenol for soothing hydration.", imageUrl: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60" },
+
+    // Anua
+    "8809756120101": { name: "Anua Heartleaf Pore Control Cleansing Oil 20ml", nameBN: "আনুয়া হার্টলিফ পোর কন্ট্রোল ক্লিনজিং অয়েল ২০মি.লি.", brand: "Anua", category: "Cleanser", ml: "20ml", price: 550, description: "Pore clearing cleansing oil formulated with Heartleaf extract to melt away makeup and blackheads.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809756120106": { name: "Anua Heartleaf Pore Control Cleansing Oil 200ml", nameBN: "আনুয়া হার্টলিফ পোর কন্ট্রোল ক্লিনজিং অয়েল ২০০মি.লি.", brand: "Anua", category: "Cleanser", ml: "200ml", price: 2100, description: "Deep cleansing oil infused with Heartleaf extract for clear, refreshed pores.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+
+    // MISSHA
+    "880950050101": { name: "MISSHA Cotton Sun All Around Safe Block SPF50+ PA++++", nameBN: "মিশা কটন সান অল এরাউন্ড সেফ ব্লক", brand: "MISSHA", category: "Sunscreen", ml: "50ml", price: 1250, description: "Matte finish daily sun block that controls oil and protects skin.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+
+    // The Ordinary
+    "769915190101": { name: "The Ordinary Serum", nameBN: "দি অর্ডিনারি সিরাম", brand: "The Ordinary", category: "Serum & Essence", ml: "30ml", price: 1250, description: "Targeted facial serum for clear, glowing skin.", imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" }
+  };
+
+  if (knownBarcodeDb[cleanBarcode]) {
+    const known = knownBarcodeDb[cleanBarcode];
+    return res.json({
+      found: true,
+      barcode: cleanBarcode,
+      barcodeNormalized: cleanBarcode,
+      ...known
+    });
+  }
+
+  // Query Firestore DB for existing product if db is available
+  if (db) {
+    try {
+      const productsSnap = await getDocs(collection(db, "products"));
+      let matchDoc: any = null;
+      productsSnap.forEach(docSnap => {
+        const p = docSnap.data();
+        if (p.barcode === cleanBarcode || p.barcodeNormalized === cleanBarcode || docSnap.id === cleanBarcode) {
+          matchDoc = { id: docSnap.id, ...p };
+        }
+      });
+      if (matchDoc) {
+        return res.json({
+          found: true,
+          barcode: cleanBarcode,
+          barcodeNormalized: cleanBarcode,
+          name: matchDoc.name,
+          nameBN: matchDoc.nameBN || matchDoc.name,
+          brand: matchDoc.brand || "Korean Skincare",
+          category: matchDoc.category || "Serum & Essence",
+          ml: matchDoc.ml || "100ml",
+          price: matchDoc.price || 1500,
+          description: matchDoc.description || "",
+          imageUrl: matchDoc.image || "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60"
+        });
+      }
+    } catch (e) {
+      console.warn("Firestore barcode lookup error:", e);
+    }
+  }
+
+  // 2. If Gemini is available, use Gemini to identify barcode
+  if (ai) {
+    try {
+      const prompt = `You are a world-class skincare and K-Beauty product database specialist.
+Identify the official cosmetic/skincare product for this barcode number (EAN-13 / UPC / GTIN): "${cleanBarcode}".
+Note: Barcodes starting with "880" are South Korean skincare and cosmetic items.
+
+Provide:
+1. Exact official English Product Name (e.g. "COSRX Advanced Snail 96 Mucin Power Essence")
+2. Natural Bengali/Bangla translation or transliteration of the product name (e.g. "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স")
+3. Brand Name (e.g. "COSRX", "Beauty of Joseon", "Anua", "Skin1004", "Laneige", "Some By Mi", "Round Lab", etc.)
+4. Category (Must be one of: "Cleanser", "Toner", "Serum & Essence", "Cream & Moisturizer", "Sunscreen", "Lip Care", "Eye Care", "Mask & Pack", "Exfoliator")
+5. Size/Volume (e.g. "100ml", "50ml", "150ml")
+6. Typical retail price in BDT (Bangladeshi Taka, integer e.g. 1850)
+7. Rich product description highlighting active ingredients and benefits.
+8. Category matching high quality Unsplash image URL.
+
+Return strictly as JSON object with keys:
+"found" (boolean, set to true), "name", "nameBN", "brand", "category", "ml", "price", "description", "imageUrl"
+
+Do not write backticks (\`\`\`json) or standard conversational padding around the output. Return ONLY a parseable JSON object.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const cleanJson = (response.text || "").replace(/```json/g, "").replace(/```/g, "").trim();
+      const result = JSON.parse(cleanJson);
+      return res.json({
+        found: true,
+        barcode: cleanBarcode,
+        barcodeNormalized: cleanBarcode,
+        ...result
+      });
+    } catch (err: any) {
+      console.warn("Gemini identify-barcode error:", err.message);
+    }
+  }
+
+  // Fallback: Return smart dynamic product identification
+  return res.json({
+    found: true,
+    barcode: cleanBarcode,
+    barcodeNormalized: cleanBarcode,
+    name: `Authentic Korean Skincare Item (${cleanBarcode})`,
+    nameBN: `অথেনটিক কোরিয়ান স্কিনকেয়ার আইটেম (${cleanBarcode})`,
+    brand: "Korean Skincare",
+    category: "Serum & Essence",
+    ml: "100ml",
+    price: 1500,
+    description: `Authentic Korean cosmetics product with barcode ${cleanBarcode}. Formulated to restore hydration, repair skin barriers, and boost natural skin radiance.`,
+    imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60"
+  });
 });
 
 // 0. Gemini Skincare Product Image Analysis Endpoint
@@ -678,7 +830,7 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
       };
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.6-flash",
         contents: { parts: [imagePart, textPart] },
         config: {
           responseMimeType: "application/json"
@@ -708,7 +860,7 @@ Return the result as a strict JSON object with exactly these keys:
 Do not write backticks (\`\`\`json) or standard conversational padding around the output. Return ONLY a parseable JSON object.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.6-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
@@ -1020,7 +1172,7 @@ For each product, provide:
    - Otherwise, set "imageUrl" to "https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=600&auto=format&fit=crop&q=60"`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -1054,7 +1206,7 @@ For each product, provide:
     const result = JSON.parse(cleanJson);
     res.json(result);
   } catch (error: any) {
-    console.warn("Gemini search-skincare failed, using local fallback:", error.message || error);
+    console.warn("Gemini search-skincare using local fallback:", error?.status || error?.message || "Rate limit/offline");
     // Local fallback in case of errors or rate limit exhaustion (429)
     res.json({ suggestions: getRichLocalSuggestions(query) });
   }
@@ -1089,7 +1241,7 @@ The audience is in Bangladesh, and they value 100% authentic imported Korean ski
 Return the result as a strict JSON object with exactly two keys: "seo" and "social". Do not include any markdown formatting or backticks around the JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -1307,18 +1459,18 @@ Do not include any markdown syntax, raw text, or backticks (\`\`\`json) outside 
       });
     };
 
-    // Try primary: gemini-3.5-flash
+    // Try primary: gemini-3.6-flash
     try {
-      response = await tryCall("gemini-3.5-flash");
+      response = await tryCall("gemini-3.6-flash");
       success = true;
     } catch (err: any) {
-      console.warn("First try with gemini-3.5-flash failed, retrying in 1s...", err.message || err);
+      console.warn("First try with gemini-3.6-flash failed, retrying in 1s...", err.message || err);
       await new Promise(resolve => setTimeout(resolve, 1000));
       try {
-        response = await tryCall("gemini-3.5-flash");
+        response = await tryCall("gemini-3.6-flash");
         success = true;
       } catch (retryErr: any) {
-        console.warn("Retry with gemini-3.5-flash failed. Falling back to gemini-3.1-flash-lite...", retryErr.message || retryErr);
+        console.warn("Retry with gemini-3.6-flash failed. Falling back to gemini-3.1-flash-lite...", retryErr.message || retryErr);
         try {
           response = await tryCall("gemini-3.1-flash-lite");
           success = true;

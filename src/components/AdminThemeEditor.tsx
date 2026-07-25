@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { themeService, DEFAULT_HOME_THEME } from '../services/themeService';
-import { HomeThemeSettings, SectionKey, ReelItem } from '../types/theme';
+import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME } from '../services/themeService';
+import { HomeThemeSettings, GlobalThemeSettings, SectionKey, ReelItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { 
-  Palette, Layout, Home, Info, ShoppingBag, Phone, Save, 
+  Palette, Layout, Home, Info, ShoppingBag, Phone, Save, Globe, Type,
   RotateCcw, Eye, ArrowUp, ArrowDown, EyeOff, Check, Image as ImageIcon,
-  Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink
+  Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
+  Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -23,12 +24,47 @@ const SECTION_LABELS: Record<SectionKey, { name: string; desc: string }> = {
   communityLive: { name: 'Community Live (Facebook Reels)', desc: 'Social rhythm and video reels showcase' }
 };
 
+const COLOR_PRESETS = [
+  { name: 'Korean Skin Food Pink', primary: '#E91E8C', secondary: '#FF62B2', bg: '#FFF5F8' },
+  { name: 'Royal Velvet Rose', primary: '#C2185B', secondary: '#E91E63', bg: '#FDF2F8' },
+  { name: 'Emerald Sanctuary', primary: '#059669', secondary: '#34D399', bg: '#ECFDF5' },
+  { name: 'Royal Sapphire', primary: '#2563EB', secondary: '#60A5FA', bg: '#EFF6FF' },
+  { name: 'Sunset Coral', primary: '#E11D48', secondary: '#FB7185', bg: '#FFF1F2' },
+  { name: 'Midnight Luxury', primary: '#18181B', secondary: '#3F3F46', bg: '#FAFAFA' },
+  { name: 'Amethyst Glow', primary: '#8B5CF6', secondary: '#C084FC', bg: '#F5F3FF' },
+];
+
+const HEADING_FONT_OPTIONS = [
+  'Playfair Display',
+  'Plus Jakarta Sans',
+  'Inter',
+  'Poppins',
+  'Montserrat',
+  'Merriweather',
+  'Cinzel',
+  'Lora',
+  'Outfit',
+  'Space Grotesk'
+];
+
+const BODY_FONT_OPTIONS = [
+  'Plus Jakarta Sans',
+  'Inter',
+  'Roboto',
+  'Poppins',
+  'Open Sans',
+  'Nunito',
+  'Lato',
+  'Work Sans'
+];
+
 export const AdminThemeEditor: React.FC = () => {
-  // Active Subpage Tab: 'home' | 'about' | 'shop' | 'contact'
-  const [activeTab, setActiveTab] = useState<'home' | 'about' | 'shop' | 'contact'>('home');
+  // Active Subpage Tab: 'global' | 'home' | 'about' | 'shop' | 'contact'
+  const [activeTab, setActiveTab] = useState<'global' | 'home' | 'about' | 'shop' | 'contact'>('global');
 
   // Theme State
   const [theme, setTheme] = useState<HomeThemeSettings>(DEFAULT_HOME_THEME);
+  const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [expandedSection, setExpandedSection] = useState<SectionKey | null>('hero');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -45,14 +81,20 @@ export const AdminThemeEditor: React.FC = () => {
 
   useEffect(() => {
     // Subscribe to theme service
-    const unsubscribe = themeService.subscribe((data) => {
+    const unsubscribeHome = themeService.subscribe((data) => {
       setTheme(data);
     });
+    const unsubscribeGlobal = themeService.subscribeGlobal((data) => {
+      setGlobalTheme(data);
+    });
     setAllProducts(productService.getProducts());
-    return () => unsubscribe();
+    return () => {
+      unsubscribeHome();
+      unsubscribeGlobal();
+    };
   }, []);
 
-  // Save handler
+  // Home Save handler
   const handleSave = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
@@ -61,16 +103,38 @@ export const AdminThemeEditor: React.FC = () => {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
-      console.error('Failed to save theme:', err);
+      console.error('Failed to save home theme:', err);
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Reset handler
+  // Home Reset handler
   const handleReset = async () => {
     if (confirm('Are you sure you want to reset all Home Page theme settings to brand defaults?')) {
       await themeService.resetToDefault();
+    }
+  };
+
+  // Global Save handler
+  const handleSaveGlobal = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await themeService.saveGlobalTheme(globalTheme);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to save global theme:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Global Reset handler
+  const handleResetGlobal = async () => {
+    if (confirm('Are you sure you want to reset all Global Settings (Favicon, Logo, Theme Color, Fonts, Contacts) to brand defaults?')) {
+      await themeService.resetGlobalToDefault();
     }
   };
 
@@ -105,6 +169,13 @@ export const AdminThemeEditor: React.FC = () => {
 
   const handleSelectMediaUrl = (url: string) => {
     if (!activeMediaTarget) return;
+
+    if (activeMediaTarget.startsWith('global.')) {
+      const field = activeMediaTarget.replace('global.', '') as keyof GlobalThemeSettings;
+      setGlobalTheme((prev) => ({ ...prev, [field]: url }));
+      setActiveMediaTarget(null);
+      return;
+    }
 
     // Parse target path like "hero.backgroundImageUrl" or "sharedJourney.photos.0.imageUrl"
     const parts = activeMediaTarget.split('.');
@@ -151,20 +222,20 @@ export const AdminThemeEditor: React.FC = () => {
           </button>
 
           <button
-            onClick={handleReset}
-            title="Reset to default brand theme"
+            onClick={activeTab === 'global' ? handleResetGlobal : handleReset}
+            title="Reset theme settings to default"
             className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition border border-slate-700 cursor-pointer shadow-sm"
           >
             <RotateCcw size={15} />
           </button>
 
           <button
-            onClick={handleSave}
+            onClick={activeTab === 'global' ? handleSaveGlobal : handleSave}
             disabled={isSaving}
             className="flex-1 md:flex-none px-6 py-2.5 bg-[#E91E8C] hover:bg-pink-600 text-white rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-2 shadow-lg shadow-pink-900/30 cursor-pointer disabled:opacity-50"
           >
             <Save size={16} />
-            <span>{isSaving ? 'Saving Changes...' : 'Save Theme Changes'}</span>
+            <span>{isSaving ? 'Saving Changes...' : activeTab === 'global' ? 'Save Global Settings' : 'Save Theme Changes'}</span>
           </button>
         </div>
       </div>
@@ -177,12 +248,25 @@ export const AdminThemeEditor: React.FC = () => {
           className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-sm"
         >
           <Check size={18} className="text-emerald-600" />
-          <span>Theme changes saved successfully! The live homepage has automatically updated.</span>
+          <span>{activeTab === 'global' ? 'Global theme settings saved successfully! Site favicon, logo & colors updated.' : 'Theme changes saved successfully! The live homepage has automatically updated.'}</span>
         </motion.div>
       )}
 
-      {/* 4 Subpage Navigation Tabs */}
+      {/* Subpage Navigation Tabs */}
       <div className="bg-white p-2 rounded-2xl border border-pink-100 shadow-sm flex flex-wrap gap-2">
+        <button
+          onClick={() => setActiveTab('global')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+            activeTab === 'global'
+              ? 'bg-[#E91E8C] text-white shadow-md'
+              : 'text-gray-600 hover:text-[#E91E8C] hover:bg-pink-50/50'
+          }`}
+        >
+          <Globe size={15} />
+          <span>Global Setting</span>
+          <span className="text-[9px] bg-white/20 px-2 py-0.5 rounded-full uppercase">Favicon & Logo</span>
+        </button>
+
         <button
           onClick={() => setActiveTab('home')}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
@@ -193,7 +277,7 @@ export const AdminThemeEditor: React.FC = () => {
         >
           <Home size={15} />
           <span>Home Page</span>
-          <span className="text-[9px] bg-white/20 px-2 py-0.5 rounded-full uppercase">Active Editor</span>
+          <span className="text-[9px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Sections</span>
         </button>
 
         <button
@@ -235,6 +319,521 @@ export const AdminThemeEditor: React.FC = () => {
           <span className="text-[9px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Structure</span>
         </button>
       </div>
+
+      {/* SUBPAGE: GLOBAL SETTINGS */}
+      {activeTab === 'global' && (
+        <div className="space-y-6">
+          {/* Global Header Banner / Info */}
+          <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="bg-pink-100 text-[#E91E8C] text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full">
+                  Global Branding & Theme System
+                </span>
+              </div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <Globe className="text-[#E91E8C]" size={20} />
+                <span>গ্লোবাল সেটিং (Global Settings)</span>
+              </h2>
+              <p className="text-slate-500 text-xs mt-1">
+                Configure site favicon, brand logo, master theme colors, font families, hotlines, and announcement bar across the entire application.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={handleResetGlobal}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw size={14} />
+                <span>Reset Defaults</span>
+              </button>
+              <button
+                onClick={handleSaveGlobal}
+                disabled={isSaving}
+                className="px-5 py-2 bg-[#E91E8C] hover:bg-pink-600 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md shadow-pink-200 cursor-pointer disabled:opacity-50"
+              >
+                <Save size={14} />
+                <span>{isSaving ? 'Saving...' : 'Save Global Settings'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* 1. Favicon Setting */}
+            <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-pink-50 text-[#E91E8C] flex items-center justify-center font-bold">
+                    <Globe size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">ফেভিকন সেটিং (Favicon Setting)</h3>
+                    <p className="text-[11px] text-slate-500">Browser tab icon (.ico, .png, or image link)</p>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-bold">Tab Icon</span>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-xs font-bold text-slate-700">Favicon Image URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={globalTheme.faviconUrl}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, faviconUrl: e.target.value })}
+                    placeholder="https://example.com/favicon.png"
+                    className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                  />
+                  <button
+                    onClick={() => openMediaPicker('global.faviconUrl')}
+                    className="px-3 py-2.5 bg-pink-50 text-[#E91E8C] hover:bg-pink-100 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <ImageIcon size={14} />
+                    <span>Media</span>
+                  </button>
+                </div>
+
+                {/* Browser Tab Simulation Preview */}
+                <div className="mt-4 p-3 bg-slate-100 rounded-2xl border border-slate-200">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block mb-2">
+                    Browser Tab Preview:
+                  </span>
+                  <div className="max-w-xs bg-slate-200/80 p-1.5 rounded-t-xl flex items-center gap-2 border-b border-slate-300 shadow-inner">
+                    <div className="bg-white px-3 py-1.5 rounded-lg flex items-center gap-2 text-xs font-bold text-slate-800 shadow-sm max-w-full truncate">
+                      <img
+                        src={globalTheme.faviconUrl || 'https://lh3.googleusercontent.com/aida-public/AB6AXuDV9JqR2f8TTBJG32wqldTxeJQRLC1xolU3UBXhjlG8xqiFFHmPa8s7VOmDWPNYjyf-t6OqEzaveZ7B4b0qSnfSfsjMLerSO2S0r_L5h7hWtHIb0PQcNOU9xzM5hr44aKCbKYO0mcXsLe818N0R-AA3Zj14exAmZCen73zfHV8MVDMbR9l4MQjyLLTF_Ar2OIbFnMMc-hSVV4yFDshte5KzLe5iLA2SY-A8gSFkM3MlXUpPyZu37-bDXliWJF5e0ujz-d6-bUCf01w'}
+                        alt="Favicon preview"
+                        className="w-4 h-4 rounded object-cover shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://lh3.googleusercontent.com/aida-public/AB6AXuDV9JqR2f8TTBJG32wqldTxeJQRLC1xolU3UBXhjlG8xqiFFHmPa8s7VOmDWPNYjyf-t6OqEzaveZ7B4b0qSnfSfsjMLerSO2S0r_L5h7hWtHIb0PQcNOU9xzM5hr44aKCbKYO0mcXsLe818N0R-AA3Zj14exAmZCen73zfHV8MVDMbR9l4MQjyLLTF_Ar2OIbFnMMc-hSVV4yFDshte5KzLe5iLA2SY-A8gSFkM3MlXUpPyZu37-bDXliWJF5e0ujz-d6-bUCf01w';
+                        }}
+                      />
+                      <span className="truncate">{globalTheme.siteTitle || 'Korean Skin Food BD'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Brand Logo & Header Customization */}
+            <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+                    <ImageIcon size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">লোগো ও হেডার ব্র্যান্ডিং (Logo Settings)</h3>
+                    <p className="text-[11px] text-slate-500">Custom image logo or styled brand title & tagline</p>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-md font-bold">Header</span>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Logo Image URL (Optional)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={globalTheme.logoUrl}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, logoUrl: e.target.value })}
+                      placeholder="Leave blank to use Text Logo below"
+                      className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                    <button
+                      onClick={() => openMediaPicker('global.logoUrl')}
+                      className="px-3 py-2.5 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <ImageIcon size={14} />
+                      <span>Media</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Brand Name / Logo Text</label>
+                    <input
+                      type="text"
+                      value={globalTheme.logoText}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, logoText: e.target.value })}
+                      placeholder="e.g. Korean Skin Food BD"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Brand Tagline</label>
+                    <input
+                      type="text"
+                      value={globalTheme.logoTagline}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, logoTagline: e.target.value })}
+                      placeholder="e.g. K-BEAUTY COSMECEUTICALS"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Live Logo Preview Box */}
+                <div className="mt-3 p-4 bg-slate-900 rounded-2xl text-white flex items-center justify-between shadow-md">
+                  <div>
+                    <span className="text-[9px] uppercase tracking-wider text-pink-400 font-extrabold block mb-1">Live Header Logo Preview</span>
+                    {globalTheme.logoUrl ? (
+                      <img src={globalTheme.logoUrl} alt="Custom Logo" className="h-9 object-contain" />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#E91E8C] to-purple-600 flex items-center justify-center text-white font-extrabold text-sm">
+                          K
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold text-sm text-white tracking-tight leading-none">{globalTheme.logoText || 'Korean Skin Food BD'}</h4>
+                          <span className="text-[9px] text-pink-300 font-bold tracking-widest uppercase block mt-0.5">{globalTheme.logoTagline || 'K-BEAUTY COSMECEUTICALS'}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 font-mono">Live</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Theme Color Scheme Engine */}
+            <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4 lg:col-span-2">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-pink-50 text-[#E91E8C] flex items-center justify-center font-bold">
+                    <Palette size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">থিম কালার সেটিং (Theme Color Palette)</h3>
+                    <p className="text-[11px] text-slate-500">Pick primary accent, gradient highlight, background tint, and dark accents</p>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-pink-100 text-[#E91E8C] px-2.5 py-0.5 rounded-full font-extrabold uppercase">Live CSS Variables</span>
+              </div>
+
+              {/* Preset Palettes Quick Chooser */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Quick Theme Preset Palettes (এক ক্লিকে কালার স্কিম থিম চেঞ্জ করুন):</label>
+                <div className="flex flex-wrap gap-2">
+                  {COLOR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.name}
+                      onClick={() => setGlobalTheme({
+                        ...globalTheme,
+                        primaryColor: preset.primary,
+                        secondaryColor: preset.secondary,
+                        backgroundColor: preset.bg
+                      })}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                        globalTheme.primaryColor === preset.primary
+                          ? 'border-[#E91E8C] bg-pink-50/80 shadow-sm text-slate-900'
+                          : 'border-slate-200 hover:border-pink-300 bg-white text-slate-700'
+                      }`}
+                    >
+                      <span className="w-3.5 h-3.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: preset.primary }} />
+                      <span>{preset.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+                {/* Primary Theme Color */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-slate-800">Primary Color</label>
+                    <input
+                      type="color"
+                      value={globalTheme.primaryColor || '#E91E8C'}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, primaryColor: e.target.value })}
+                      className="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 overflow-hidden"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={globalTheme.primaryColor}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, primaryColor: e.target.value })}
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E91E8C]"
+                  />
+                  <span className="text-[10px] text-slate-500 block">Main buttons, badges & active states</span>
+                </div>
+
+                {/* Secondary Color */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-slate-800">Secondary / Gradient</label>
+                    <input
+                      type="color"
+                      value={globalTheme.secondaryColor || '#FF62B2'}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, secondaryColor: e.target.value })}
+                      className="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 overflow-hidden"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={globalTheme.secondaryColor}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, secondaryColor: e.target.value })}
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E91E8C]"
+                  />
+                  <span className="text-[10px] text-slate-500 block">Gradients, hovers & subtle highlights</span>
+                </div>
+
+                {/* Accent / Dark Color */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-slate-800">Accent / Dark Text</label>
+                    <input
+                      type="color"
+                      value={globalTheme.accentColor || '#0F172A'}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, accentColor: e.target.value })}
+                      className="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 overflow-hidden"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={globalTheme.accentColor}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, accentColor: e.target.value })}
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E91E8C]"
+                  />
+                  <span className="text-[10px] text-slate-500 block">Dark section headers & typography</span>
+                </div>
+
+                {/* Background Tint */}
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-slate-800">Background Tint</label>
+                    <input
+                      type="color"
+                      value={globalTheme.backgroundColor || '#FFF5F8'}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, backgroundColor: e.target.value })}
+                      className="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 overflow-hidden"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={globalTheme.backgroundColor}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, backgroundColor: e.target.value })}
+                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E91E8C]"
+                  />
+                  <span className="text-[10px] text-slate-500 block">Soft background tint for cards</span>
+                </div>
+              </div>
+
+              {/* Live Swatch Preview */}
+              <div className="p-4 rounded-2xl border border-pink-100 flex flex-wrap items-center justify-between gap-3" style={{ backgroundColor: globalTheme.backgroundColor || '#FFF5F8' }}>
+                <div>
+                  <h4 className="font-extrabold text-xs" style={{ color: globalTheme.accentColor || '#0F172A' }}>Live Palette Preview Sample</h4>
+                  <p className="text-[11px]" style={{ color: globalTheme.accentColor || '#0F172A', opacity: 0.8 }}>This is how your chosen background and buttons will look to customers.</p>
+                </div>
+                <button
+                  style={{ backgroundColor: globalTheme.primaryColor || '#E91E8C' }}
+                  className="px-5 py-2 text-white rounded-xl text-xs font-extrabold shadow-md cursor-pointer transition hover:opacity-90"
+                >
+                  Sample Primary Button
+                </button>
+              </div>
+            </div>
+
+            {/* 4. Font Family & Typography */}
+            <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4 lg:col-span-2">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                    <FontIcon size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">ফন্ট ফ্যামিলি সেটিং (Typography & Font Family)</h3>
+                    <p className="text-[11px] text-slate-500">Google Fonts selection for headings and body content</p>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md font-bold">Google Fonts</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Heading Font Family (শিরোনাম ফন্ট)</label>
+                  <select
+                    value={globalTheme.headingFont}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, headingFont: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-extrabold text-slate-800 focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                  >
+                    {HEADING_FONT_OPTIONS.map((font) => (
+                      <option key={font} value={font}>{font}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Body Font Family (বডি লেখা ফন্ট)</label>
+                  <select
+                    value={globalTheme.bodyFont}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, bodyFont: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-extrabold text-slate-800 focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                  >
+                    {BODY_FONT_OPTIONS.map((font) => (
+                      <option key={font} value={font}>{font}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Live Font Specimen Card */}
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Live Font Specimen Preview:</span>
+                <h3 className="text-lg font-bold text-slate-900" style={{ fontFamily: `'${globalTheme.headingFont || 'Playfair Display'}', serif` }}>
+                  {globalTheme.siteTitle || 'Korean Skin Food BD'} — Radiance & Heritage
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed" style={{ fontFamily: `'${globalTheme.bodyFont || 'Plus Jakarta Sans'}', sans-serif` }}>
+                  100% Authentic Korean Cosmeceuticals directly imported from Seoul, South Korea. Pure botanical formulations verified for Bengali skin tones.
+                </p>
+              </div>
+            </div>
+
+            {/* 5. Site Identity & Contact Information */}
+            <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                    <Shield size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">সাইট ইনফো ও যোগাযোগ (Site Info & Hotline)</h3>
+                    <p className="text-[11px] text-slate-500">Store title, meta tagline, currency symbol and contact details</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Site Title / Browser Tab Title</label>
+                    <input
+                      type="text"
+                      value={globalTheme.siteTitle}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, siteTitle: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Currency Symbol</label>
+                    <input
+                      type="text"
+                      value={globalTheme.currencySymbol}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, currencySymbol: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-extrabold text-slate-800 text-center focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Site Meta Tagline / Subtitle</label>
+                  <input
+                    type="text"
+                    value={globalTheme.siteTagline}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, siteTagline: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Hotline / WhatsApp Phone</label>
+                    <input
+                      type="text"
+                      value={globalTheme.contactPhone}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, contactPhone: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Support Email Address</label>
+                    <input
+                      type="text"
+                      value={globalTheme.contactEmail}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, contactEmail: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 6. Social Media Links & Announcement Bar */}
+            <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                    <Megaphone size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">অ্যানাউন্সমেন্ট ও সোশ্যাল লিঙ্ক (Social & Announcement)</h3>
+                    <p className="text-[11px] text-slate-500">Top announcement marquee bar and official social profiles</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="p-3 bg-pink-50/50 rounded-2xl border border-pink-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                      <Megaphone size={14} className="text-[#E91E8C]" />
+                      <span>Enable Top Announcement Bar</span>
+                    </label>
+                    <input
+                      type="checkbox"
+                      checked={globalTheme.enableAnnouncement}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, enableAnnouncement: e.target.checked })}
+                      className="w-4 h-4 accent-[#E91E8C] rounded cursor-pointer"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={globalTheme.announcementText}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, announcementText: e.target.value })}
+                    placeholder="e.g. ✨ FREE shipping inside Dhaka for orders over ৳2,000! ✨"
+                    className="w-full px-3.5 py-2 bg-white border border-pink-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Facebook Page URL</label>
+                    <input
+                      type="text"
+                      value={globalTheme.facebookUrl}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, facebookUrl: e.target.value })}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Instagram URL</label>
+                    <input
+                      type="text"
+                      value={globalTheme.instagramUrl}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, instagramUrl: e.target.value })}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Footer Copyright / Slogan Text</label>
+                  <input
+                    type="text"
+                    value={globalTheme.footerText}
+                    onChange={(e) => setGlobalTheme({ ...globalTheme, footerText: e.target.value })}
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* SUBPAGE: HOME PAGE THEME EDITOR */}
       {activeTab === 'home' && (

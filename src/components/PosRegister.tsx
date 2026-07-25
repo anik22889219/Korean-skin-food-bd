@@ -296,10 +296,14 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           productId: item.product.id,
           name: item.product.name,
           price: item.product.discountPrice || item.product.price,
-          quantity: item.quantity
+          quantity: item.quantity,
+          scannedQuantity: item.quantity,
+          barcode: item.product.barcode
         })),
         totalAmount: grandTotal,
         status: 'delivered',
+        order_source: 'POS',
+        stock_deducted: true,
         createdAt: new Date().toISOString(),
         paymentMethod: 'POS_In_Person',
         sessionType: 'POS',
@@ -327,6 +331,18 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             updatedProd.stock,
             `POS Checkout - Register ${sessionId}`
           );
+          productService.logStockMovement({
+            productId: prod.id,
+            productName: prod.name,
+            orderId,
+            quantity: -item.quantity,
+            type: 'sale',
+            source: 'POS',
+            performedBy: 'POS Operator',
+            previousStock: prevStock,
+            newStock: updatedProd.stock,
+            reason: `POS In-Store Checkout`
+          });
         }
       }
 
