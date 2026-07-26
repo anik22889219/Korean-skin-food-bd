@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, doc, setDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 import { QRCodeSVG } from 'qrcode.react';
-import { jsPDF } from 'jspdf';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
 import { Product, Order } from '../types';
+import InvoiceDocument from './InvoiceDocument';
+import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 import { 
   Tv, 
   Smartphone, 
@@ -367,115 +368,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     }
   };
 
-  // 6. Download PDF Invoice using jsPDF
+  // 6. Download PDF Invoice using html2canvas & jsPDF helper
   const downloadPDF = () => {
     if (!invoiceOrder) return;
-    try {
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      // Colors & Branding
-      doc.setFillColor(233, 30, 140); // Pink header bar
-      doc.rect(0, 0, 210, 15, 'F');
-
-      doc.setTextColor(255, 255, 255);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.text('KOREAN SKIN FOOD BD', 15, 10);
-
-      // Invoice info
-      doc.setTextColor(50, 50, 50);
-      doc.setFontSize(22);
-      doc.text('INVOICE', 15, 30);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Invoice ID: ${invoiceOrder.id}`, 150, 25);
-      doc.text(`Date: ${new Date(invoiceOrder.createdAt).toLocaleString()}`, 150, 30);
-      doc.text(`Channel: In-Store POS Register`, 150, 35);
-
-      // Divider line
-      doc.setDrawColor(240, 240, 240);
-      doc.line(15, 42, 195, 42);
-
-      // Customer Details
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text('CUSTOMER INFO:', 15, 50);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.text(`Name: ${invoiceOrder.customerName}`, 15, 56);
-      doc.text(`Phone: ${invoiceOrder.customerPhone}`, 15, 62);
-      doc.text(`Address: ${invoiceOrder.address}`, 15, 68);
-
-      // Products Table Header
-      let currentY = 82;
-      doc.setFillColor(250, 240, 245);
-      doc.rect(15, currentY, 180, 8, 'F');
-      
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(190, 24, 93); // Pink dark text
-      doc.text('Item Description', 18, currentY + 5.5);
-      doc.text('Price (BDT)', 110, currentY + 5.5);
-      doc.text('Qty', 145, currentY + 5.5);
-      doc.text('Total (BDT)', 170, currentY + 5.5);
-
-      // Table rows
-      doc.setTextColor(70, 70, 70);
-      doc.setFont('helvetica', 'normal');
-      
-      invoiceOrder.items.forEach((item, index) => {
-        currentY += 10;
-        
-        // Background strip for alternating rows
-        if (index % 2 === 1) {
-          doc.setFillColor(253, 250, 252);
-          doc.rect(15, currentY - 2, 180, 10, 'F');
-        }
-
-        // Draw item row
-        doc.text(item.name.substring(0, 48), 18, currentY + 4);
-        doc.text(`bdt ${item.price}`, 110, currentY + 4);
-        doc.text(`x ${item.quantity}`, 145, currentY + 4);
-        doc.text(`bdt ${item.price * item.quantity}`, 170, currentY + 4);
-        
-        doc.setDrawColor(245, 245, 245);
-        doc.line(15, currentY + 8, 195, currentY + 8);
-      });
-
-      // Totals block
-      currentY += 18;
-      doc.setDrawColor(200, 200, 200);
-      doc.line(120, currentY, 195, currentY);
-
-      const currentDeliveryFee = invoiceOrder.items.length > 0 ? (deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0) : 0;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.text('Subtotal:', 130, currentY + 6);
-      doc.text(`BDT ৳${invoiceOrder.totalAmount - currentDeliveryFee}`, 170, currentY + 6);
-
-      doc.text('Delivery Charge:', 130, currentY + 12);
-      doc.text(`BDT ৳${currentDeliveryFee}`, 170, currentY + 12);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(233, 30, 140);
-      doc.text('Grand Total:', 130, currentY + 20);
-      doc.text(`BDT ৳${invoiceOrder.totalAmount}`, 170, currentY + 20);
-
-      // Footer
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      doc.setTextColor(150, 150, 150);
-      doc.text('Thank you for glowing with us! This is an official computer-generated receipt.', 105, 275, { align: 'center' });
-
-      doc.save(`Invoice-${invoiceOrder.id}.pdf`);
-    } catch (err) {
-      console.error('Error generating PDF:', err);
-    }
+    downloadInvoicePDF(invoiceOrder);
   };
 
   const pairingUrl = `${window.location.origin}/pos/scan/${sessionId}`;
@@ -590,92 +486,13 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             </div>
           </div>
 
-          {/* PRINTABLE A4 INVOICE SHEET */}
-          <div className="bg-white rounded-3xl p-8 shadow-xl border border-pink-100 space-y-8 font-mono print:border-none print:shadow-none print:p-0">
-            <div className="flex justify-between items-start flex-wrap gap-4 border-b border-pink-100 pb-6">
-              <div className="space-y-1.5">
-                <h1 className="text-xl font-extrabold text-gray-900 tracking-tight">KOREAN SKIN FOOD BD</h1>
-                <p className="text-xs text-pink-600 font-semibold italic">"Love yourself, Love your skin"</p>
-                <p className="text-[11px] text-gray-500 font-medium">Flagship Store, Dhaka, Bangladesh</p>
-                <p className="text-[11px] text-gray-500 font-medium font-mono">Mobile Hotline: 01712345678</p>
-              </div>
-
-              <div className="text-right space-y-1 text-xs">
-                <span className="bg-[#E91E8C] text-white px-2.5 py-1 rounded font-bold uppercase text-[10px] tracking-wider block text-center">
-                  Cash Invoice
-                </span>
-                <p className="font-bold text-gray-800 mt-1"># {invoiceOrder.id}</p>
-                <p className="text-gray-500 text-[10px]">{new Date(invoiceOrder.createdAt).toLocaleString()}</p>
-              </div>
-            </div>
-
-            {/* Customer info card */}
-            <div className="bg-pink-50/10 p-5 rounded-2xl border border-pink-100/50 text-xs grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <span className="text-pink-700 font-bold uppercase tracking-wider block text-[10px]">Customer Details:</span>
-                <div><strong className="text-gray-800 font-bold">{invoiceOrder.customerName}</strong></div>
-                <div><span className="text-gray-500">Phone:</span> <span className="font-mono">{invoiceOrder.customerPhone}</span></div>
-              </div>
-              <div className="space-y-2">
-                <span className="text-pink-700 font-bold uppercase tracking-wider block text-[10px]">Delivery Info:</span>
-                <div className="text-gray-700 font-medium">{invoiceOrder.address}</div>
-                <div><span className="text-gray-500">Method:</span> POS Counter Checkout</div>
-              </div>
-            </div>
-
-            {/* Invoice Line Items */}
-            <div className="space-y-4">
-              <span className="text-pink-700 font-bold uppercase tracking-wider block text-[10px]">Order Particulars:</span>
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b-2 border-dashed border-pink-100 text-[#E91E8C] font-extrabold">
-                    <th className="py-2.5 px-1">Product Description</th>
-                    <th className="py-2.5 px-1 text-right">Unit Price</th>
-                    <th className="py-2.5 px-1 text-center">Qty</th>
-                    <th className="py-2.5 px-1 text-right">Total Price</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-pink-100/50 text-gray-800">
-                  {invoiceOrder.items.map((item, index) => (
-                    <tr key={index}>
-                      <td className="py-3 px-1 font-semibold">{item.name}</td>
-                      <td className="py-3 px-1 text-right font-mono">৳{item.price}</td>
-                      <td className="py-3 px-1 text-center font-mono font-bold">{item.quantity}</td>
-                      <td className="py-3 px-1 text-right font-mono font-extrabold">৳{item.price * item.quantity}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Calculations Breakdown */}
-            <div className="flex justify-end pt-4">
-              <div className="w-full max-w-xs space-y-2 text-right text-xs border-t border-dashed border-pink-200 pt-4">
-                <div className="flex justify-between text-gray-500">
-                  <span>Gross Subtotal:</span>
-                  <span className="font-mono">৳{subtotal}</span>
-                </div>
-                <div className="flex justify-between text-gray-500">
-                  <span>In-Store Delivery:</span>
-                  <span className="font-mono">৳{deliveryCharge}</span>
-                </div>
-                <div className="flex justify-between text-gray-900 font-black text-sm border-t border-dashed border-pink-200 pt-2">
-                  <span className="text-[#E91E8C]">Amount Paid (Net):</span>
-                  <span className="text-[#E91E8C] font-mono">৳{grandTotal}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="text-center text-gray-400 text-[10px] border-t border-pink-100 pt-6">
-              Thank you for choosing Korean Skin Food BD. We appreciate your preference!<br/>
-              Exchange available within 7 days with unopened package and receipt.
-            </div>
-          </div>
+          {/* REUSABLE INVOICE DOCUMENT COMPONENT */}
+          <InvoiceDocument order={invoiceOrder} />
 
           {/* CONTROLS (HIDDEN ON PRINT) */}
           <div className="flex flex-wrap gap-3 pt-4 print:hidden">
             <button 
-              onClick={() => window.print()}
+              onClick={() => printInvoice(invoiceOrder)}
               className="flex-1 bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 py-3 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
             >
               <Printer size={15} />

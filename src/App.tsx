@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { MainLayout } from './components/MainLayout';
 import { StoreCatalog } from './components/StoreCatalog';
+import { ShopCategoryPage } from './components/ShopCategoryPage';
 import { ProductDetail } from './components/ProductDetail';
 import { Login } from './components/Login';
 import { Profile } from './components/Profile';
@@ -60,7 +61,7 @@ export default function App() {
             {/* PUBLIC SHOP PAGES */}
             <Route path="/" element={<MainLayout />}>
               <Route index element={<StoreCatalog />} />
-              <Route path="shop" element={<StoreCatalog />} />
+              <Route path="shop" element={<ShopCategoryPage />} />
               <Route path="about-us" element={<AboutUs />} />
               <Route path="contact-us" element={<ContactUs />} />
               <Route path="product/:id" element={<ProductDetail />} />

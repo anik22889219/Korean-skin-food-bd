@@ -27,11 +27,21 @@ import {
   Volume2,
   Upload,
   Focus,
-  Maximize2
+  Maximize2,
+  FileText,
+  Truck,
+  Printer,
+  Download,
+  ExternalLink,
+  Send,
+  Loader2
 } from 'lucide-react';
 import { Order, OrderItem, Product, StockMovement } from '../types';
 import { posService } from '../services/posService';
 import { productService } from '../services/productService';
+import InvoiceDocument from './InvoiceDocument';
+import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
+import { createSteadfastConsignment } from '../services/steadfastService';
 import { 
   findProductByScannedCode, 
   scanBarcodeFromImageFile, 
@@ -92,7 +102,60 @@ export const AdminOrders: React.FC = () => {
   // Selected Order Detail View Modal
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<Order | null>(null);
 
+  // Invoice Modal State & Courier Sending State
+  const [invoiceModalOrder, setInvoiceModalOrder] = useState<Order | null>(null);
+  const [isSteadfastLoading, setIsSteadfastLoading] = useState<boolean>(false);
+  const [steadfastNotice, setSteadfastNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Send Order to Steadfast Courier
+  const handleSendToSteadfast = async (orderToDispatch: Order) => {
+    if (isSteadfastLoading) return;
+    setIsSteadfastLoading(true);
+    setSteadfastNotice(null);
+
+    try {
+      const res = await createSteadfastConsignment(orderToDispatch);
+      if (res.success && res.courier) {
+        // Save courier data to order in posService & Firestore
+        const updated = posService.updateOrderCourier(orderToDispatch.id, res.courier);
+        
+        // Update state across open modals/views
+        const finalOrder = updated || { ...orderToDispatch, courier: res.courier };
+        
+        setOrders(prev => prev.map(o => o.id === finalOrder.id ? finalOrder : o));
+        
+        if (invoiceModalOrder?.id === finalOrder.id) {
+          setInvoiceModalOrder(finalOrder);
+        }
+        if (selectedOrderDetails?.id === finalOrder.id) {
+          setSelectedOrderDetails(finalOrder);
+        }
+        if (activeFulfillmentOrder?.id === finalOrder.id) {
+          setActiveFulfillmentOrder(finalOrder);
+        }
+
+        setSteadfastNotice({
+          type: 'success',
+          text: `Successfully dispatched to Steadfast! Consignment ID: ${res.courier.consignmentId}`
+        });
+      } else {
+        setSteadfastNotice({
+          type: 'error',
+          text: res.message || 'Failed to create Steadfast courier consignment.'
+        });
+      }
+    } catch (err: any) {
+      console.error('Steadfast consignment error:', err);
+      setSteadfastNotice({
+        type: 'error',
+        text: err.message || 'Error connecting to Steadfast Courier API.'
+      });
+    } finally {
+      setIsSteadfastLoading(false);
+    }
+  };
 
   // Auto-refresh interval and initial load
   useEffect(() => {
@@ -440,16 +503,44 @@ export const AdminOrders: React.FC = () => {
               </h2>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setInvoiceModalOrder(activeFulfillmentOrder)}
+                className="px-3.5 py-2 bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-2xs"
+              >
+                <FileText className="w-4 h-4 text-[#C81E78]" />
+                View Invoice
+              </button>
+
+              {activeFulfillmentOrder.courier ? (
+                <div className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                  <Truck className="w-4 h-4 text-emerald-600" />
+                  <span>Steadfast CN: #{activeFulfillmentOrder.courier.consignmentId}</span>
+                </div>
+              ) : (
+                <button
+                  disabled={isSteadfastLoading}
+                  onClick={() => handleSendToSteadfast(activeFulfillmentOrder)}
+                  className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                >
+                  {isSteadfastLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Truck className="w-4 h-4" />
+                  )}
+                  <span>Send to Steadfast</span>
+                </button>
+              )}
+
               <button
                 onClick={() => setActiveFulfillmentOrder(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-all"
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
               >
                 ← Exit Verification
               </button>
               <button
                 onClick={() => handleCancelOrder(activeFulfillmentOrder)}
-                className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-sm font-semibold rounded-xl transition-all"
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl transition-all"
               >
                 Cancel Order
               </button>
@@ -1000,14 +1091,51 @@ export const AdminOrders: React.FC = () => {
                         ৳{order.totalAmount.toLocaleString()}
                       </td>
                       <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           <button
                             onClick={() => setSelectedOrderDetails(order)}
                             className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-all"
-                            title="View Details"
+                            title="View Order Details"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+
+                          <button
+                            onClick={() => setInvoiceModalOrder(order)}
+                            className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] rounded-lg transition-all border border-pink-200"
+                            title="View Shared Invoice"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            onClick={() => downloadInvoicePDF(order)}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all"
+                            title="Download PDF Invoice"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+
+                          {order.courier ? (
+                            <span 
+                              className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10px] rounded-full flex items-center gap-1"
+                              title={`Steadfast CN: ${order.courier.consignmentId}`}
+                            >
+                              <Truck className="w-3 h-3 text-emerald-600" />
+                              CN #{order.courier.consignmentId}
+                            </span>
+                          ) : (
+                            order.status !== 'cancelled' && (
+                              <button
+                                disabled={isSteadfastLoading}
+                                onClick={() => handleSendToSteadfast(order)}
+                                className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 font-bold text-xs rounded-lg transition-all flex items-center gap-1 disabled:opacity-50"
+                                title="Send to Steadfast Courier"
+                              >
+                                <Truck className="w-3 h-3" /> Steadfast
+                              </button>
+                            )
+                          )}
 
                           {(order.status === 'pending' || order.status === 'packing') && (
                             <button
@@ -1152,6 +1280,18 @@ export const AdminOrders: React.FC = () => {
               <div><strong>Status:</strong> {selectedOrderDetails.status.toUpperCase()}</div>
             </div>
 
+            {selectedOrderDetails.courier && (
+              <div className="border border-emerald-200 bg-emerald-50/60 rounded-xl p-3 text-xs space-y-1">
+                <div className="font-bold text-emerald-800 uppercase flex items-center gap-1">
+                  <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Steadfast Courier Dispatched</span>
+                </div>
+                <div className="text-emerald-900 font-mono">Consignment ID: #{selectedOrderDetails.courier.consignmentId}</div>
+                <div className="text-emerald-900 font-mono">Tracking Code: {selectedOrderDetails.courier.trackingCode}</div>
+                <div className="text-emerald-700 capitalize">Status: {selectedOrderDetails.courier.status}</div>
+              </div>
+            )}
+
             <div className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50">
               <div className="font-bold text-xs text-slate-500 uppercase">Items</div>
               {selectedOrderDetails.items.map((item, i) => (
@@ -1166,12 +1306,122 @@ export const AdminOrders: React.FC = () => {
               </div>
             </div>
 
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setInvoiceModalOrder(selectedOrderDetails);
+                  setSelectedOrderDetails(null);
+                }}
+                className="flex-1 py-2.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] font-bold text-xs rounded-xl border border-pink-200 transition-all flex items-center justify-center gap-1.5"
+              >
+                <FileText className="w-4 h-4" />
+                View Invoice
+              </button>
+
+              <button
+                onClick={() => downloadInvoicePDF(selectedOrderDetails)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
+              >
+                <Download className="w-4 h-4" />
+                Download PDF
+              </button>
+
+              {!selectedOrderDetails.courier && selectedOrderDetails.status !== 'cancelled' && (
+                <button
+                  disabled={isSteadfastLoading}
+                  onClick={() => handleSendToSteadfast(selectedOrderDetails)}
+                  className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {isSteadfastLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+                  Steadfast
+                </button>
+              )}
+            </div>
+
             <button
               onClick={() => setSelectedOrderDetails(null)}
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all"
+              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all text-xs"
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Shared Invoice Document Modal Overlay */}
+      {invoiceModalOrder && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 z-50 overflow-y-auto">
+          <div className="bg-slate-100 rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
+            {/* Modal Sticky Top Header */}
+            <div className="bg-white px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-[#C81E78]" />
+                <h3 className="font-extrabold text-slate-900 text-base sm:text-lg">
+                  Cash Invoice #{invoiceModalOrder.id}
+                </h3>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {invoiceModalOrder.courier ? (
+                  <div className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs rounded-xl flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Steadfast CN: #{invoiceModalOrder.courier.consignmentId}</span>
+                  </div>
+                ) : (
+                  invoiceModalOrder.status !== 'cancelled' && (
+                    <button
+                      disabled={isSteadfastLoading}
+                      onClick={() => handleSendToSteadfast(invoiceModalOrder)}
+                      className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                    >
+                      {isSteadfastLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Truck className="w-3.5 h-3.5" />}
+                      <span>Send to Steadfast Courier</span>
+                    </button>
+                  )
+                )}
+
+                <button
+                  onClick={() => printInvoice(invoiceModalOrder)}
+                  className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-all flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Print</span>
+                </button>
+
+                <button
+                  onClick={() => downloadInvoicePDF(invoiceModalOrder)}
+                  className="px-3.5 py-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] font-bold text-xs rounded-xl border border-pink-200 transition-all flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download PDF</span>
+                </button>
+
+                <button
+                  onClick={() => { setInvoiceModalOrder(null); setSteadfastNotice(null); }}
+                  className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all font-bold text-sm ml-2"
+                  title="Close Modal"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Steadfast Status Notice */}
+            {steadfastNotice && (
+              <div className={`px-6 py-2.5 text-xs font-bold flex items-center gap-2 shrink-0 ${
+                steadfastNotice.type === 'success' ? 'bg-emerald-100 text-emerald-900 border-b border-emerald-200' : 'bg-rose-100 text-rose-900 border-b border-rose-200'
+              }`}>
+                {steadfastNotice.type === 'success' ? <CheckCircle className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-rose-600" />}
+                <span>{steadfastNotice.text}</span>
+              </div>
+            )}
+
+            {/* Modal Scrollable Body containing InvoiceDocument */}
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 bg-slate-100/50">
+              <div className="max-w-2xl mx-auto shadow-lg rounded-2xl overflow-hidden">
+                <InvoiceDocument order={invoiceModalOrder} />
+              </div>
+            </div>
           </div>
         </div>
       )}

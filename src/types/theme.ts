@@ -187,3 +187,15 @@ export interface HomeThemeSettings {
   communityLive: CommunityLiveSection;
   updatedAt?: string;
 }
+
+export interface ShopThemeSettings {
+  heroTitle: string;
+  heroSubtitle: string;
+  heroBannerUrl: string;
+  quoteText: string;
+  quoteAuthor: string;
+  itemsPerPage: number;
+  defaultSort: string;
+  updatedAt?: string;
+}
+

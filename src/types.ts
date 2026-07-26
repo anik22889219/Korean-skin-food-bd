@@ -40,6 +40,17 @@ export interface OrderItem {
   barcode?: string;
 }
 
+export interface CourierData {
+  provider: 'steadfast';
+  consignmentId: string;
+  trackingCode: string;
+  status: 'pending' | 'in_transit' | 'delivered' | 'cancelled' | 'returned';
+  codAmount: number;
+  deliveryFee: number;
+  trackingUrl: string;
+  createdAt: string;
+}
+
 export interface Order {
   id: string;
   customerName: string;
@@ -60,6 +71,7 @@ export interface Order {
   paymentMethod: 'COD' | 'POS_In_Person';
   sessionType: 'Online' | 'POS';
   isPaid: boolean;
+  courier?: CourierData;
 }
 
 export interface StockMovement {

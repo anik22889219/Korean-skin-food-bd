@@ -22,7 +22,7 @@ import {
   Plus, Wand2, QrCode, Search, 
   Trash2, Edit, AlertCircle, CheckCircle, X, 
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
-  Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag
+  Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { KOREAN_BRANDS } from '../data/brands';
@@ -53,6 +53,12 @@ export const ProductManagement: React.FC = () => {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  
+  // Scanned Barcode & Confirmation Modal States
+  const [pendingScannedBarcode, setPendingScannedBarcode] = useState<string | null>(null);
+  const [confirmationProductData, setConfirmationProductData] = useState<Product | null>(null);
+  const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
+  const [isSavingConfirmedProduct, setIsSavingConfirmedProduct] = useState(false);
   
   // Barcode Audit Modal State
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
@@ -91,11 +97,8 @@ export const ProductManagement: React.FC = () => {
     if (!rawBarcode || !rawBarcode.trim()) return;
     const cleanBc = normalizeBarcode(rawBarcode);
 
-    if (isAddingProduct && (!editingProduct || !editingProduct.name || editingProduct.name.trim() === '')) {
-      // Adding NEW product mode with empty name -> run Identify system to populate product details
-      await handleIdentifyProductByBarcode(cleanBc);
-    } else {
-      // Editing product or product name already set -> ONLY set the barcode field in form! Do NOT touch other fields!
+    if (editingProduct && editingProduct.name && editingProduct.name.trim() !== '' && !isAddingProduct) {
+      // Editing existing product -> set barcode code only
       setEditingProduct(prev => prev ? {
         ...prev,
         barcode: cleanBc,
@@ -106,6 +109,9 @@ export const ProductManagement: React.FC = () => {
         text: `✅ Barcode code "${cleanBc}" scanned and assigned to product!`
       });
       setTimeout(() => setAlertMsg(null), 4000);
+    } else {
+      // Run barcode identification flow
+      await handleIdentifyProductByBarcode(cleanBc);
     }
   };
 
@@ -113,62 +119,35 @@ export const ProductManagement: React.FC = () => {
     if (!rawBarcode || !rawBarcode.trim()) return;
     const cleanBc = normalizeBarcode(rawBarcode);
 
-    // If editing an existing product OR product name is already set, DO NOT perform AI/catalog identify auto-fill! Just set barcode code.
-    if (!isAddingProduct || (editingProduct && editingProduct.name && editingProduct.name.trim() !== '')) {
-      setEditingProduct(prev => prev ? {
-        ...prev,
-        barcode: cleanBc,
-        barcodeNormalized: cleanBc
-      } : null);
-      setAlertMsg({
-        type: 'success',
-        text: `✅ Barcode code "${cleanBc}" set for this product.`
-      });
-      setTimeout(() => setAlertMsg(null), 4000);
-      return;
-    }
-
     setIsPhotoScanning(true);
-    setAlertMsg({ type: 'info', text: `🔍 Identifying product for barcode "${cleanBc}"...` });
+    setAlertMsg({ type: 'info', text: `🔍 Searching inventory for barcode "${cleanBc}"...` });
 
     try {
-      // 1. Check local catalog first (productService & allProducts)
+      // 1. Check local catalog / inventory first
       const localMatch = productService.getProductByBarcode(cleanBc) || 
         productService.getProducts().find(p => p.barcodeNormalized === cleanBc || normalizeBarcode(p.barcode) === cleanBc);
 
       if (localMatch) {
-        setEditingProduct({
-          id: 'prod_' + Date.now(), // generate fresh ID for new product entry
-          name: localMatch.name,
-          nameBN: localMatch.nameBN || localMatch.name,
-          brand: localMatch.brand,
-          category: localMatch.category,
-          price: localMatch.price,
-          importPrice: localMatch.importPrice,
-          discountPrice: localMatch.discountPrice,
-          ml: localMatch.ml || '100ml',
-          stock: 20,
-          description: localMatch.description || '',
-          descriptionBN: localMatch.descriptionBN || '',
-          image: localMatch.image || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60',
-          images: localMatch.images || [],
-          skinTypes: localMatch.skinTypes || ['All'],
-          rating: localMatch.rating || 4.8,
-          reviewsCount: localMatch.reviewsCount || 1,
+        // FOUND IN INVENTORY -> Load confirmation modal for review/confirmation
+        const fullProdObj: Product = {
+          ...localMatch,
           barcode: cleanBc,
-          barcodeNormalized: cleanBc,
-          sku: localMatch.sku || '',
-          lowStockThreshold: localMatch.lowStockThreshold || 5
-        } as any);
+          barcodeNormalized: cleanBc
+        } as any;
+        setConfirmationProductData(fullProdObj);
+        setIsConfirmationModalOpen(true);
         setAlertMsg({ 
           type: 'success', 
-          text: `✅ Found in catalog: "${localMatch.name}" (${localMatch.brand})! Form auto-filled.` 
+          text: `✅ Found in inventory: "${localMatch.name}" (${localMatch.brand})! Review product details and confirm.` 
         });
         setTimeout(() => setAlertMsg(null), 5000);
         return localMatch;
       }
 
-      // 2. Query Gemini & Barcode Identification API
+      // 2. NOT FOUND IN INVENTORY ("amr inventory te na payle"):
+      // Search online/Google for product name
+      setAlertMsg({ type: 'info', text: `🔍 Barcode "${cleanBc}" inventory-তে পাওয়া যায়নি। Google search করে Product Name খোঁজ করা হচ্ছে...` });
+
       const res = await fetch('/api/gemini/identify-barcode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,48 +157,36 @@ export const ProductManagement: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         if (data && data.name) {
-          setEditingProduct({
-            id: 'prod_' + Date.now(),
-            name: data.name || '',
-            nameBN: data.nameBN || data.name || '',
-            brand: data.brand || 'Korean Skincare',
-            category: data.category || 'Serum & Essence',
-            ml: data.ml || '100ml',
-            price: data.price ? Number(data.price) : 1500,
-            stock: 20,
-            description: data.description || '',
-            descriptionBN: 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট।',
-            image: data.imageUrl || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60',
-            images: [],
-            skinTypes: ['All'],
-            rating: 4.8,
-            reviewsCount: 1,
-            barcode: cleanBc,
-            barcodeNormalized: cleanBc,
-            sku: '',
-            lowStockThreshold: 5
-          } as any);
+          const foundProductName = data.name;
+          setPendingScannedBarcode(cleanBc);
+
+          // Open & switch to "Upload by Product Name" mode
+          setShowUploadSelector(true);
+          setUploadSelectorMode('name');
+          setNameSearchQuery(foundProductName);
+
+          // Trigger live search by product name to load suggestions
+          await handleSearchProductsByName(foundProductName);
 
           setAlertMsg({
             type: 'success',
-            text: `✨ Identified Product: "${data.name}" (${data.brand})! Form auto-filled.`
+            text: `✨ Barcode Google Search result: "${foundProductName}". Suggestions loaded in "Upload by Product Name"! Select a product to confirm.`
           });
-          setTimeout(() => setAlertMsg(null), 5000);
+          setTimeout(() => setAlertMsg(null), 7000);
           return data;
         }
       }
 
-      // Fallback: Apply barcode if AI/network offline
-      setEditingProduct(prev => prev ? {
-        ...prev,
-        barcode: cleanBc,
-        barcodeNormalized: cleanBc
-      } : null);
-      setAlertMsg({ type: 'warning', text: `Barcode "${cleanBc}" applied to new product form. Please enter title and specs.` });
-      setTimeout(() => setAlertMsg(null), 4000);
+      // Fallback if online search returned generic fallback:
+      setPendingScannedBarcode(cleanBc);
+      setShowUploadSelector(true);
+      setUploadSelectorMode('name');
+      setNameSearchQuery(`Barcode ${cleanBc}`);
+      setAlertMsg({ type: 'warning', text: `Barcode "${cleanBc}" not in inventory. Please type product name in "Upload by Product Name" to view suggestions.` });
+      setTimeout(() => setAlertMsg(null), 5000);
     } catch (err) {
       console.error("Barcode identification error:", err);
-      setAlertMsg({ type: 'error', text: 'Error identifying product by barcode.' });
+      setAlertMsg({ type: 'error', text: 'Error searching barcode online.' });
     } finally {
       setIsPhotoScanning(false);
     }
@@ -476,16 +443,15 @@ export const ProductManagement: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  // Process product name selection: populate the edit form and open camera barcode scanner so the user can scan barcode before saving
+  // Process product name selection: populate full product object and open confirmation modal
   const handleSelectNameSuggestion = async (sug: any) => {
     setIsSearchingNames(true);
-    setAlertMsg({ type: 'info', text: 'Fetching product details and preparing form...' });
+    setAlertMsg({ type: 'info', text: 'Fetching product details and preparing configuration...' });
     
     try {
-      const newId = 'p' + Math.floor(100 + Math.random() * 900);
-      const barcode = sug.barcode ? normalizeBarcode(sug.barcode) : '';
+      const newId = 'prod_' + Date.now();
+      const barcodeToUse = pendingScannedBarcode || (sug.barcode ? normalizeBarcode(sug.barcode) : '');
       
-      // 1. Store the representative product image in Cloudinary mock/real system
       let finalImageUrl = sug.imageUrl || 'https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?q=80&w=600&auto=format&fit=crop';
       try {
         const uploadedImg = await cloudinaryService.uploadImage(sug.name, finalImageUrl);
@@ -496,7 +462,6 @@ export const ProductManagement: React.FC = () => {
         console.warn("Cloudinary upload failed, using original URL:", cloudErr);
       }
 
-      // 2. Fetch automatic Bangla translation if not present
       let nameBN = sug.nameBN || '';
       if (!nameBN) {
         try {
@@ -514,16 +479,14 @@ export const ProductManagement: React.FC = () => {
         }
       }
 
-      // 3. Populate product form for editing and barcode scanning instead of saving directly
-      setIsAddingProduct(true);
-      setEditingProduct({
+      const fullProductObj: Product = {
         id: newId,
         name: sug.name || 'Authentic K-Beauty Skincare',
-        nameBN: nameBN,
+        nameBN: nameBN || sug.name,
         brand: sug.brand || 'COSRX',
         category: sug.category || 'Serum & Essence',
         skinTypes: ['All'],
-        price: Number(sug.price) || 1200,
+        price: Number(sug.price) || 1500,
         stock: 20,
         ml: sug.ml || '100ml',
         image: finalImageUrl,
@@ -532,25 +495,51 @@ export const ProductManagement: React.FC = () => {
         descriptionBN: 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের যত্নে অত্যন্ত কার্যকরী।',
         rating: 4.8,
         reviewsCount: 1,
-        barcode: barcode,
-        barcodeNormalized: barcode,
+        barcode: barcodeToUse,
+        barcodeNormalized: barcodeToUse,
         sku: '',
         lowStockThreshold: 5
-      } as any);
+      } as any;
 
-      setShowUploadSelector(false);
-      setIsFormCameraActive(false); // Keep camera closed until user explicitly clicks scan button
+      // Open Confirmation Modal ("confirmation cabe")!
+      setConfirmationProductData(fullProductObj);
+      setIsConfirmationModalOpen(true);
+
       setAlertMsg({ 
         type: 'success', 
-        text: `✨ Details for "${sug.name}" auto-filled! Click "📷 Live Cam" or "🔍 Lens Photo Scan" if you wish to attach a barcode.` 
+        text: `✨ Product details filled for "${sug.name}". Please review and confirm to save to inventory!` 
       });
-      setTimeout(() => setAlertMsg(null), 7000);
+      setTimeout(() => setAlertMsg(null), 5000);
     } catch (err: any) {
       console.error("Auto population by product name failed:", err);
       setAlertMsg({ type: 'error', text: 'Failed to populate product details: ' + err.message });
       setTimeout(() => setAlertMsg(null), 5000);
     } finally {
       setIsSearchingNames(false);
+    }
+  };
+
+  const handleConfirmSaveProduct = async () => {
+    if (!confirmationProductData) return;
+    setIsSavingConfirmedProduct(true);
+    setAlertMsg({ type: 'info', text: 'Saving product to inventory database...' });
+    try {
+      await productService.createProduct(confirmationProductData);
+      refreshProducts();
+      setAlertMsg({ 
+        type: 'success', 
+        text: `🎉 "${confirmationProductData.name}" successfully added to inventory!` 
+      });
+      setIsConfirmationModalOpen(false);
+      setConfirmationProductData(null);
+      setShowUploadSelector(false);
+      setPendingScannedBarcode(null);
+      setTimeout(() => setAlertMsg(null), 5000);
+    } catch (err: any) {
+      console.error("Failed to confirm & save product:", err);
+      setAlertMsg({ type: 'error', text: 'Error saving product: ' + err.message });
+    } finally {
+      setIsSavingConfirmedProduct(false);
     }
   };
 
@@ -2476,6 +2465,143 @@ export const ProductManagement: React.FC = () => {
                 {isDeleting ? 'Deleting...' : 'Yes, Delete Product'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRODUCT REGISTRATION CONFIRMATION MODAL */}
+      {isConfirmationModalOpen && confirmationProductData && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[28px] border border-pink-100 overflow-hidden max-w-lg w-full shadow-2xl flex flex-col justify-between max-h-[92vh]">
+            
+            {/* Modal Header */}
+            <div className="p-4 border-b border-pink-100 flex justify-between items-center bg-white">
+              <span className="text-xs font-black text-gray-950 uppercase tracking-wider flex items-center gap-1.5">
+                <CheckCircle size={16} className="text-[#E91E8C]" />
+                <span>Product Registration Confirmation</span>
+              </span>
+              <button 
+                type="button" 
+                onClick={() => {
+                  setIsConfirmationModalOpen(false);
+                  setConfirmationProductData(null);
+                }} 
+                className="text-gray-400 hover:text-pink-600 cursor-pointer p-1 rounded-full hover:bg-pink-50 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs bg-white">
+              <div className="bg-pink-50/40 p-3 rounded-2xl border border-pink-100/60 flex items-center gap-2.5">
+                <Info size={16} className="text-[#E91E8C] flex-shrink-0" />
+                <p className="text-[11px] text-gray-700 leading-relaxed font-medium">
+                  Barcode search found product details. Please review and confirm to save to your store inventory.
+                </p>
+              </div>
+
+              {/* Product Card Details */}
+              <div className="flex gap-4 p-3.5 bg-gray-50/70 border border-gray-150 rounded-2xl items-start">
+                <div className="w-20 h-20 rounded-xl overflow-hidden border border-pink-100 bg-white flex-shrink-0 shadow-sm">
+                  <img src={confirmationProductData.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[9px] uppercase font-bold text-[#E91E8C] bg-pink-50 px-2 py-0.5 rounded-full">
+                      {confirmationProductData.brand}
+                    </span>
+                    <span className="text-[9px] font-mono font-extrabold bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
+                      {confirmationProductData.ml || '100ml'}
+                    </span>
+                    {confirmationProductData.barcodeNormalized && (
+                      <span className="text-[9px] font-mono font-bold bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded">
+                        Barcode: {confirmationProductData.barcodeNormalized}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-gray-900 text-xs leading-snug">{confirmationProductData.name}</h4>
+                  {confirmationProductData.nameBN && (
+                    <p className="text-[11px] text-pink-750 font-medium">{confirmationProductData.nameBN}</p>
+                  )}
+                  <p className="text-[10px] text-gray-500">{confirmationProductData.category}</p>
+                </div>
+              </div>
+
+              {/* Price & Stock Adjustment */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-600">Retail Price (BDT ৳)</label>
+                  <input
+                    type="number"
+                    value={confirmationProductData.price}
+                    onChange={(e) => setConfirmationProductData({
+                      ...confirmationProductData,
+                      price: Number(e.target.value) || 0
+                    })}
+                    className="w-full bg-pink-50/10 text-gray-900 font-mono font-bold px-3 py-2 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-600">Initial Stock</label>
+                  <input
+                    type="number"
+                    value={confirmationProductData.stock}
+                    onChange={(e) => setConfirmationProductData({
+                      ...confirmationProductData,
+                      stock: Number(e.target.value) || 0
+                    })}
+                    className="w-full bg-pink-50/10 text-gray-900 font-mono font-bold px-3 py-2 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Description preview */}
+              <div className="space-y-1">
+                <label className="block text-[10px] uppercase font-extrabold text-gray-500">Product Description</label>
+                <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-[11px] text-gray-600 leading-relaxed max-h-24 overflow-y-auto">
+                  {confirmationProductData.description}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-pink-50/20 border-t border-pink-100 flex flex-wrap gap-2 justify-end items-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmationModalOpen(false);
+                  setIsAddingProduct(true);
+                  setEditingProduct(confirmationProductData);
+                  setConfirmationProductData(null);
+                }}
+                className="px-3.5 py-2 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1"
+              >
+                <Edit size={13} />
+                <span>Customize Details</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmSaveProduct}
+                disabled={isSavingConfirmedProduct}
+                className="px-5 py-2 bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-extrabold rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isSavingConfirmedProduct ? (
+                  <>
+                    <div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full"></div>
+                    <span>Saving to Inventory...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={14} />
+                    <span>Confirm & Save to Inventory</span>
+                  </>
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       )}

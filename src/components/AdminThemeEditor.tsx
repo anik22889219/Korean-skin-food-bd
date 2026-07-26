@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME } from '../services/themeService';
-import { HomeThemeSettings, GlobalThemeSettings, SectionKey, ReelItem } from '../types/theme';
+import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME } from '../services/themeService';
+import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, SectionKey, ReelItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
@@ -65,6 +65,7 @@ export const AdminThemeEditor: React.FC = () => {
   // Theme State
   const [theme, setTheme] = useState<HomeThemeSettings>(DEFAULT_HOME_THEME);
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
+  const [shopTheme, setShopTheme] = useState<ShopThemeSettings>(DEFAULT_SHOP_THEME);
   const [expandedSection, setExpandedSection] = useState<SectionKey | null>('hero');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -87,10 +88,14 @@ export const AdminThemeEditor: React.FC = () => {
     const unsubscribeGlobal = themeService.subscribeGlobal((data) => {
       setGlobalTheme(data);
     });
+    const unsubscribeShop = themeService.subscribeShop((data) => {
+      setShopTheme(data);
+    });
     setAllProducts(productService.getProducts());
     return () => {
       unsubscribeHome();
       unsubscribeGlobal();
+      unsubscribeShop();
     };
   }, []);
 
@@ -138,6 +143,28 @@ export const AdminThemeEditor: React.FC = () => {
     }
   };
 
+  // Shop Save handler
+  const handleSaveShop = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await themeService.saveShopTheme(shopTheme);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to save shop theme:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Shop Reset handler
+  const handleResetShop = async () => {
+    if (confirm('Are you sure you want to reset Shop Page settings to defaults?')) {
+      await themeService.resetShopToDefault();
+    }
+  };
+
   // Section Order handlers
   const moveSection = (index: number, direction: 'up' | 'down') => {
     const newOrder = [...theme.sectionOrder];
@@ -169,6 +196,12 @@ export const AdminThemeEditor: React.FC = () => {
 
   const handleSelectMediaUrl = (url: string) => {
     if (!activeMediaTarget) return;
+
+    if (activeMediaTarget === 'shopBannerUrl') {
+      setShopTheme((prev) => ({ ...prev, heroBannerUrl: url }));
+      setActiveMediaTarget(null);
+      return;
+    }
 
     if (activeMediaTarget.startsWith('global.')) {
       const field = activeMediaTarget.replace('global.', '') as keyof GlobalThemeSettings;
@@ -2072,18 +2105,127 @@ export const AdminThemeEditor: React.FC = () => {
       )}
 
       {activeTab === 'shop' && (
-        <div className="bg-white p-8 rounded-[28px] border border-pink-100 text-center space-y-4 shadow-sm">
-          <div className="w-16 h-16 bg-pink-50 rounded-2xl flex items-center justify-center mx-auto text-[#E91E8C]">
-            <ShoppingBag size={32} />
+        <div className="bg-white p-6 md:p-8 rounded-[28px] border border-pink-100 space-y-6 shadow-sm">
+          <div className="flex items-center justify-between border-b border-pink-100 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-pink-50 rounded-2xl flex items-center justify-center text-[#E91E8C]">
+                <ShoppingBag size={24} />
+              </div>
+              <div>
+                <h2 className="text-lg font-extrabold text-gray-900">Shop Category Page Theme</h2>
+                <p className="text-xs text-gray-500">Customize hero titles, editorial quotes, banner image, and default pagination settings.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleResetShop}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition cursor-pointer flex items-center gap-1.5"
+              >
+                <RotateCcw size={14} />
+                <span>Reset Defaults</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveShop}
+                disabled={isSaving}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white bg-[#E91E8C] hover:bg-[#FF4B91] transition cursor-pointer shadow-md shadow-pink-200 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Save size={14} />
+                <span>{isSaving ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+            </div>
           </div>
-          <h2 className="text-xl font-extrabold text-gray-900">Shop Page Theme Editor</h2>
-          <p className="text-xs text-gray-500 max-w-md mx-auto">
-            This structure is ready for the Shop catalog page layout. Custom section editing system for promo badges, category layout density, and filter bars will be integrated in the next module.
-          </p>
-          <div className="pt-2">
-            <span className="px-4 py-1.5 bg-pink-50 text-[#E91E8C] text-xs font-bold rounded-full border border-pink-200 inline-block">
-              Structure Reserved • Home Page Customizer Ready
-            </span>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Hero Title */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-extrabold text-gray-800">Category Page Title</label>
+              <input
+                type="text"
+                value={shopTheme.heroTitle}
+                onChange={(e) => setShopTheme({ ...shopTheme, heroTitle: e.target.value })}
+                placeholder="e.g. The Apothecary"
+                className="w-full bg-pink-50/20 border border-pink-200 rounded-xl px-3.5 py-2.5 text-xs font-medium outline-none focus:border-[#E91E8C]"
+              />
+            </div>
+
+            {/* Hero Subtitle */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-extrabold text-gray-800">Category Page Subtitle</label>
+              <input
+                type="text"
+                value={shopTheme.heroSubtitle}
+                onChange={(e) => setShopTheme({ ...shopTheme, heroSubtitle: e.target.value })}
+                placeholder="Subtitle description..."
+                className="w-full bg-pink-50/20 border border-pink-200 rounded-xl px-3.5 py-2.5 text-xs font-medium outline-none focus:border-[#E91E8C]"
+              />
+            </div>
+
+            {/* Hero Banner Background Image URL */}
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="block text-xs font-extrabold text-gray-800">Hero Header Banner Image URL</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={shopTheme.heroBannerUrl}
+                  onChange={(e) => setShopTheme({ ...shopTheme, heroBannerUrl: e.target.value })}
+                  placeholder="https://..."
+                  className="flex-1 bg-pink-50/20 border border-pink-200 rounded-xl px-3.5 py-2.5 text-xs font-mono outline-none focus:border-[#E91E8C]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveMediaTarget('shopBannerUrl');
+                    setMediaModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] text-xs font-bold rounded-xl border border-pink-200 transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <ImageIcon size={14} />
+                  <span>Media Library</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Editorial Sidebar Quote */}
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="block text-xs font-extrabold text-gray-800">Editorial Sidebar Wisdom Quote</label>
+              <textarea
+                rows={2}
+                value={shopTheme.quoteText}
+                onChange={(e) => setShopTheme({ ...shopTheme, quoteText: e.target.value })}
+                placeholder='"Skin is the mirror of your soul..."'
+                className="w-full bg-pink-50/20 border border-pink-200 rounded-xl px-3.5 py-2.5 text-xs font-medium outline-none focus:border-[#E91E8C]"
+              />
+            </div>
+
+            {/* Quote Author */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-extrabold text-gray-800">Quote Author / Source Label</label>
+              <input
+                type="text"
+                value={shopTheme.quoteAuthor}
+                onChange={(e) => setShopTheme({ ...shopTheme, quoteAuthor: e.target.value })}
+                placeholder="e.g. Korean Skin Food Wisdom"
+                className="w-full bg-pink-50/20 border border-pink-200 rounded-xl px-3.5 py-2.5 text-xs font-medium outline-none focus:border-[#E91E8C]"
+              />
+            </div>
+
+            {/* Products per page */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-extrabold text-gray-800">Products Per Page Load</label>
+              <select
+                value={shopTheme.itemsPerPage}
+                onChange={(e) => setShopTheme({ ...shopTheme, itemsPerPage: Number(e.target.value) })}
+                className="w-full bg-pink-50/20 border border-pink-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none focus:border-[#E91E8C] cursor-pointer"
+              >
+                <option value={8}>8 Products</option>
+                <option value={12}>12 Products (Recommended)</option>
+                <option value={16}>16 Products</option>
+                <option value={24}>24 Products</option>
+              </select>
+            </div>
           </div>
         </div>
       )}

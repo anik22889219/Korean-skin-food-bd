@@ -688,5 +688,16 @@ export const posService = {
       return updatedOrder;
     }
     return undefined;
+  },
+
+  updateOrderCourier(orderId: string, courierData: Order['courier']): Order | undefined {
+    const index = ordersCache.findIndex(o => o.id === orderId);
+    if (index !== -1) {
+      const updatedOrder = { ...ordersCache[index], courier: courierData };
+      ordersCache[index] = updatedOrder;
+      setDoc(doc(db, 'orders', orderId), updatedOrder).catch(console.error);
+      return updatedOrder;
+    }
+    return undefined;
   }
 };
