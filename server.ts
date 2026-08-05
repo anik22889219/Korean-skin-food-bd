@@ -1539,12 +1539,13 @@ app.post("/api/steadfast/create-consignment", async (req, res) => {
   const { orderId, customerName, customerPhone, customerAddress, codAmount, deliveryFee, note } = req.body;
 
   if (!orderId || !customerName || !customerPhone) {
-    return res.status(400).json({ error: "Missing required order details (orderId, customerName, customerPhone)" });
+    return res.status(400).json({ success: false, error: "Missing required order details (orderId, customerName, customerPhone)" });
   }
 
   const apiKey = process.env.STEADFAST_API_KEY;
   const secretKey = process.env.STEADFAST_SECRET_KEY;
   const baseUrl = process.env.STEADFAST_BASE_URL || "https://portal.steadfast.com.bd/api/v1";
+  const isSandboxMode = process.env.STEADFAST_SANDBOX_MODE === "true";
 
   const numCodAmount = Number(codAmount) || 0;
   const numDeliveryFee = Number(deliveryFee) || (customerAddress?.toLowerCase().includes("dhaka") ? 60 : 120);
@@ -1571,7 +1572,7 @@ app.post("/api/steadfast/create-consignment", async (req, res) => {
       });
 
       const responseData: any = await apiResponse.json();
-      if (apiResponse.ok && responseData.status === 200 && responseData.consignment) {
+      if (apiResponse.ok && (responseData.status === 200 || responseData.code === 200) && responseData.consignment) {
         const c = responseData.consignment;
         const consignmentId = String(c.consignment_id || c.id || `SF-${Math.floor(100000 + Math.random() * 900000)}`);
         const trackingCode = String(c.tracking_code || c.tracking_id || consignmentId);
@@ -1593,20 +1594,43 @@ app.post("/api/steadfast/create-consignment", async (req, res) => {
         });
       } else {
         console.warn("Steadfast API returned non-200 or error:", responseData);
+        const apiErrorMessage = responseData?.errors
+          ? (typeof responseData.errors === 'string' ? responseData.errors : JSON.stringify(responseData.errors))
+          : (responseData?.message || responseData?.error || "Steadfast API request failed");
+
+        if (!isSandboxMode) {
+          return res.status(400).json({
+            success: false,
+            error: `Steadfast API error: ${apiErrorMessage}`
+          });
+        }
       }
     } catch (err: any) {
       console.error("Error communicating with Steadfast Courier API:", err.message);
+      if (!isSandboxMode) {
+        return res.status(500).json({
+          success: false,
+          error: `Network error connecting to Steadfast API: ${err.message}`
+        });
+      }
+    }
+  } else {
+    if (!isSandboxMode) {
+      return res.status(400).json({
+        success: false,
+        error: "Steadfast is not configured yet. Add API credentials in settings."
+      });
     }
   }
 
-  // Seamless fallback for sandbox testing or when API credentials aren't present
-  const consignmentId = `SF-${Math.floor(100000 + Math.random() * 900000)}`;
+  // Explicit opt-in sandbox mode only (STEADFAST_SANDBOX_MODE=true)
+  const consignmentId = `SANDBOX-SF-${Math.floor(100000 + Math.random() * 900000)}`;
   const trackingCode = `S${Math.floor(1000000 + Math.random() * 9000000)}`;
   const trackingUrl = `https://steadfast.com.bd/t/${trackingCode}`;
 
   return res.json({
     success: true,
-    message: "Consignment created successfully (Steadfast Courier)",
+    message: "[SANDBOX MODE] Consignment simulated for testing",
     isSandboxFallback: true,
     courier: {
       provider: "steadfast",
@@ -1644,10 +1668,17 @@ app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
     }
   }
 
-  res.json({
-    status: 200,
-    delivery_status: "in_transit",
-    consignment_id: consignmentId
+  if (process.env.STEADFAST_SANDBOX_MODE === "true" || consignmentId.startsWith("SANDBOX")) {
+    return res.json({
+      status: 200,
+      delivery_status: "in_transit",
+      consignment_id: consignmentId
+    });
+  }
+
+  res.status(400).json({
+    success: false,
+    error: "Steadfast API is not configured or consignment status lookup failed."
   });
 });
 
