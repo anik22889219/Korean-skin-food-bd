@@ -7,13 +7,17 @@ import {
   Trash2, Plus, Minus, CheckCircle, ShieldCheck, Settings,
   LayoutDashboard, Tv, Globe, MessageSquare, Menu, ChevronLeft, 
   ChevronRight, Home, Compass, BarChart3, CreditCard, Boxes, 
-  TrendingUp, Wand2, MessageCircle, Gift, Lock
+  TrendingUp, Wand2, MessageCircle, Gift, Lock, Camera, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { WhatsAppChatBot } from './WhatsAppChatBot';
 import { Footer } from './Footer';
+import { ImageSearchModal } from './ImageSearchModal';
+import { HeaderSearch } from './HeaderSearch';
 import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
+import { productService } from '../services/productService';
+import { Product } from '../types';
 import { GlobalThemeSettings } from '../types/theme';
 
 export const MainLayout: React.FC = () => {
@@ -25,18 +29,26 @@ export const MainLayout: React.FC = () => {
     lastCreatedOrder, calculateCartSubtotal, calculateShipping, 
     handleCheckoutSubmit, activeTranslations, updateCartQty, removeFromCart,
     useLoyaltyPoints, setUseLoyaltyPoints, availablePoints, pointsDiscount,
-    calculateGrandTotal, calculatePointsEarned
+    calculateGrandTotal, calculatePointsEarned, addToCart
   } = useCart();
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
+  const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
 
   useEffect(() => {
-    const unsubscribe = themeService.subscribeGlobal((gt) => {
+    const unsubscribeTheme = themeService.subscribeGlobal((gt) => {
       setGlobalTheme(gt);
     });
-    return () => unsubscribe();
+    const unsubProducts = productService.subscribe((prods) => {
+      setAllProducts(prods);
+    });
+    return () => {
+      unsubscribeTheme();
+      unsubProducts();
+    };
   }, []);
 
   const defaultAnnouncements = [
@@ -130,8 +142,29 @@ export const MainLayout: React.FC = () => {
           )}
         </Link>
 
-        {/* Right Section: Language Switcher, Cart Trigger, Login or Profile avatar */}
+        {/* Right Section: Header Live Text + Image Search, Language Switcher, Cart Trigger, Login */}
         <div className="flex items-center gap-2.5">
+          {/* Header Live Search Input with Dropdown & Image Search button */}
+          <div className="hidden md:block w-64 lg:w-72">
+            <HeaderSearch
+              products={allProducts}
+              onOpenImageSearch={() => setIsImageSearchOpen(true)}
+              onAddToCart={(product) => {
+                addToCart(product);
+                setIsCartOpen(true);
+              }}
+            />
+          </div>
+
+          {/* Mobile Image Search Icon Button */}
+          <button
+            onClick={() => setIsImageSearchOpen(true)}
+            className="md:hidden flex items-center gap-1 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white p-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
+            title="Search Products"
+          >
+            <Camera size={16} />
+          </button>
+
           {/* Language Switcher Badge Button */}
           <button 
             onClick={() => setLanguage(language === 'en' ? 'bn' : 'en')}
@@ -579,6 +612,20 @@ export const MainLayout: React.FC = () => {
           </Link>
         )}
       </div>
+
+      {/* Image Search Modal */}
+      <ImageSearchModal
+        isOpen={isImageSearchOpen}
+        onClose={() => setIsImageSearchOpen(false)}
+        catalog={allProducts}
+        onAddToCart={(product) => {
+          addToCart(product);
+          setIsCartOpen(true);
+        }}
+        onSelectProduct={(product) => {
+          navigate(`/shop`);
+        }}
+      />
 
     </div>
   );

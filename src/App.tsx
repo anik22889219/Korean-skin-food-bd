@@ -19,6 +19,8 @@ import { AdminChatLeads } from './components/AdminChatLeads';
 import { AdminThemeEditor } from './components/AdminThemeEditor';
 import { AdminOrders } from './components/AdminOrders';
 import { AdminSlackSettings } from './components/AdminSlackSettings';
+import { AdminAIAgents } from './components/AdminAIAgents';
+import { UserManagement } from './components/UserManagement';
 import { AboutUs } from './components/AboutUs';
 import { ContactUs } from './components/ContactUs';
 import PosRegister from './components/PosRegister';
@@ -81,6 +83,7 @@ export default function App() {
             <Route element={<AdminRoute />}>
               <Route path="admin" element={<AdminLayout />}>
                 <Route index element={<AdminDashboardHome />} />
+                <Route path="users" element={<UserManagement />} />
                 <Route path="orders" element={<AdminOrders />} />
                 <Route path="theme-editor" element={<AdminThemeEditor />} />
                 <Route path="pos" element={<PosRegisterRouteWrapper />} />
@@ -89,6 +92,7 @@ export default function App() {
                 <Route path="social" element={<AdminSocial />} />
                 <Route path="chat-leads" element={<AdminChatLeads />} />
                 <Route path="slack" element={<AdminSlackSettings />} />
+                <Route path="ai-agents" element={<AdminAIAgents />} />
               </Route>
             </Route>
 

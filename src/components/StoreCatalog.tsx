@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { themeService } from '../services/themeService';
 import { HomeThemeSettings, SectionKey, ReelItem } from '../types/theme';
 import { productService } from '../services/productService';
@@ -11,10 +11,12 @@ import {
   Globe, Store, Zap, ShieldCheck, FileText, ChevronRight, ChevronLeft,
   ArrowRight, Play, Pause, Star, Sparkles, MapPin, Package, Truck,
   Award, Heart, RefreshCw, Send, Volume2, VolumeX, ExternalLink,
-  Eye, Share2, Clock, Calendar, Filter, Tag
+  Eye, Share2, Clock, Calendar, Filter, Tag, Camera
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
+import { StoreCatalogSkeleton } from './Skeletons';
+import { ImageSearchModal } from './ImageSearchModal';
 
 const CATEGORIES = [
   'All', 
@@ -42,12 +44,27 @@ export const StoreCatalog: React.FC = () => {
   // Theme & Products state
   const [theme, setTheme] = useState<HomeThemeSettings>(themeService.getHomeTheme());
   const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedBrand, setSelectedBrand] = useState('All');
   const [selectedSkinType, setSelectedSkinType] = useState('All');
   const [brandSearchTerm, setBrandSearchTerm] = useState('');
   const [isBrandDrawerOpen, setIsBrandDrawerOpen] = useState(false);
+  const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close catalog search dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Available brands list combining static catalog & active store products
   const availableBrands = useMemo(() => {
@@ -97,9 +114,14 @@ export const StoreCatalog: React.FC = () => {
     const unsubscribeTheme = themeService.subscribe((data) => {
       setTheme(data);
     });
-    setProducts(productService.getProducts());
+    const initialProds = productService.getProducts();
+    if (initialProds && initialProds.length > 0) {
+      setProducts(initialProds);
+      setIsLoading(false);
+    }
     const unsubscribeProducts = productService.subscribe((prods) => {
       setProducts([...prods]);
+      setIsLoading(false);
     });
     return () => {
       unsubscribeTheme();
@@ -516,24 +538,98 @@ export const StoreCatalog: React.FC = () => {
         <div className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
             
-            {/* Search Input */}
-            <div className="relative md:col-span-4">
+            {/* Search Input with Image Search trigger & Live Dropdown */}
+            <div ref={searchContainerRef} className="relative md:col-span-4">
               <Search size={16} className="absolute left-3 top-2.5 text-pink-400" />
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setIsSearchDropdownOpen(true);
+                }}
+                onFocus={() => {
+                  if (searchQuery.trim()) setIsSearchDropdownOpen(true);
+                }}
                 placeholder="Search by product name, brand, barcode..."
-                className="w-full bg-pink-50/10 border border-pink-100 rounded-xl pl-9 pr-8 py-2 text-xs outline-none focus:border-[#E91E8C]"
+                className="w-full bg-pink-50/10 border border-pink-100 rounded-xl pl-9 pr-24 py-2 text-xs outline-none focus:border-[#E91E8C]"
               />
-              {searchQuery && (
+              <div className="absolute right-2 top-1.5 flex items-center gap-1">
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setIsSearchDropdownOpen(false);
+                    }}
+                    className="p-1 text-gray-400 hover:text-pink-600"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-2.5 text-gray-400 hover:text-pink-600"
+                  onClick={() => setIsImageSearchOpen(true)}
+                  className="px-2 py-1 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+                  title="Search catalog by uploading a product photo"
                 >
-                  <X size={14} />
+                  <Camera size={13} />
+                  <span className="hidden sm:inline">Photo Search</span>
                 </button>
+              </div>
+
+              {/* Live Search Autocomplete Dropdown */}
+              {isSearchDropdownOpen && searchQuery.trim() !== '' && (
+                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-rose-100 overflow-hidden z-50 animate-fadeIn">
+                  <div className="px-3.5 py-2 bg-rose-50/60 border-b border-rose-100 flex items-center justify-between text-xs text-rose-700 font-semibold">
+                    <span>Live Suggestions ({filteredProducts.slice(0, 6).length})</span>
+                    <span className="text-[10px] text-slate-400 font-medium">Click to view product</span>
+                  </div>
+
+                  {filteredProducts.length > 0 ? (
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                      {filteredProducts.slice(0, 6).map((product) => (
+                        <div
+                          key={product.id}
+                          onClick={() => {
+                            setIsSearchDropdownOpen(false);
+                            navigate(`/product/${product.id}`);
+                          }}
+                          className="p-2.5 hover:bg-rose-50/50 cursor-pointer transition-colors flex items-center gap-3 group"
+                        >
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            className="w-10 h-10 object-cover rounded-lg bg-slate-100 border border-slate-200 shrink-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[9px] font-bold text-rose-600 uppercase bg-rose-50 px-1 py-0.2 rounded border border-rose-100">
+                              {product.brand}
+                            </span>
+                            <h5 className="text-xs font-bold text-slate-800 truncate group-hover:text-rose-600 transition-colors">
+                              {product.name}
+                            </h5>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs font-black text-rose-600">
+                                ৳{product.price.toLocaleString()}
+                              </span>
+                              <span className={`text-[9px] font-medium px-1 py-0.2 rounded ${
+                                product.stock > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                              }`}>
+                                {product.stock > 0 ? `${product.stock} in stock` : 'Out of Stock'}
+                              </span>
+                            </div>
+                          </div>
+                          <Eye size={14} className="text-slate-300 group-hover:text-rose-500 shrink-0 transition-colors" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 text-center text-xs text-slate-500">
+                      No products found matching "{searchQuery}"
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1428,6 +1524,10 @@ export const StoreCatalog: React.FC = () => {
     }
   };
 
+  if (isLoading) {
+    return <StoreCatalogSkeleton />;
+  }
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 15 }}
@@ -1451,6 +1551,14 @@ export const StoreCatalog: React.FC = () => {
           </div>
         );
       })}
+
+      {/* Image Search Modal */}
+      <ImageSearchModal
+        isOpen={isImageSearchOpen}
+        onClose={() => setIsImageSearchOpen(false)}
+        catalog={products}
+        onAddToCart={(product) => addToCart(product)}
+      />
     </motion.div>
   );
 };

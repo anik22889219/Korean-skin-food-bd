@@ -125,7 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAdmin = profile 
-    ? (profile.role === 'admin' || profile.role === 'super_admin' || profile.role === 'inventory_manager' || profile.role === 'customer_support') 
+    ? (profile.role === 'admin' || profile.role === 'super_admin' || profile.role === 'hr' || profile.role === 'inventory_manager' || profile.role === 'customer_support') 
     : false;
 
   return (

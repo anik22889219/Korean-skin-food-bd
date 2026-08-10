@@ -7,7 +7,7 @@ import { Product, ProductReview, Order } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { db } from '../services/firebase';
-import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { 
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
@@ -15,6 +15,7 @@ import {
   Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ProductDetailSkeleton } from './Skeletons';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -124,17 +125,17 @@ export const ProductDetail: React.FC = () => {
 
   // Check if current user is a Verified Purchaser for this product
   useEffect(() => {
-    if (!user || !product) {
+    if (!product) {
       setIsVerifiedPurchaser(false);
       setVerifiedOrderInfo(null);
       return;
     }
 
-    const userEmailLower = user.email?.toLowerCase().trim();
-    const userUid = user.uid;
-    const userPhoneClean = profile?.phone?.trim();
-
     const checkOrdersForProduct = (allOrders: Order[]) => {
+      const userEmailLower = user?.email?.toLowerCase().trim();
+      const userUid = user?.uid;
+      const userPhoneClean = profile?.phone?.trim();
+
       const matchingOrder = allOrders.find(ord => {
         const matchEmail = userEmailLower && ord.customerEmail && ord.customerEmail.toLowerCase().trim() === userEmailLower;
         const matchUid = ord.customer_uid && ord.customer_uid === userUid;
@@ -162,8 +163,15 @@ export const ProductDetail: React.FC = () => {
       }
     };
 
-    // Query Firestore orders
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+    if (!user || !user.uid) {
+      // If user is not logged in, skip the Firestore query entirely
+      const localOrders = posService.getOrders();
+      checkOrdersForProduct(localOrders);
+      return;
+    }
+
+    // Query Firestore orders belonging to current logged-in user
+    const q = query(collection(db, 'orders'), where('customer_uid', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ords: Order[] = [];
       snapshot.forEach(docSnap => {
@@ -308,11 +316,7 @@ export const ProductDetail: React.FC = () => {
   }, [reviews, product]);
 
   if (!product) {
-    return (
-      <div className="py-24 text-center text-xs font-mono font-medium text-pink-600 animate-pulse">
-        Loading product detail files...
-      </div>
-    );
+    return <ProductDetailSkeleton />;
   }
 
   const discountPercent = product.discountPrice 

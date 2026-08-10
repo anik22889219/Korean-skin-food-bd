@@ -120,7 +120,7 @@ export interface StaffMember {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'inventory_manager' | 'customer_support';
+  role: 'admin' | 'inventory_manager' | 'customer_support' | 'hr' | 'super_admin';
   active: boolean;
 }
 
@@ -138,15 +138,20 @@ export interface AdPerformance {
   isMock?: boolean;
 }
 
+export type UserRole = 'customer' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'customer_support';
+
 export interface UserProfile {
   uid: string;
   phone?: string;
   email?: string;
   name: string;
-  role: 'customer' | 'admin' | 'super_admin' | 'inventory_manager' | 'customer_support';
+  role: UserRole;
   loyaltyPoints?: number;
   photoURL?: string;
   address?: string;
+  createdAt?: any;
+  department?: string;
+  status?: 'active' | 'suspended';
 }
 
 export interface ChatLeadItem {

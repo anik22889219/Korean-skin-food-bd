@@ -5,73 +5,95 @@ service cloud.firestore {
     // Helper to check if user has a staff role
     function isStaff() {
       return request.auth != null && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'inventory_manager', 'customer_support', 'super_admin'];
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'inventory_manager', 'customer_support', 'super_admin', 'hr'];
     }
 
-    // pos_sessions and subcollection scans
-    match /pos_sessions/{sessionId} {
-      allow read, write: if true;
-      
-      match /scans/{scanId} {
-        allow read, write: if true;
-      }
-    }
-
-    // Standard rules for other collections
+    // users
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if isStaff() || (request.auth != null && request.auth.uid == userId);
+      allow create: if isStaff() || (
+        request.auth != null && 
+        request.auth.uid == userId && 
+        (!('role' in request.resource.data) || request.resource.data.role == 'customer')
+      );
+      allow update: if isStaff() || (
+        request.auth != null && 
+        request.auth.uid == userId && 
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || request.resource.data.role == resource.data.role)
+      );
+      allow delete: if isStaff() || (request.auth != null && request.auth.uid == userId);
     }
 
-    match /orders/{orderId} {
-      allow read, write: if true;
-    }
-
+    // products
     match /products/{productId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isStaff();
     }
 
-    match /inventory_logs/{logId} {
-      allow read, write: if true;
+    // orders
+    match /orders/{orderId} {
+      allow create: if true;
+      allow read: if isStaff() || (request.auth != null && resource.data.customer_uid == request.auth.uid);
+      allow update, delete: if isStaff();
     }
-    
+
+    // product_reviews
+    match /product_reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if isStaff();
+    }
+
+    // chat_leads
+    match /chat_leads/{leadId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
+    // Staff-only collections
+    match /inventory_logs/{logId} {
+      allow read, write: if isStaff();
+    }
+
     match /ad_performance/{perfId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
     }
 
     match /agent_runs/{runId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
     }
 
     match /ai_agent_runs/{runId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
     }
 
     match /site_settings/{settingId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isStaff();
     }
 
     match /draft_orders/{draftId} {
-      allow read, write: if true;
-    }
-
-    match /chat_leads/{leadId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
     }
 
     match /cloudinary_images/{imageId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
     }
 
     match /stock_movements/{movementId} {
-      allow read, write: if true;
-    }
-
-    match /product_reviews/{reviewId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
     }
 
     match /slack_users/{slackUserId} {
-      allow read, write: if true;
+      allow read, write: if isStaff();
+    }
+
+    match /pos_sessions/{sessionId} {
+      allow read, write: if isStaff();
+
+      match /scans/{scanId} {
+        allow read, write: if isStaff();
+      }
     }
   }
 }

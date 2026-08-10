@@ -4,11 +4,8 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBa
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
 
-// Ensure initial products have barcodeNormalized populated
-let productsCache: Product[] = INITIAL_PRODUCTS.map(p => ({
-  ...p,
-  barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode)
-}));
+// Ensure initial products cache starts empty
+let productsCache: Product[] = [];
 let inventoryLogsCache: InventoryLog[] = [];
 let stockMovementsCache: StockMovement[] = [];
 
@@ -25,30 +22,10 @@ function notifySubscribers() {
   });
 }
 
-// Seed database with full inventory catalog if not already populated
-let isSeedingDone = false;
+// Seeding disabled since demo products were removed
+let isSeedingDone = true;
 async function seedInitialProductsIfMissing(existingDocsCount: number) {
-  if (isSeedingDone) return;
   isSeedingDone = true;
-  
-  if (existingDocsCount === 0) {
-    try {
-      console.log(`[ProductService] Seeding catalog (${INITIAL_PRODUCTS.length} items) in batched chunks to Firestore...`);
-      const BATCH_SIZE = 40;
-      for (let i = 0; i < INITIAL_PRODUCTS.length; i += BATCH_SIZE) {
-        const chunk = INITIAL_PRODUCTS.slice(i, i + BATCH_SIZE);
-        const batch = writeBatch(db);
-        chunk.forEach(p => {
-          const normProduct = { ...p, barcodeNormalized: p.barcodeNormalized || normalizeBarcode(p.barcode) };
-          batch.set(doc(db, 'products', p.id), normProduct, { merge: true });
-        });
-        await batch.commit();
-      }
-      console.log('[ProductService] Catalog seeding complete.');
-    } catch (err) {
-      console.warn('[ProductService] Seeding notice (operating in offline/cached mode):', err);
-    }
-  }
 }
 
 // Subscribe to real-time changes in products

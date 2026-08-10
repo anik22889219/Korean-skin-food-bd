@@ -13,7 +13,8 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Initialize Slack Bolt SDK Foundation
 initializeSlackSDK();
@@ -1380,6 +1381,114 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
       seoTitle: "Authentic Korean Skincare | Korean Skin Food BD",
       metaDescription: "Buy authentic skincare imported directly from Korea at the best price in Bangladesh. Cash on Delivery. Order online!",
       keywords: "K-Beauty, skincare, Bangladesh, authentic cosmetics, COSRX"
+    });
+  }
+});
+
+// Gemini Product Search by Image Endpoint
+app.post("/api/gemini/search-by-image", async (req, res) => {
+  const { imageBase64, mimeType, catalog } = req.body;
+  if (!imageBase64) {
+    return res.status(400).json({ error: "imageBase64 is required for image search" });
+  }
+
+  // Fallback if AI is not available
+  if (!ai) {
+    return res.json({
+      success: true,
+      detectedItem: {
+        brand: "Skincare Item",
+        name: "Uploaded Product Photo",
+        category: "Skincare",
+        description: "Visual image received.",
+        skinConcernOrFeature: "General skincare"
+      },
+      matches: [],
+      analysisSummary: "AI service key is currently unconfigured. Please search manually by product name or barcode."
+    });
+  }
+
+  try {
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const resolvedMimeType = mimeType || "image/jpeg";
+
+    const imagePart = {
+      inlineData: {
+        mimeType: resolvedMimeType,
+        data: cleanBase64
+      }
+    };
+
+    const storeProducts = Array.isArray(catalog) ? catalog : [];
+    const catalogSummary = storeProducts.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      brand: p.brand,
+      category: p.category,
+      barcode: p.barcode,
+      description: p.description ? p.description.slice(0, 150) : ''
+    }));
+
+    const promptText = `You are an expert visual search AI for 'Korean Skin Food BD', an authentic K-Beauty store in Bangladesh.
+Analyze the uploaded image and search for matching products in our store catalog.
+
+Current Store Catalog:
+${JSON.stringify(catalogSummary, null, 2)}
+
+Instructions:
+1. Identify details in the photo:
+   - Brand name, product title, container type (bottle, tub, tube, pump, box, sheet mask), liquid color, label text.
+   - Key skincare ingredients (e.g., Snail Mucin, Centella, Rice, Green Tea, BHA, Niacinamide, Retinol, Hyaluronic) or product category (Cleanser, Toner, Serum & Essence, Moisturizer, Sunscreen, Lip Care, Mask).
+
+2. Compare visual findings with the Store Catalog list above:
+   - Identify any matching product IDs from the catalog.
+   - Assign a matchScore (0 to 100) and reason for matching items (matchScore >= 40).
+   - Sort matches descending by matchScore.
+
+3. Return a strict JSON object with:
+   - "detectedItem": object with "brand", "name", "category", "description", "skinConcernOrFeature"
+   - "matches": array of objects with "productId", "matchScore", "reason"
+   - "analysisSummary": short string summary (e.g. "Identified COSRX Snail Mucin Essence in photo.")
+
+Return ONLY valid JSON. Do NOT wrap in backticks or markdown formatting.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: { parts: [imagePart, { text: promptText }] },
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const responseText = response.text || "{}";
+    let jsonResult: any = {};
+    try {
+      const cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
+      jsonResult = JSON.parse(cleanJson);
+    } catch (parseErr) {
+      console.warn("Failed to parse Gemini image search response, using fallback format:", parseErr);
+      jsonResult = {
+        detectedItem: {
+          brand: "K-Beauty Brand",
+          name: "Skincare Product",
+          category: "Skincare",
+          description: responseText.slice(0, 200),
+          skinConcernOrFeature: "Skincare"
+        },
+        matches: [],
+        analysisSummary: "Image search completed."
+      };
+    }
+
+    return res.json({
+      success: true,
+      ...jsonResult
+    });
+  } catch (err: any) {
+    console.error("Gemini Search By Image Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to analyze image with Gemini."
     });
   }
 });
