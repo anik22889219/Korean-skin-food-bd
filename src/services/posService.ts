@@ -425,6 +425,11 @@ export const posService = {
     ordersCache = [newOrder, ...ordersCache];
     setDoc(doc(db, 'orders', orderId), newOrder).catch(console.error);
 
+    // Trigger real-time Slack Notification
+    import('./slackNotificationService').then(({ slackNotificationService }) => {
+      slackNotificationService.notifyNewOrder(newOrder).catch(console.warn);
+    });
+
     return newOrder;
   },
 
@@ -667,6 +672,10 @@ export const posService = {
     ordersCache[idx] = order;
     setDoc(doc(db, 'orders', orderId), order).catch(console.error);
 
+    import('./slackNotificationService').then(({ slackNotificationService }) => {
+      slackNotificationService.notifyOrderStatusChange(order, 'packing').catch(console.warn);
+    });
+
     return {
       success: true,
       message: order.stock_restored
@@ -679,12 +688,20 @@ export const posService = {
   updateOrderStatus(orderId: string, status: Order['status']): Order | undefined {
     const index = ordersCache.findIndex(o => o.id === orderId);
     if (index !== -1) {
+      const previousStatus = ordersCache[index].status;
       const updatedOrder = { ...ordersCache[index], status };
       if (status === 'delivered') {
         updatedOrder.isPaid = true;
       }
       ordersCache[index] = updatedOrder;
       setDoc(doc(db, 'orders', orderId), updatedOrder).catch(console.error);
+
+      if (previousStatus !== status) {
+        import('./slackNotificationService').then(({ slackNotificationService }) => {
+          slackNotificationService.notifyOrderStatusChange(updatedOrder, previousStatus).catch(console.warn);
+        });
+      }
+
       return updatedOrder;
     }
     return undefined;

@@ -185,3 +185,110 @@ export interface ProductReview {
   helpfulVoters?: string[];
 }
 
+export type SlackRole = 'customer' | 'admin' | 'super_admin' | 'inventory_manager' | 'customer_support';
+
+export type SlackPermission = 
+  | 'orders:read'
+  | 'orders:write'
+  | 'inventory:read'
+  | 'inventory:write'
+  | 'users:manage'
+  | 'reports:view'
+  | 'admin:all';
+
+export interface SlackUser {
+  slackUserId: string;
+  firestoreUserId: string;
+  email: string;
+  role: SlackRole;
+  permissions: SlackPermission[];
+  slackUsername?: string;
+  slackTeamId?: string;
+  linkedAt: string;
+  updatedAt?: string;
+  name?: string;
+}
+
+export interface ProductImportPayload {
+  importId: string;
+  productName: string;
+  brand: string;
+  barcode: string;
+  variant: string;
+  volume: string;
+  imageMatchScore: string | number;
+  imageUrl?: string;
+  category?: string;
+  price?: number;
+  stock?: number;
+  description?: string;
+  status: 'pending_approval' | 'approved' | 'rejected' | 're_searching';
+  source?: 'barcode_scan' | 'ai_import' | 'manual_scan';
+  timestamp: string;
+  performedBy?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  entityType: 'product_import' | 'order' | 'inventory' | 'courier' | 'support_ticket';
+  action: string;
+  importId?: string;
+  productName?: string;
+  barcode?: string;
+  orderId?: string;
+  ticketId?: string;
+  performedBy: string;
+  slackUserId?: string;
+  timestamp: string;
+  details?: string;
+  status?: string;
+}
+
+export interface SupportThreadReply {
+  id: string;
+  author: string;
+  authorRole: 'staff' | 'customer' | 'system';
+  message: string;
+  timestamp: string;
+  slackUserId?: string;
+}
+
+export interface CustomerSupportTicket {
+  id: string;
+  ticketNumber: string;
+  orderId?: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  subject: string;
+  description: string;
+  status: 'open' | 'in_progress' | 'refund_approved' | 'closed';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  assignedStaff?: string;
+  assignedSlackUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+  replies: SupportThreadReply[];
+  refundAmount?: number;
+  refundStatus?: 'none' | 'pending' | 'approved' | 'processed';
+  channelName?: string;
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+  purpose: string;
+  memberCount: number;
+  isPrivate: boolean;
+}
+
+export interface SlashCommandPayload {
+  command: '/order' | '/product' | '/stock' | '/courier' | '/report';
+  text: string;
+  userId: string;
+  userName: string;
+}
+
+

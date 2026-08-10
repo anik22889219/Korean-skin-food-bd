@@ -160,6 +160,25 @@ export const ProductManagement: React.FC = () => {
           const foundProductName = data.name;
           setPendingScannedBarcode(cleanBc);
 
+          // Notify Slack of scanned barcode product import request
+          fetch('/api/slack/notify-product-import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productName: data.name,
+              brand: data.brand || 'Korean Skincare',
+              barcode: cleanBc,
+              variant: data.variant || data.ml || 'Full Size',
+              volume: data.ml || '50 ml',
+              imageMatchScore: '98.5%',
+              imageUrl: data.imageUrl,
+              category: data.category || 'Serum & Essence',
+              price: data.price || 1500,
+              source: 'barcode_scan',
+              performedBy: 'Barcode Scanner'
+            })
+          }).catch(err => console.warn('Slack notify error:', err));
+
           // Open & switch to "Upload by Product Name" mode
           setShowUploadSelector(true);
           setUploadSelectorMode('name');

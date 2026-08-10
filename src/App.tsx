@@ -18,6 +18,7 @@ import { AdminSocial } from './components/AdminSocial';
 import { AdminChatLeads } from './components/AdminChatLeads';
 import { AdminThemeEditor } from './components/AdminThemeEditor';
 import { AdminOrders } from './components/AdminOrders';
+import { AdminSlackSettings } from './components/AdminSlackSettings';
 import { AboutUs } from './components/AboutUs';
 import { ContactUs } from './components/ContactUs';
 import PosRegister from './components/PosRegister';
@@ -87,6 +88,7 @@ export default function App() {
                 <Route path="seo" element={<AdminSEO />} />
                 <Route path="social" element={<AdminSocial />} />
                 <Route path="chat-leads" element={<AdminChatLeads />} />
+                <Route path="slack" element={<AdminSlackSettings />} />
               </Route>
             </Route>
 

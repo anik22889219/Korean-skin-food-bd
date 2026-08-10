@@ -69,5 +69,9 @@ service cloud.firestore {
     match /product_reviews/{reviewId} {
       allow read, write: if true;
     }
+
+    match /slack_users/{slackUserId} {
+      allow read, write: if true;
+    }
   }
 }

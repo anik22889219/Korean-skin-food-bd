@@ -200,6 +200,17 @@ export const productService = {
         newStock: product.stock,
         reason: 'Manual inventory adjustment'
       });
+
+      // Trigger Slack stock alert if low stock or out of stock or inventory updated
+      const eventType = product.stock <= 0 
+        ? 'out_of_stock' 
+        : product.stock <= (product.lowStockThreshold || 5) 
+          ? 'low_stock' 
+          : 'inventory_updated';
+
+      import('./slackNotificationService').then(({ slackNotificationService }) => {
+        slackNotificationService.notifyStockAlert(updatedProduct, eventType, oldProduct.stock).catch(console.warn);
+      });
     }
     return product;
   },

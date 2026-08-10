@@ -45,10 +45,16 @@ export async function createSteadfastConsignment(
     const data = await response.json();
 
     if (!response.ok || !data.success || !data.courier) {
-      return {
+      const failResult = {
         success: false,
         message: data.error || data.message || 'Failed to create Steadfast consignment.'
       };
+
+      import('./slackNotificationService').then(({ slackNotificationService }) => {
+        slackNotificationService.notifySteadfastCourier(order, failResult).catch(console.warn);
+      });
+
+      return failResult;
     }
 
     const courierData: CourierData = data.courier;
@@ -70,11 +76,17 @@ export async function createSteadfastConsignment(
       }
     }
 
-    return {
+    const successResult = {
       success: true,
       message: `Steadfast consignment created (CN ID: ${courierData.consignmentId})`,
       courier: courierData
     };
+
+    import('./slackNotificationService').then(({ slackNotificationService }) => {
+      slackNotificationService.notifySteadfastCourier(order, successResult).catch(console.warn);
+    });
+
+    return successResult;
 
   } catch (error: any) {
     console.error('Error creating Steadfast consignment:', error);

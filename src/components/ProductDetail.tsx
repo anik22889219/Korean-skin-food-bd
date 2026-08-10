@@ -8,10 +8,11 @@ import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { db } from '../services/firebase';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { 
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
-  Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon
+  Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -25,6 +26,44 @@ export const ProductDetail: React.FC = () => {
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [activeTab, setActiveTab] = useState<'desc' | 'ingredients' | 'how-to'>('desc');
   const [selectedMainImage, setSelectedMainImage] = useState<string>('');
+  const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
+
+  // Load site settings for WhatsApp contact number
+  useEffect(() => {
+    async function loadSettings() {
+      const settings = await fetchSiteSettings();
+      if (settings && settings.whatsappNumber) {
+        setWhatsappNumber(settings.whatsappNumber);
+      }
+    }
+    loadSettings();
+  }, []);
+
+  // Send WhatsApp message template with product details
+  const handleWhatsAppOrder = () => {
+    if (!product) return;
+
+    const currentPrice = product.discountPrice || product.price;
+    const pageUrl = window.location.href;
+
+    const summaryText = 
+      `🌸 *Order Inquiry - Korean Skin Food BD* 🌸\n` +
+      `--------------------------------------\n` +
+      `📦 *Product Name:* ${product.name}\n` +
+      `🏷️ *Brand:* ${product.brand}\n` +
+      `💰 *Price:* ৳${currentPrice} BDT\n` +
+      `📁 *Category:* ${product.category}\n` +
+      `⚡ *Availability:* ${product.stock > 0 ? 'In Stock' : 'Out of Stock'}\n` +
+      `🔗 *Product Link:* ${pageUrl}\n` +
+      `--------------------------------------\n` +
+      `Hello! I would like to order this product.`;
+
+    const encodedSummary = encodeURIComponent(summaryText);
+    const targetNumber = formatWhatsAppNumber(whatsappNumber);
+    const whatsappUrl = `https://wa.me/${targetNumber}?text=${encodedSummary}`;
+
+    window.open(whatsappUrl, '_blank');
+  };
 
   // Product Reviews State
   const [reviews, setReviews] = useState<ProductReview[]>([]);
@@ -469,14 +508,26 @@ export const ProductDetail: React.FC = () => {
           </div>
 
           {/* Add to Basket CTA */}
-          <button
-            onClick={() => addToCart(product)}
-            disabled={product.stock <= 0}
-            className="w-full py-4 bg-[#E91E8C] hover:bg-[#d0177c] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm"
-          >
-            <ShoppingBag size={18} />
-            <span>{product.stock > 0 ? "Add to Skincare Basket" : "Restocking soon"}</span>
-          </button>
+          <div className="space-y-3 pt-1">
+            <button
+              onClick={() => addToCart(product)}
+              disabled={product.stock <= 0}
+              className="w-full py-4 bg-[#E91E8C] hover:bg-[#d0177c] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm"
+            >
+              <ShoppingBag size={18} />
+              <span>{product.stock > 0 ? "Add to Skincare Basket" : "Restocking soon"}</span>
+            </button>
+
+            {/* Order via WhatsApp CTA */}
+            <button
+              onClick={handleWhatsAppOrder}
+              type="button"
+              className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-emerald-100 flex items-center justify-center gap-2.5 text-sm"
+            >
+              <MessageCircle size={19} className="fill-white" />
+              <span>Order via WhatsApp</span>
+            </button>
+          </div>
         </div>
       </div>
 

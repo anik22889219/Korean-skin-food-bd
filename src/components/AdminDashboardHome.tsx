@@ -4,12 +4,15 @@ import { adService } from '../services/adService';
 import { agentService, AiAgentRun } from '../services/agentService';
 import { productService } from '../services/productService';
 import { posService } from '../services/posService';
+import { slackNotificationService } from '../services/slackNotificationService';
 import { Product, Order, AdPerformance } from '../types';
 import { 
   TrendingUp, Wand2, RefreshCw, AlertCircle, ShoppingBag, 
-  ArrowUpRight, ArrowDownRight, Zap, Play, CheckCircle
+  ArrowUpRight, ArrowDownRight, Zap, Play, CheckCircle, ShieldCheck,
+  Send, Users, Bell, Clock, RotateCcw, ChevronRight, MessageSquare, AlertTriangle, ExternalLink
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { 
   ResponsiveContainer, ComposedChart, Bar, Line, 
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend 
@@ -17,16 +20,21 @@ import {
 
 export const AdminDashboardHome: React.FC = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [adPerformance, setAdPerformance] = useState<AdPerformance[]>([]);
   const [realAgentRuns, setRealAgentRuns] = useState<AiAgentRun[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [slackSummary, setSlackSummary] = useState<any>(null);
   
   // Loading and action triggers
   const [isLoadingAds, setIsLoadingAds] = useState(true);
   const [isLoadingRuns, setIsLoadingRuns] = useState(true);
   const [isSyncingAds, setIsSyncingAds] = useState(false);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [isSendingTestAlert, setIsSendingTestAlert] = useState(false);
+  const [isRetryingQueue, setIsRetryingQueue] = useState(false);
+  const [slackActionMsg, setSlackActionMsg] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -51,10 +59,46 @@ export const AdminDashboardHome: React.FC = () => {
       const runs = await agentService.getRecentRuns(5);
       setRealAgentRuns(runs);
       setIsLoadingRuns(false);
+
+      // Load Slack Ops Summary
+      const summary = await slackNotificationService.getOpsSummary();
+      setSlackSummary(summary);
     } catch (err) {
       console.error('[DashboardHome] Failed to load data:', err);
       setIsLoadingAds(false);
       setIsLoadingRuns(false);
+    }
+  };
+
+  const handleSendTestAlert = async () => {
+    setIsSendingTestAlert(true);
+    setSlackActionMsg(null);
+    try {
+      await slackNotificationService.sendTestNotification('#system-alerts');
+      const updated = await slackNotificationService.getOpsSummary();
+      setSlackSummary(updated);
+      setSlackActionMsg('✅ Test notification successfully enqueued to #system-alerts!');
+      setTimeout(() => setSlackActionMsg(null), 4000);
+    } catch (err: any) {
+      setSlackActionMsg(`❌ Test failed: ${err.message}`);
+    } finally {
+      setIsSendingTestAlert(false);
+    }
+  };
+
+  const handleRetryQueue = async () => {
+    setIsRetryingQueue(true);
+    setSlackActionMsg(null);
+    try {
+      const res = await slackNotificationService.retryFailedQueue();
+      const updated = await slackNotificationService.getOpsSummary();
+      setSlackSummary(updated);
+      setSlackActionMsg(`🔄 ${res.message}`);
+      setTimeout(() => setSlackActionMsg(null), 4000);
+    } catch (err: any) {
+      setSlackActionMsg(`❌ Retry failed: ${err.message}`);
+    } finally {
+      setIsRetryingQueue(false);
     }
   };
 
@@ -79,6 +123,8 @@ export const AdminDashboardHome: React.FC = () => {
       const runs = await agentService.getRecentRuns(5);
       setRealAgentRuns(runs);
       setProducts(productService.getProducts());
+      const updated = await slackNotificationService.getOpsSummary();
+      setSlackSummary(updated);
     } catch (err) {
       console.error(err);
     } finally {
@@ -106,10 +152,10 @@ export const AdminDashboardHome: React.FC = () => {
           </span>
           <h3 className="text-xl font-black tracking-tight">Assalamu Alaikum, {profile?.name || 'Skincare Administrator'}</h3>
           <p className="text-xs text-slate-300 max-w-xl">
-            Autonomous audit agents are monitoring warehouse stock. Facebook Pixel & Meta Ads are synchronizing conversions in real-time.
+            Autonomous audit agents are monitoring warehouse stock. Slack notifications & Meta Ads are synchronizing operations in real-time.
           </p>
         </div>
-        <div className="flex gap-2.5 z-10">
+        <div className="flex flex-wrap gap-2.5 z-10">
           <button
             onClick={handleRunInventoryAudit}
             disabled={isAgentRunning}
@@ -157,6 +203,178 @@ export const AdminDashboardHome: React.FC = () => {
           <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">Est. Revenue (7D)</span>
           <div className="text-2xl font-black text-emerald-600 font-mono">৳{totalRevenue.toLocaleString()} BDT</div>
           <span className="text-[10px] text-slate-500 font-semibold block">AOV: ~৳2,450 BDT</span>
+        </div>
+      </div>
+
+      {/* Slack Integration Dashboard Hub */}
+      <div className="bg-white p-6 rounded-[28px] border border-pink-200/80 shadow-md space-y-5 relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-pink-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#E91E8C] to-purple-600 flex items-center justify-center text-white shadow-md shadow-[#E91E8C]/20 shrink-0">
+              <ShieldCheck size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-black text-slate-900 tracking-tight">Slack Operations & Team Hub</h4>
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  {slackSummary?.connectionStatus?.configured ? '🟢 Bolt SDK Active' : '🟡 Safe Mode Ready'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Real-time synchronization for orders, inventory alerts, courier status, and customer support tickets.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleSendTestAlert}
+              disabled={isSendingTestAlert}
+              className="px-3 py-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] font-extrabold text-xs rounded-xl border border-pink-200 flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Send size={12} className={isSendingTestAlert ? 'animate-bounce' : ''} />
+              <span>{isSendingTestAlert ? 'Sending...' : 'Test Alert'}</span>
+            </button>
+
+            <button
+              onClick={handleRetryQueue}
+              disabled={isRetryingQueue}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl border border-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <RotateCcw size={12} className={isRetryingQueue ? 'animate-spin' : ''} />
+              <span>Retry Queue</span>
+            </button>
+
+            <button
+              onClick={() => navigate('/admin/slack')}
+              className="px-3.5 py-1.5 bg-[#E91E8C] hover:bg-pink-600 text-white font-extrabold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <span>Slack Settings</span>
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        {slackActionMsg && (
+          <motion.div 
+            initial={{ opacity: 0, y: -5 }} 
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 bg-pink-50/80 border border-pink-200 rounded-xl text-xs font-bold text-pink-900"
+          >
+            {slackActionMsg}
+          </motion.div>
+        )}
+
+        {/* Status Metrics Ribbon */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-150 space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Channels</span>
+            <div className="text-base font-black text-slate-900 font-mono">
+              {slackSummary?.connectionStatus?.activeChannelsCount || 6} Channels
+            </div>
+            <span className="text-[9px] text-pink-600 font-bold block">#new-orders, #inventory</span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-150 space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Pending Approvals</span>
+            <div className="text-base font-black text-amber-600 font-mono">
+              {slackSummary?.connectionStatus?.pendingApprovalsCount || 0} Items
+            </div>
+            <span className="text-[9px] text-amber-700 font-bold block">Imports & Refunds</span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-150 space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Team Online</span>
+            <div className="text-base font-black text-emerald-600 font-mono">
+              {slackSummary?.teamOnlineStatus?.length || 2} Members
+            </div>
+            <span className="text-[9px] text-emerald-700 font-bold block">RBAC Mapped</span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-150 space-y-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Queue Status</span>
+            <div className="text-base font-black text-slate-800 capitalize font-mono">
+              {slackSummary?.queueMetrics?.queueStatus || 'Idle'}
+            </div>
+            <span className="text-[9px] text-slate-500 font-bold block">Rate Limit: {slackSummary?.connectionStatus?.rateLimitMs || 500}ms</span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-150 space-y-1 col-span-2 md:col-span-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Queue Metrics</span>
+            <div className="text-base font-black text-blue-600 font-mono">
+              {slackSummary?.queueMetrics?.sentCount || 0} Sent / {slackSummary?.queueMetrics?.pendingCount || 0} Queued
+            </div>
+            <span className="text-[9px] text-slate-500 font-bold block">Errors: {slackSummary?.queueMetrics?.totalErrorLogs || 0}</span>
+          </div>
+        </div>
+
+        {/* Dual Column Slack Feeds: Recent Activity & Pending Approvals */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-2">
+          {/* Left: Recent Slack Activity Stream */}
+          <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 text-slate-200 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-pink-400 flex items-center gap-1.5">
+                <Bell size={13} />
+                <span>Live Slack Activity Stream</span>
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">Last 8 dispatches</span>
+            </div>
+
+            {(!slackSummary?.recentActivity || slackSummary.recentActivity.length === 0) ? (
+              <div className="text-center py-6 text-slate-400 text-xs font-mono">
+                No recent Slack activity logs. Trigger test alert or create a POS order!
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1 text-xs">
+                {slackSummary.recentActivity.map((log: any) => (
+                  <div key={log.id} className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="font-extrabold text-pink-400 uppercase font-mono">{log.type.replace('_', ' ')}</span>
+                      <span className="text-slate-500">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <p className="text-slate-300 font-medium truncate">{log.title}</p>
+                    {log.lastAction && (
+                      <div className="text-[10px] text-emerald-400 font-mono truncate">
+                        Action: {log.lastAction} (by {log.lastActionBy})
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Team Online Status & Pending Approvals */}
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                <Users size={13} className="text-[#E91E8C]" />
+                <span>Team Members & Roles Mapped</span>
+              </span>
+              <span className="text-[10px] font-mono text-slate-500">RBAC Active</span>
+            </div>
+
+            <div className="space-y-2">
+              {slackSummary?.teamOnlineStatus?.map((user: any) => (
+                <div key={user.slackUserId} className="p-2.5 bg-white rounded-xl border border-slate-200 flex items-center justify-between text-xs shadow-2xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="relative w-7 h-7 rounded-lg bg-pink-100 text-[#E91E8C] font-black flex items-center justify-center shrink-0 text-xs">
+                      {user.name ? user.name.slice(0, 2).toUpperCase() : 'US'}
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white"></span>
+                    </div>
+                    <div className="truncate">
+                      <strong className="block text-slate-900 truncate leading-none mb-0.5">{user.name}</strong>
+                      <span className="text-[10px] text-slate-500 font-mono block">@{user.slackUsername} ({user.slackUserId})</span>
+                    </div>
+                  </div>
+
+                  <span className="px-2 py-0.5 rounded-md bg-pink-50 text-[#E91E8C] font-extrabold text-[10px] uppercase border border-pink-100 shrink-0">
+                    {user.role?.replace('_', ' ')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 

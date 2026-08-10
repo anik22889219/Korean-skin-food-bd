@@ -77,7 +77,7 @@ export const ContactUs: React.FC = () => {
             <div className="space-y-4 text-xs font-semibold text-gray-700">
               {/* WhatsApp / Phone */}
               <a 
-                href="https://wa.me/8801700000000" 
+                href="https://wa.me/8801755837545" 
                 target="_blank" 
                 rel="noreferrer"
                 className="flex items-center gap-4 p-4 rounded-2xl bg-emerald-50/40 hover:bg-emerald-50 text-emerald-800 border border-emerald-100 transition"
@@ -87,7 +87,7 @@ export const ContactUs: React.FC = () => {
                 </div>
                 <div>
                   <span className="block text-[10px] text-emerald-600 font-bold uppercase tracking-wider">WhatsApp Live Chat</span>
-                  <span className="text-sm font-extrabold font-mono">+880 1700-000000</span>
+                  <span className="text-sm font-extrabold font-mono">+880 1755-837545</span>
                 </div>
               </a>
 

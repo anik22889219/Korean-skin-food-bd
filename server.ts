@@ -4,8 +4,9 @@ import dotenv from "dotenv";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, setDoc, getDocs, runTransaction } from "firebase/firestore";
+import { initializeSlackSDK, slackService } from "./src/services/slackService";
 
 dotenv.config();
 
@@ -13,6 +14,15 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Initialize Slack Bolt SDK Foundation
+initializeSlackSDK();
+const receiver = slackService.getReceiver();
+if (receiver) {
+  app.use("/slack/events", receiver.router);
+  app.use("/api/slack/events", receiver.router);
+  console.log("⚡ Slack Bolt Receiver endpoint mounted at /slack/events and /api/slack/events");
+}
 
 // Initialize Firebase client on server-side
 let db: any = null;
@@ -29,7 +39,7 @@ try {
       appId: process.env.VITE_FIREBASE_APP_ID || firebaseConfigJson.appId
     };
 
-    const firebaseApp = initializeApp(firebaseConfig);
+    const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
     db = getFirestore(firebaseApp, databaseId);
     console.log("Firebase server client initialized successfully for DB:", databaseId);
@@ -63,7 +73,437 @@ try {
 
 // API Routes
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", aiInitialized: !!ai, dbInitialized: !!db });
+  res.json({ 
+    status: "ok", 
+    aiInitialized: !!ai, 
+    dbInitialized: !!db,
+    slackConfigured: slackService.isSDKConfigured()
+  });
+});
+
+// SLACK FOUNDATION & AUTHENTICATION ENDPOINTS
+app.get("/api/slack/status", (req, res) => {
+  res.json({
+    success: true,
+    ...slackService.getStatus()
+  });
+});
+
+app.get("/api/slack/users", async (req, res) => {
+  try {
+    const users = await slackService.getAllSlackUsers();
+    res.json({ success: true, count: users.length, users });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/link-user", async (req, res) => {
+  const { slackUserId, firestoreUserId, email, role, permissions, name, slackUsername } = req.body;
+
+  if (!slackUserId || !email || !role) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "Missing required fields: slackUserId, email, role" 
+    });
+  }
+
+  try {
+    const linkedUser = await slackService.linkSlackUser({
+      slackUserId: String(slackUserId).trim(),
+      firestoreUserId: firestoreUserId ? String(firestoreUserId).trim() : `staff-${role}-${Math.floor(100 + Math.random() * 900)}`,
+      email: String(email).trim().toLowerCase(),
+      role,
+      permissions: Array.isArray(permissions) ? permissions : [],
+      name: name || email.split("@")[0],
+      slackUsername: slackUsername || email.split("@")[0]
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully linked Slack User ${slackUserId} to Firestore account (${email})`,
+      user: linkedUser
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/unlink-user", async (req, res) => {
+  const { slackUserId } = req.body;
+  if (!slackUserId) {
+    return res.status(400).json({ success: false, error: "slackUserId is required" });
+  }
+
+  try {
+    await slackService.unlinkSlackUser(String(slackUserId));
+    res.json({
+      success: true,
+      message: `Unlinked Slack User ${slackUserId} successfully`
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/verify-permission", async (req, res) => {
+  const { slackUserId, requiredPermission } = req.body;
+  if (!slackUserId || !requiredPermission) {
+    return res.status(400).json({ 
+      success: false, 
+      error: "slackUserId and requiredPermission are required" 
+    });
+  }
+
+  try {
+    const result = await slackService.verifyPermission(String(slackUserId), requiredPermission);
+    if (!result.authorized) {
+      return res.status(403).json({
+        success: false,
+        authorized: false,
+        reason: result.reason,
+        slackUserId
+      });
+    }
+
+    res.json({
+      success: true,
+      authorized: true,
+      user: result.user
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// SLACK NOTIFICATION LOGS, AUDIT LOGS & INTERACTIVE ACTION HANDLERS
+app.get("/api/slack/notification-logs", async (req, res) => {
+  const { slackNotificationService } = await import('./src/services/slackNotificationService');
+  res.json({
+    success: true,
+    logs: slackNotificationService.getNotificationLogs()
+  });
+});
+
+app.get("/api/slack/audit-logs", async (req, res) => {
+  const { slackNotificationService } = await import('./src/services/slackNotificationService');
+  res.json({
+    success: true,
+    auditLogs: slackNotificationService.getAuditLogs()
+  });
+});
+
+app.get("/api/slack/product-imports", async (req, res) => {
+  const { slackNotificationService } = await import('./src/services/slackNotificationService');
+  res.json({
+    success: true,
+    requests: slackNotificationService.getProductImportRequests()
+  });
+});
+
+app.get("/api/slack/channels", async (req, res) => {
+  const { slackNotificationService } = await import('./src/services/slackNotificationService');
+  res.json({
+    success: true,
+    channels: slackNotificationService.getChannels()
+  });
+});
+
+app.get("/api/slack/support-tickets", async (req, res) => {
+  const { slackNotificationService } = await import('./src/services/slackNotificationService');
+  res.json({
+    success: true,
+    tickets: slackNotificationService.getSupportTickets()
+  });
+});
+
+app.post("/api/slack/support-tickets", async (req, res) => {
+  const { customerName, customerPhone, customerEmail, orderId, subject, description, priority } = req.body;
+  if (!customerName || !subject || !description) {
+    return res.status(400).json({ success: false, error: "customerName, subject, and description are required" });
+  }
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const ticketId = `tkt-${Date.now()}`;
+    const ticketNumber = `TKT-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newTicket = {
+      id: ticketId,
+      ticketNumber,
+      orderId,
+      customerName,
+      customerPhone: customerPhone || '+8801700000000',
+      customerEmail,
+      subject,
+      description,
+      status: 'open' as const,
+      priority: priority || 'medium',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      channelName: '#customer-support',
+      replies: [
+        {
+          id: `rep-0`,
+          author: customerName,
+          authorRole: 'customer' as const,
+          message: description,
+          timestamp: new Date().toISOString()
+        }
+      ]
+    };
+
+    const log = await slackNotificationService.notifySupportTicket(newTicket);
+    res.json({
+      success: true,
+      message: `Support ticket ${ticketNumber} created and posted to Slack #customer-support`,
+      ticket: newTicket,
+      log
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/command", async (req, res) => {
+  const { command, text, user_name, user_id } = req.body;
+  if (!command) {
+    return res.status(400).json({ success: false, error: "command is required" });
+  }
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const result = await slackNotificationService.executeSlashCommand({
+      command: command as any,
+      text: text || '',
+      userName: user_name || 'AdminStaff',
+      userId: user_id || 'U_ADMIN_01'
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/support-tickets/:id/reply", async (req, res) => {
+  const { id } = req.params;
+  const { message, authorName, slackUserId } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ success: false, error: "message is required" });
+  }
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const ticket = await slackNotificationService.addTicketReply(
+      id,
+      message,
+      authorName || 'Staff Agent',
+      'staff',
+      slackUserId || 'U_ADMIN_01'
+    );
+    res.json({ success: true, ticket });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/support-tickets/:id/refund", async (req, res) => {
+  const { id } = req.params;
+  const { amount, staffName, slackUserId } = req.body;
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const ticket = await slackNotificationService.approveTicketRefund(
+      id,
+      amount,
+      staffName || 'Admin Manager',
+      slackUserId || 'U_ADMIN_01'
+    );
+    res.json({ success: true, ticket });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/slack/summary", async (req, res) => {
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const summary = await slackNotificationService.getOpsSummary();
+    res.json({ success: true, ...summary });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/retry-queue", async (req, res) => {
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const result = await slackNotificationService.retryFailedQueue();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/test-notification", async (req, res) => {
+  const { channel } = req.body;
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const item = await slackNotificationService.sendTestNotification(channel || '#system-alerts');
+    res.json({ success: true, message: "Test notification enqueued", item });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/support-tickets/:id/close", async (req, res) => {
+  const { id } = req.params;
+  const { staffName, slackUserId } = req.body;
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const ticket = await slackNotificationService.closeSupportTicket(
+      id,
+      staffName || 'Admin Manager',
+      slackUserId || 'U_ADMIN_01'
+    );
+    res.json({ success: true, ticket });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/notify-product-import", async (req, res) => {
+  const { productName, brand, barcode, variant, volume, imageMatchScore, imageUrl, category, price, stock, description, source, performedBy } = req.body;
+
+  if (!productName || !barcode) {
+    return res.status(400).json({ success: false, error: "productName and barcode are required" });
+  }
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const importId = `imp-${barcode}-${Date.now()}`;
+    const payload = {
+      importId,
+      productName,
+      brand: brand || 'Korean Skincare',
+      barcode,
+      variant: variant || 'Full Size',
+      volume: volume || '50 ml',
+      imageMatchScore: imageMatchScore || '98%',
+      imageUrl: imageUrl || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60',
+      category: category || 'Serum & Essence',
+      price: price || 1500,
+      stock: stock || 20,
+      description: description || `Authentic ${productName} by ${brand}.`,
+      status: 'pending_approval' as const,
+      source: source || 'barcode_scan',
+      timestamp: new Date().toISOString(),
+      performedBy: performedBy || 'AI Barcode Scanner'
+    };
+
+    const log = await slackNotificationService.notifyProductImportRequest(payload);
+    res.json({
+      success: true,
+      message: "Slack product import notification sent successfully",
+      importId,
+      log
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/interactive", async (req, res) => {
+  const { actionId, payloadValue, slackUserId, slackUsername } = req.body;
+
+  if (!actionId || !slackUserId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing required fields: actionId, slackUserId"
+    });
+  }
+
+  try {
+    const { slackNotificationService } = await import('./src/services/slackNotificationService');
+    const result = await slackNotificationService.handleSlackAction(
+      actionId,
+      payloadValue,
+      slackUserId,
+      slackUsername
+    );
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: result.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: result.message,
+      updatedBlocks: result.updatedBlocks,
+      order: result.order
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/slack/trigger-test-notification", async (req, res) => {
+  const { type, orderId, productId } = req.body;
+  const { slackNotificationService } = await import('./src/services/slackNotificationService');
+  const { posService } = await import('./src/services/posService');
+  const { productService } = await import('./src/services/productService');
+
+  try {
+    let log;
+    if (type === 'new_order' || type === 'order_status') {
+      const orders = posService.getOrders();
+      const targetOrder = orders.find(o => o.id === orderId) || orders[0];
+      if (!targetOrder) return res.status(400).json({ success: false, error: "No order available for test notification" });
+
+      if (type === 'new_order') {
+        log = await slackNotificationService.notifyNewOrder(targetOrder);
+      } else {
+        log = await slackNotificationService.notifyOrderStatusChange(targetOrder, 'pending');
+      }
+    } else if (type === 'stock_alert') {
+      const products = productService.getProducts();
+      const targetProd = products.find(p => p.id === productId) || products[0];
+      if (!targetProd) return res.status(400).json({ success: false, error: "No product available for stock alert" });
+
+      log = await slackNotificationService.notifyStockAlert(targetProd, targetProd.stock <= 0 ? 'out_of_stock' : 'low_stock');
+    } else if (type === 'courier_event') {
+      const orders = posService.getOrders();
+      const targetOrder = orders.find(o => o.id === orderId) || orders[0];
+      if (!targetOrder) return res.status(400).json({ success: false, error: "No order available for courier test" });
+
+      log = await slackNotificationService.notifySteadfastCourier(targetOrder, {
+        success: true,
+        message: "Steadfast Consignment created successfully",
+        courier: targetOrder.courier || {
+          provider: 'steadfast',
+          consignmentId: '10884920',
+          trackingCode: 'SF910284',
+          status: 'pending',
+          codAmount: targetOrder.totalAmount || 1200,
+          deliveryFee: 100,
+          trackingUrl: 'https://steadfast.com.bd/t/SF910284',
+          createdAt: new Date().toISOString()
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Triggered ${type} test notification!`,
+      log
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // 1. placeOrder Endpoint (mirrors Firebase Cloud Function)

@@ -5,11 +5,12 @@ import {
   ChevronRight, ChevronLeft, Star, Sparkles, RefreshCw, Heart, Check, CheckCircle, 
   Tag, ArrowUpDown, Sliders, Eye, Flame, ShieldCheck, Truck, ArrowRight,
   Info, Award, Zap, Package, Compass, Droplets, Droplet, Sun, Layers,
-  Smile, Feather, Pill, Palette, Pause, Play
+  Smile, Feather, Pill, Palette, Pause, Play, MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCart } from '../context/CartContext';
 import { productService } from '../services/productService';
+import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { themeService, DEFAULT_SHOP_THEME } from '../services/themeService';
 import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
@@ -106,6 +107,40 @@ export const ShopCategoryPage: React.FC = () => {
   // UI Drawer & Modal States
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState<boolean>(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
+
+  useEffect(() => {
+    async function loadSettings() {
+      const settings = await fetchSiteSettings();
+      if (settings && settings.whatsappNumber) {
+        setWhatsappNumber(settings.whatsappNumber);
+      }
+    }
+    loadSettings();
+  }, []);
+
+  const handleQuickViewWhatsApp = (prod: Product) => {
+    const currentPrice = prod.discountPrice || prod.price;
+    const pageUrl = `${window.location.origin}/product/${prod.id}`;
+
+    const summaryText = 
+      `🌸 *Order Inquiry - Korean Skin Food BD* 🌸\n` +
+      `--------------------------------------\n` +
+      `📦 *Product Name:* ${prod.name}\n` +
+      `🏷️ *Brand:* ${prod.brand}\n` +
+      `💰 *Price:* ৳${currentPrice} BDT\n` +
+      `📁 *Category:* ${prod.category}\n` +
+      `⚡ *Availability:* ${prod.stock > 0 ? 'In Stock' : 'Out of Stock'}\n` +
+      `🔗 *Product Link:* ${pageUrl}\n` +
+      `--------------------------------------\n` +
+      `Hello! I would like to order this product.`;
+
+    const encodedSummary = encodeURIComponent(summaryText);
+    const targetNumber = formatWhatsAppNumber(whatsappNumber);
+    const whatsappUrl = `https://wa.me/${targetNumber}?text=${encodedSummary}`;
+
+    window.open(whatsappUrl, '_blank');
+  };
 
   // Wishlist local state
   const [wishlist, setWishlist] = useState<string[]>(() => {
@@ -1167,6 +1202,15 @@ export const ShopCategoryPage: React.FC = () => {
                     >
                       <ShoppingBag size={15} />
                       <span>Add to Bag & View Cart</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleQuickViewWhatsApp(quickViewProduct)}
+                      type="button"
+                      className="w-full py-2.5 bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white rounded-xl text-xs font-extrabold cursor-pointer transition shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <MessageCircle size={16} className="fill-white" />
+                      <span>Order via WhatsApp</span>
                     </button>
 
                     <button

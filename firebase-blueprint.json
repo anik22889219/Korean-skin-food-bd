@@ -136,9 +136,29 @@
         "helpfulVoters": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "productId", "userName", "rating", "comment", "isVerifiedPurchaser", "createdAt"]
+    },
+    "SlackUser": {
+      "title": "SlackUser",
+      "description": "Mapping of Slack User IDs to Firestore Admin Accounts, roles, and granular permissions",
+      "type": "object",
+      "properties": {
+        "slackUserId": { "type": "string" },
+        "firestoreUserId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "admin", "super_admin", "inventory_manager", "customer_support"] },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "slackUsername": { "type": "string" },
+        "slackTeamId": { "type": "string" },
+        "linkedAt": { "type": "string" }
+      },
+      "required": ["slackUserId", "firestoreUserId", "email", "role", "permissions", "linkedAt"]
     }
   },
   "firestore": {
+    "/slack_users/{slackUserId}": {
+      "schema": "SlackUser",
+      "description": "Slack user ID authorization mappings to Firestore admin profiles"
+    },
     "/product_reviews/{reviewId}": {
       "schema": "ProductReview",
       "description": "Customer ratings, photos and text feedback"

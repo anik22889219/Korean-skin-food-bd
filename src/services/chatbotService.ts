@@ -144,6 +144,25 @@ export async function saveLeadToFirestore(orderState: OrderState, messages: Chat
 }
 
 /**
+ * Helper to normalize and clean WhatsApp phone numbers to international digits
+ */
+export function formatWhatsAppNumber(rawNumber?: string): string {
+  if (!rawNumber) return '8801755837545';
+  let digits = rawNumber.replace(/\D/g, '');
+  if (digits.startsWith('800')) {
+    digits = '880' + digits.slice(3);
+  } else if (digits.startsWith('01')) {
+    digits = '880' + digits.slice(1);
+  } else if (!digits.startsWith('880') && digits.length === 10 && digits.startsWith('1')) {
+    digits = '880' + digits;
+  }
+  if (digits === '8801712345678' || digits === '01712345678' || !digits) {
+    digits = '8801755837545';
+  }
+  return digits;
+}
+
+/**
  * Retrieves the site settings to fetch the WhatsApp number
  */
 export async function fetchSiteSettings(): Promise<{ whatsappNumber: string }> {
@@ -153,12 +172,13 @@ export async function fetchSiteSettings(): Promise<{ whatsappNumber: string }> {
     if (docSnap.exists()) {
       const data = docSnap.data();
       if (data && data.whatsappNumber) {
-        return { whatsappNumber: data.whatsappNumber };
+        const cleaned = formatWhatsAppNumber(data.whatsappNumber);
+        return { whatsappNumber: cleaned };
       }
     }
   } catch (error) {
     console.error("Error fetching site settings:", error);
   }
-  // Fallback to seeded default WhatsApp number
-  return { whatsappNumber: '+8801712345678' };
+  // Fallback to default WhatsApp number
+  return { whatsappNumber: '8801755837545' };
 }

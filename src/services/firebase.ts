@@ -120,4 +120,24 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   }
 }
 
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeForFirestore(item)) as unknown as T;
+  }
+  const cleanObj: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+        cleanObj[key] = sanitizeForFirestore(value);
+      } else {
+        cleanObj[key] = value;
+      }
+    }
+  }
+  return cleanObj as T;
+}
+
 export { app, db, auth, functions };

@@ -21,6 +21,7 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
+    { to: '/admin/slack', label: 'Slack Integration', badge: 'Step 1', icon: ShieldCheck },
   ];
 
   const handleSignOut = async () => {
