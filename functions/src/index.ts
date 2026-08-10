@@ -1,7 +1,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize Firebase Admin
