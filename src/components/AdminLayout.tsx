@@ -6,6 +6,7 @@ import {
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, Palette, Package, Bot, Users 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { WhatsAppChatBot } from './WhatsAppChatBot';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
@@ -231,6 +232,9 @@ export const AdminLayout: React.FC = () => {
           <Outlet />
         </main>
       </div>
+
+      {/* Floating AI assistant widget */}
+      <WhatsAppChatBot />
     </div>
   );
 };

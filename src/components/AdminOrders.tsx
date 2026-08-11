@@ -772,85 +772,70 @@ export const AdminOrders: React.FC = () => {
             )}
           </div>
 
-          {/* Items Checklist Table */}
+          {/* Items Checklist Cards */}
           <div className="space-y-3">
             <h3 className="font-bold text-slate-800 text-base flex items-center justify-between">
               <span>Order Items Checklist</span>
               <span className="text-xs text-slate-500 font-normal">Click "Quick Scan" button next to item for fast testing</span>
             </h3>
 
-            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="p-3.5">Product Name</th>
-                    <th className="p-3.5">Barcode</th>
-                    <th className="p-3.5 text-center">Ordered Qty</th>
-                    <th className="p-3.5 text-center">Scanned Qty</th>
-                    <th className="p-3.5 text-center">Verification Status</th>
-                    <th className="p-3.5 text-right">Quick Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {activeFulfillmentOrder.items.map((item, idx) => {
-                    const prod = productService.getProductById(item.productId);
-                    const isVerified = (item.scannedQuantity || 0) >= item.quantity;
-                    const displayBarcode = item.barcode || (prod ? prod.barcode : 'N/A');
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {activeFulfillmentOrder.items.map((item, idx) => {
+                const prod = productService.getProductById(item.productId);
+                const isVerified = (item.scannedQuantity || 0) >= item.quantity;
+                const displayBarcode = item.barcode || (prod ? prod.barcode : 'N/A');
 
-                    return (
-                      <tr key={idx} className={isVerified ? 'bg-emerald-50/40' : 'hover:bg-slate-50'}>
-                        <td className="p-3.5">
-                          <div className="font-bold text-slate-900">{item.name}</div>
-                          <div className="text-xs text-slate-500">
-                            Current Stock in Catalog: {prod ? prod.stock : 'Unknown'} units
-                          </div>
-                        </td>
-                        <td className="p-3.5 font-mono text-slate-600 text-xs font-semibold">
-                          {displayBarcode}
-                        </td>
-                        <td className="p-3.5 text-center font-extrabold text-slate-800">
-                          {item.quantity}
-                        </td>
-                        <td className="p-3.5 text-center font-extrabold text-slate-900">
-                          <span className={`px-3 py-1 rounded-full text-sm ${
-                            isVerified
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : 'bg-amber-100 text-amber-800 border border-amber-300'
-                          }`}>
-                            {item.scannedQuantity || 0} / {item.quantity}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-center">
-                          {isVerified ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold border border-emerald-200">
-                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                              VERIFIED
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold border border-amber-200">
-                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                              PENDING SCAN
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3.5 text-right">
-                          <button
-                            disabled={isVerified}
-                            onClick={() => handleVerifyScan(displayBarcode !== 'N/A' ? displayBarcode : item.productId)}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                              isVerified
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
-                            }`}
-                          >
-                            + Quick Scan Barcode
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                return (
+                  <div key={idx} className={`p-4 rounded-xl border transition-all space-y-3 ${
+                    isVerified ? 'bg-emerald-50/60 border-emerald-200' : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs'
+                  }`}>
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <div className="font-bold text-slate-900 text-sm">{item.name}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          Catalog Stock: <span className="font-semibold">{prod ? prod.stock : 'Unknown'}</span> units
+                        </div>
+                      </div>
+                      {isVerified ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold border border-emerald-200 shrink-0">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          VERIFIED
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold border border-amber-200 shrink-0">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                          PENDING
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                      <div>
+                        <span className="text-slate-400 block font-semibold text-[10px] uppercase">Barcode</span>
+                        <span className="font-mono text-slate-700 font-bold">{displayBarcode}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-semibold text-[10px] uppercase">Scanned / Ordered</span>
+                        <span className="font-bold text-slate-900">{item.scannedQuantity || 0} / {item.quantity}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        disabled={isVerified}
+                        onClick={() => handleVerifyScan(displayBarcode !== 'N/A' ? displayBarcode : item.productId)}
+                        className={`w-full py-2 px-3 text-xs font-bold rounded-lg transition-all text-center ${
+                          isVerified
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
+                        }`}
+                      >
+                        + Quick Scan Barcode
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1021,147 +1006,142 @@ export const AdminOrders: React.FC = () => {
             </div>
           </div>
 
-          {/* Table */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                <tr>
-                  <th className="p-3.5">Order ID</th>
-                  <th className="p-3.5">Source</th>
-                  <th className="p-3.5">Customer</th>
-                  <th className="p-3.5">Date</th>
-                  <th className="p-3.5 text-center">Status</th>
-                  <th className="p-3.5 text-center">Stock Deducted</th>
-                  <th className="p-3.5 text-right">Amount</th>
-                  <th className="p-3.5 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredOrders.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">
-                      No orders found matching selected filters.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredOrders.map(order => (
-                    <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3.5 font-mono font-bold text-rose-600">
-                        #{order.id}
-                      </td>
-                      <td className="p-3.5">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase border ${
+          {/* Order Cards Grid System */}
+          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+            {filteredOrders.length === 0 ? (
+              <div className="col-span-full p-8 text-center text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                No orders found matching selected filters.
+              </div>
+            ) : (
+              filteredOrders.map(order => (
+                <div key={order.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3 flex flex-col justify-between hover:border-rose-300 transition-all">
+                  <div className="space-y-2.5">
+                    {/* Top Row: Order ID, Source & Status */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-black text-rose-600 text-sm">#{order.id}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
                           order.order_source === 'POS'
                             ? 'bg-purple-100 text-purple-800 border-purple-200'
                             : 'bg-blue-100 text-blue-800 border-blue-200'
                         }`}>
                           {order.order_source || 'WEBSITE'}
                         </span>
-                      </td>
-                      <td className="p-3.5">
-                        <div className="font-bold text-slate-900">{order.customerName}</div>
-                        <div className="text-xs text-slate-500">{order.customerPhone}</div>
-                      </td>
-                      <td className="p-3.5 text-xs text-slate-500 font-medium">
+                      </div>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
+                        order.status === 'delivered'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                          : order.status === 'cancelled'
+                          ? 'bg-rose-100 text-rose-800 border-rose-200'
+                          : 'bg-amber-100 text-amber-800 border-amber-200'
+                      }`}>
+                        {order.status}
+                      </span>
+                    </div>
+
+                    {/* Customer Info */}
+                    <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 space-y-1">
+                      <div className="font-bold text-slate-900 text-sm">{order.customerName}</div>
+                      <div className="text-xs text-slate-500 font-medium">{order.customerPhone}</div>
+                      <div className="text-[10px] text-slate-400 font-medium pt-0.5">
                         {new Date(order.createdAt).toLocaleString()}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase border ${
-                          order.status === 'delivered'
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                            : order.status === 'cancelled'
-                            ? 'bg-rose-100 text-rose-800 border-rose-200'
-                            : 'bg-amber-100 text-amber-800 border-amber-200'
-                        }`}>
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-center">
+                      </div>
+                    </div>
+
+                    {/* Amount & Stock Info */}
+                    <div className="grid grid-cols-2 gap-2 text-xs p-2.5 bg-rose-50/20 rounded-xl border border-rose-100/50">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-bold uppercase">Total Amount</span>
+                        <span className="font-black text-slate-900 text-sm font-mono">৳{order.totalAmount.toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-bold uppercase">Stock Deducted</span>
                         {order.stock_deducted ? (
-                          <span className="text-xs font-bold text-emerald-600 flex items-center justify-center gap-1">
+                          <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 mt-0.5">
                             <CheckCircle className="w-3.5 h-3.5" /> YES
                           </span>
                         ) : (
-                          <span className="text-xs font-bold text-amber-600 flex items-center justify-center gap-1">
+                          <span className="text-xs font-bold text-amber-600 flex items-center gap-1 mt-0.5">
                             <AlertTriangle className="w-3.5 h-3.5" /> NO
                           </span>
                         )}
-                      </td>
-                      <td className="p-3.5 text-right font-extrabold text-slate-900">
-                        ৳{order.totalAmount.toLocaleString()}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setSelectedOrderDetails(order)}
+                        className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-all"
+                        title="View Order Details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => setInvoiceModalOrder(order)}
+                        className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] rounded-lg transition-all border border-pink-200"
+                        title="View Shared Invoice"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => downloadInvoicePDF(order)}
+                        className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all"
+                        title="Download PDF Invoice"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {order.courier ? (
+                        <span 
+                          className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10px] rounded-full flex items-center gap-1"
+                          title={`Steadfast CN: ${order.courier.consignmentId}`}
+                        >
+                          <Truck className="w-3 h-3 text-emerald-600" />
+                          CN #{order.courier.consignmentId}
+                        </span>
+                      ) : (
+                        order.status !== 'cancelled' && (
                           <button
-                            onClick={() => setSelectedOrderDetails(order)}
-                            className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-all"
-                            title="View Order Details"
+                            disabled={isSteadfastLoading}
+                            onClick={() => handleSendToSteadfast(order)}
+                            className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 font-bold text-xs rounded-lg transition-all flex items-center gap-1 disabled:opacity-50"
+                            title="Send to Steadfast Courier"
                           >
-                            <Eye className="w-4 h-4" />
+                            <Truck className="w-3 h-3" /> Steadfast
                           </button>
+                        )
+                      )}
 
-                          <button
-                            onClick={() => setInvoiceModalOrder(order)}
-                            className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] rounded-lg transition-all border border-pink-200"
-                            title="View Shared Invoice"
-                          >
-                            <FileText className="w-4 h-4" />
-                          </button>
+                      {(order.status === 'pending' || order.status === 'packing') && (
+                        <button
+                          onClick={() => handleStartFulfillment(order)}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1"
+                        >
+                          <Barcode className="w-3 h-3" /> Fulfill
+                        </button>
+                      )}
 
-                          <button
-                            onClick={() => downloadInvoicePDF(order)}
-                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all"
-                            title="Download PDF Invoice"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-
-                          {order.courier ? (
-                            <span 
-                              className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10px] rounded-full flex items-center gap-1"
-                              title={`Steadfast CN: ${order.courier.consignmentId}`}
-                            >
-                              <Truck className="w-3 h-3 text-emerald-600" />
-                              CN #{order.courier.consignmentId}
-                            </span>
-                          ) : (
-                            order.status !== 'cancelled' && (
-                              <button
-                                disabled={isSteadfastLoading}
-                                onClick={() => handleSendToSteadfast(order)}
-                                className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 font-bold text-xs rounded-lg transition-all flex items-center gap-1 disabled:opacity-50"
-                                title="Send to Steadfast Courier"
-                              >
-                                <Truck className="w-3 h-3" /> Steadfast
-                              </button>
-                            )
-                          )}
-
-                          {(order.status === 'pending' || order.status === 'packing') && (
-                            <button
-                              onClick={() => handleStartFulfillment(order)}
-                              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1"
-                            >
-                              <Barcode className="w-3 h-3" /> Fulfill
-                            </button>
-                          )}
-
-                          {order.status !== 'cancelled' && (
-                            <button
-                              onClick={() => handleCancelOrder(order)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-lg transition-all"
-                              title="Cancel Order"
-                            >
-                              Cancel
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      {order.status !== 'cancelled' && (
+                        <button
+                          onClick={() => handleCancelOrder(order)}
+                          className="px-2 py-1 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-lg transition-all"
+                          title="Cancel Order"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -1190,68 +1170,60 @@ export const AdminOrders: React.FC = () => {
             </button>
           </div>
 
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                <tr>
-                  <th className="p-3.5">Timestamp</th>
-                  <th className="p-3.5">Product Name</th>
-                  <th className="p-3.5 text-center">Type</th>
-                  <th className="p-3.5 text-center">Source</th>
-                  <th className="p-3.5 text-center">Qty Delta</th>
-                  <th className="p-3.5 text-center">Stock Before → After</th>
-                  <th className="p-3.5">Performed By / Order ID</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 bg-white">
-                {movements.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">
-                      No stock movements recorded yet.
-                    </td>
-                  </tr>
-                ) : (
-                  movements.map(m => (
-                    <tr key={m.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3.5 text-xs text-slate-500 font-medium">
+          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+            {movements.length === 0 ? (
+              <div className="col-span-full p-8 text-center text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                No stock movements recorded yet.
+              </div>
+            ) : (
+              movements.map(m => (
+                <div key={m.id} className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-3 hover:border-slate-300 transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-slate-900 text-sm leading-tight">{m.productName}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 font-medium">
                         {new Date(m.createdAt).toLocaleString()}
-                      </td>
-                      <td className="p-3.5 font-bold text-slate-900">
-                        {m.productName}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase border ${
-                          m.type === 'sale'
-                            ? 'bg-rose-100 text-rose-800 border-rose-200'
-                            : m.type === 'return'
-                            ? 'bg-purple-100 text-purple-800 border-purple-200'
-                            : m.type === 'restock' || m.type === 'stock_in'
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                            : 'bg-amber-100 text-amber-800 border-amber-200'
-                        }`}>
-                          {m.type}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-center font-bold text-xs text-slate-600">
-                        {m.source}
-                      </td>
-                      <td className="p-3.5 text-center font-black">
-                        <span className={m.quantity < 0 ? 'text-rose-600' : 'text-emerald-600'}>
-                          {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-center font-mono text-xs text-slate-700 font-bold">
-                        {m.previousStock !== undefined ? `${m.previousStock} → ${m.newStock}` : 'N/A'}
-                      </td>
-                      <td className="p-3.5 text-xs text-slate-600 font-semibold">
-                        <div>{m.performedBy || 'Staff'}</div>
-                        {m.orderId && <div className="text-rose-600 font-mono">Order #{m.orderId}</div>}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      </div>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border shrink-0 ${
+                      m.type === 'sale'
+                        ? 'bg-rose-100 text-rose-800 border-rose-200'
+                        : m.type === 'return'
+                        ? 'bg-purple-100 text-purple-800 border-purple-200'
+                        : m.type === 'restock' || m.type === 'stock_in'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-100 text-amber-800 border-amber-200'
+                    }`}>
+                      {m.type}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                    <div>
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Source</span>
+                      <span className="font-bold text-slate-700">{m.source}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Qty Delta</span>
+                      <span className={`font-black ${m.quantity < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Stock Shift</span>
+                      <span className="font-mono text-[11px] text-slate-800 font-bold">
+                        {m.previousStock !== undefined ? `${m.previousStock}→${m.newStock}` : 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-slate-600 pt-1 font-semibold border-t border-slate-100">
+                    <div>By: <span className="text-slate-800">{m.performedBy || 'Staff'}</span></div>
+                    {m.orderId && <div className="text-rose-600 font-mono text-[11px]">Order #{m.orderId}</div>}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}

@@ -99,6 +99,39 @@ export const StoreCatalog: React.FC = () => {
   const [calcWeight, setCalcWeight] = useState<number | ''>(1);
   const [calcResult, setCalcResult] = useState<number | null>(750);
 
+  // Mobile viewport detection
+  const [isMobile, setIsMobile] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+
+  // Touch swipe gesture refs for carousels
+  const touchStartX = useRef<number | null>(null);
+  const touchEndX = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchEndX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (onSwipeLeft: () => void, onSwipeRight: () => void) => {
+    if (!touchStartX.current || !touchEndX.current) return;
+    const distance = touchStartX.current - touchEndX.current;
+    if (distance > 35) {
+      onSwipeLeft();
+    } else if (distance < -35) {
+      onSwipeRight();
+    }
+    touchStartX.current = null;
+    touchEndX.current = null;
+  };
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Auto Slide state for Community Live (Reels)
   const [clActiveIndex, setClActiveIndex] = useState(0);
   const [clAutoPlay, setClAutoPlay] = useState(true);
@@ -943,11 +976,12 @@ export const StoreCatalog: React.FC = () => {
       setSjActiveIndex((prev) => (prev - 1 + photos.length) % photos.length);
     };
 
-    // Calculate visible photos slice (displays 4 items starting from active index)
+    // Calculate visible photos slice (displays 2 items on mobile, 4 on desktop)
     const getVisiblePhotos = () => {
-      if (photos.length <= 4) return photos;
+      const maxVisible = isMobile ? 2 : 4;
+      if (photos.length <= maxVisible) return photos;
       const visible = [];
-      for (let i = 0; i < Math.min(4, photos.length); i++) {
+      for (let i = 0; i < Math.min(maxVisible, photos.length); i++) {
         visible.push(photos[(sjActiveIndex + i) % photos.length]);
       }
       return visible;
@@ -958,9 +992,12 @@ export const StoreCatalog: React.FC = () => {
     return (
       <div 
         key="sharedJourney" 
-        className="bg-[#fbf2ed] p-6 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden"
+        className="bg-[#fbf2ed] p-5 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden select-none"
         onMouseEnter={() => setSjIsHovered(true)}
         onMouseLeave={() => setSjIsHovered(false)}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={() => handleTouchEnd(handleNextPhoto, handlePrevPhoto)}
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-100/80 pb-4">
           <div>

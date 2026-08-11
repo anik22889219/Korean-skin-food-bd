@@ -475,137 +475,109 @@ export const UserManagement: React.FC = () => {
           )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-100/70 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="py-3 px-4">User Details</th>
-                <th className="py-3 px-4">Role & Access Tier</th>
-                <th className="py-3 px-4">Contact Info</th>
-                <th className="py-3 px-4">Department / Notes</th>
-                <th className="py-3 px-4 text-center">Loyalty Pts</th>
-                <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 font-medium">
-                    {loading ? 'Loading user database...' : 'No users match your criteria.'}
-                  </td>
-                </tr>
-              ) : (
-                filteredUsers.map((u) => (
-                  <tr key={u.uid} className="hover:bg-slate-50/80 transition">
-                    {/* User Details */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
-                          {u.photoURL ? (
-                            <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
-                          ) : (
-                            u.name?.slice(0, 2).toUpperCase() || 'US'
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <span className="font-extrabold text-slate-900 block truncate">{u.name}</span>
-                          <span className="text-[10px] font-mono text-slate-400 block truncate">UID: {u.uid.slice(0, 12)}...</span>
-                        </div>
+        {/* User Cards Grid System */}
+        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+          {filteredUsers.length === 0 ? (
+            <div className="col-span-full py-12 text-center text-slate-400 font-medium bg-slate-50/80 rounded-2xl border border-dashed border-slate-200">
+              {loading ? 'Loading user database...' : 'No users match your criteria.'}
+            </div>
+          ) : (
+            filteredUsers.map((u) => (
+              <div key={u.uid} className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4 hover:border-indigo-300 transition-all flex flex-col justify-between">
+                <div className="space-y-3">
+                  {/* Avatar, Name & UID */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow-xs overflow-hidden text-sm">
+                      {u.photoURL ? (
+                        <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
+                      ) : (
+                        u.name?.slice(0, 2).toUpperCase() || 'US'
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-extrabold text-slate-900 text-sm truncate">{u.name}</span>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase shrink-0 ${
+                          u.status === 'suspended' 
+                            ? 'bg-rose-100 text-rose-700 border border-rose-200' 
+                            : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                        }`}>
+                          {u.status === 'suspended' ? <XCircle size={9} /> : <CheckCircle2 size={9} />}
+                          {u.status || 'active'}
+                        </span>
                       </div>
-                    </td>
+                      <span className="text-[10px] font-mono text-slate-400 block truncate">UID: {u.uid.slice(0, 16)}...</span>
+                    </div>
+                  </div>
 
-                    {/* Role Selector */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-2">
-                        {getRoleBadge(u.role)}
+                  {/* Role Selector & Badge */}
+                  <div className="flex items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Role Tier</span>
+                    <div className="flex items-center gap-2">
+                      {getRoleBadge(u.role)}
+                      <select
+                        value={u.role}
+                        onChange={(e) => handleRoleChange(u.uid, e.target.value as UserRole)}
+                        className="text-[10px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                        title="Change User Role"
+                      >
+                        <option value="customer">Customer</option>
+                        <option value="customer_support">Support Rep</option>
+                        <option value="inventory_manager">Inventory Manager</option>
+                        <option value="admin">Store Admin</option>
+                        <option value="hr">HR Manager</option>
+                        <option value="super_admin">Super Admin</option>
+                      </select>
+                    </div>
+                  </div>
 
-                        {/* Quick Role Select Dropdown for HR & Super Admin */}
-                        <div className="relative group">
-                          <select
-                            value={u.role}
-                            onChange={(e) => handleRoleChange(u.uid, e.target.value as UserRole)}
-                            className="text-[10px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                            title="Change User Role"
-                          >
-                            <option value="customer">Customer</option>
-                            <option value="customer_support">Support Rep</option>
-                            <option value="inventory_manager">Inventory Manager</option>
-                            <option value="admin">Store Admin</option>
-                            <option value="hr">HR Manager</option>
-                            <option value="super_admin">Super Admin</option>
-                          </select>
-                        </div>
+                  {/* Contact Info & Department */}
+                  <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex items-center gap-2 font-semibold truncate">
+                      <Mail size={13} className="text-slate-400 shrink-0" />
+                      <span className="truncate">{u.email || 'No Email'}</span>
+                    </div>
+                    {u.phone && (
+                      <div className="flex items-center gap-2 text-slate-500 font-medium">
+                        <Phone size={13} className="text-slate-400 shrink-0" />
+                        <span>{u.phone}</span>
                       </div>
-                    </td>
-
-                    {/* Contact Info */}
-                    <td className="py-3.5 px-4">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5 text-slate-700 font-semibold truncate">
-                          <Mail size={12} className="text-slate-400 shrink-0" />
-                          <span className="truncate">{u.email || 'No Email'}</span>
-                        </div>
-                        {u.phone && (
-                          <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
-                            <Phone size={12} className="text-slate-400 shrink-0" />
-                            <span>{u.phone}</span>
-                          </div>
-                        )}
+                    )}
+                    {u.department && (
+                      <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-100/80">
+                        Dept: <span className="font-bold text-slate-700">{u.department}</span>
                       </div>
-                    </td>
+                    )}
+                  </div>
+                </div>
 
-                    {/* Department */}
-                    <td className="py-3.5 px-4">
-                      <span className="text-slate-600 font-medium">
-                        {u.department || '—'}
-                      </span>
-                    </td>
+                {/* Footer: Loyalty Points & Actions */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 font-black text-xs text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                    <Award size={13} className="text-amber-500" />
+                    {u.loyaltyPoints || 0} Points
+                  </span>
 
-                    {/* Loyalty Points */}
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="inline-flex items-center gap-1 font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
-                        <Award size={12} className="text-amber-500" />
-                        {u.loyaltyPoints || 0}
-                      </span>
-                    </td>
-
-                    {/* Account Status */}
-                    <td className="py-3.5 px-4 text-center">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                        u.status === 'suspended' 
-                          ? 'bg-rose-100 text-rose-700 border border-rose-200' 
-                          : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      }`}>
-                        {u.status === 'suspended' ? <XCircle size={10} /> : <CheckCircle2 size={10} />}
-                        {u.status || 'active'}
-                      </span>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => openEditModal(u)}
-                          className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-xl transition cursor-pointer"
-                          title="Edit User Profile"
-                        >
-                          <Edit3 size={15} />
-                        </button>
-                        <button
-                          onClick={() => setUserToDelete(u)}
-                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-xl transition cursor-pointer"
-                          title="Delete Account"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => openEditModal(u)}
+                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-xl transition cursor-pointer"
+                      title="Edit User Profile"
+                    >
+                      <Edit3 size={15} />
+                    </button>
+                    <button
+                      onClick={() => setUserToDelete(u)}
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                      title="Delete Account"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

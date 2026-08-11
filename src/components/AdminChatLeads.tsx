@@ -657,8 +657,8 @@ export function AdminChatLeads() {
               </table>
             </div>
 
-            {/* Mobile Card Grid: shown on smaller screens to completely prevent scrolling */}
-            <div className="lg:hidden p-1 space-y-4">
+            {/* Mobile Card Grid: 2 columns on mobile */}
+            <div className="lg:hidden grid grid-cols-2 gap-2 sm:gap-4 p-1">
               {filteredLeads.map((lead) => (
                 <div 
                   key={lead.id} 

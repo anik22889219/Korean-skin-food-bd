@@ -1060,211 +1060,103 @@ export const ProductManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Products Dual-Layout Table/Cards */}
-      <div className="space-y-4">
-        {/* Desktop Table: shown only on lg and up */}
-        <div className="hidden lg:block overflow-x-auto border border-pink-50 rounded-xl">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-pink-50/40 text-pink-700 font-bold uppercase tracking-wider">
-                <th className="py-3 px-4">Brand & Product</th>
-                <th className="py-3 px-2">Category</th>
-                <th className="py-3 px-2">Stock Level</th>
-                <th className="py-3 px-2">Base Price</th>
-                <th className="py-3 px-2">Promo Price</th>
-                <th className="py-3 px-2 text-center">Gemini Writer</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-pink-50 bg-white">
-              {filteredProducts.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-10 text-gray-400">No items match the filters.</td>
-                </tr>
-              ) : (
-                filteredProducts.map(p => (
-                  <tr key={p.id} className="hover:bg-pink-50/10 transition">
-                    <td className="py-4 px-4">
-                      <div className="flex items-center gap-3">
-                        <img 
-                          src={p.image} 
-                          className="w-10 h-10 object-cover rounded shadow-sm border border-pink-50 cursor-pointer hover:scale-105 transition" 
-                          referrerPolicy="no-referrer" 
-                          onClick={() => setSelectedProductForPopup(p)}
-                          title="Click to view full specs & AI Discussion"
-                        />
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] uppercase font-bold text-[#E91E8C] block leading-none">{p.brand}</span>
-                            {p.ml && (
-                              <span className="text-[8px] px-1 bg-pink-50 text-pink-700 rounded font-mono font-bold leading-none">{p.ml}</span>
-                            )}
-                          </div>
-                          <span 
-                            onClick={() => setSelectedProductForPopup(p)}
-                            className="font-extrabold text-gray-800 block truncate max-w-xs cursor-pointer hover:text-[#E91E8C] transition"
-                            title="Click to view full specs & AI Discussion"
-                          >
-                            {p.name}
-                          </span>
-                          <span className="text-[9px] text-gray-400 block font-mono">Barcode: {p.barcode}</span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-2 text-gray-600 font-bold">{p.category}</td>
-                    <td className="py-4 px-2">
-                      <span className={`px-2.5 py-0.5 rounded font-mono font-bold text-[10px] ${p.stock <= 5 ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
-                        {p.stock} units
-                      </span>
-                    </td>
-                    <td className="py-4 px-2 text-gray-800 font-black font-mono">
-                      ৳{p.price}
-                      {p.importPrice && (
-                        <span className="block text-[8px] font-medium text-gray-400">Cost: ৳{p.importPrice}</span>
+      {/* Products Card System Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
+        {filteredProducts.length === 0 ? (
+          <div className="col-span-full text-center py-12 bg-white rounded-2xl border border-pink-100/50 text-gray-400 font-medium">
+            No items match the selected filters.
+          </div>
+        ) : (
+          filteredProducts.map(p => (
+            <div 
+              key={p.id} 
+              onClick={() => setSelectedProductForPopup(p)}
+              className="bg-white p-4 rounded-2xl border border-pink-100 shadow-xs space-y-3 cursor-pointer hover:border-[#E91E8C] hover:shadow-md transition-all flex flex-col justify-between"
+            >
+              <div className="space-y-2.5">
+                {/* Top row: Image & Quick Info */}
+                <div className="flex gap-3">
+                  <img src={p.image} className="w-16 h-16 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] uppercase font-bold text-[#E91E8C] block leading-none">{p.brand}</span>
+                      {p.ml && (
+                        <span className="text-[8px] px-1 bg-pink-50 text-pink-700 rounded font-mono font-bold leading-none">{p.ml}</span>
                       )}
-                    </td>
-                    <td className="py-4 px-2 font-mono font-bold text-[#E91E8C]">
-                      {p.discountPrice ? `৳${p.discountPrice}` : 'None'}
-                    </td>
-                    <td className="py-4 px-2 text-center">
-                      <button 
-                        onClick={() => handleGenerateOnDemandContent(p.id)}
-                        disabled={isAiGeneratingContent === p.id}
-                        className="mx-auto bg-pink-50 text-[#E91E8C] border border-pink-100 hover:bg-pink-100 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
-                      >
-                        <Wand2 size={11} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
-                        <span>{isAiGeneratingContent === p.id ? "Writing..." : "Auto-Generate SEO"}</span>
-                      </button>
-                    </td>
-                    <td className="py-4 px-4 text-right">
-                      <div className="flex justify-end gap-1.5">
-                        <button 
-                          onClick={() => setSelectedProductForPopup(p)}
-                          className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 rounded-lg cursor-pointer transition text-[11px] font-bold"
-                          title="Quick Spec Specifications Details"
-                        >
-                          <Eye size={12} />
-                        </button>
-                        <button 
-                          onClick={() => handleStartEditProduct(p)}
-                          className="p-1.5 bg-pink-50 hover:bg-pink-100 text-pink-750 border border-pink-100 rounded-lg cursor-pointer transition text-[11px] font-bold"
-                        >
-                          <Edit size={12} />
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteProduct(p);
-                          }}
-                          className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg cursor-pointer transition text-[11px] font-bold"
-                          title="Delete product"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Card Grid: shown on smaller screens to completely prevent scrolling */}
-        <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {filteredProducts.length === 0 ? (
-            <div className="col-span-full text-center py-10 bg-white rounded-2xl border border-pink-100/50 text-gray-400">
-              No items match the filters.
-            </div>
-          ) : (
-            filteredProducts.map(p => (
-              <div 
-                key={p.id} 
-                onClick={() => setSelectedProductForPopup(p)}
-                className="bg-white p-4 rounded-2xl border border-pink-100 shadow-sm space-y-3 cursor-pointer hover:border-[#E91E8C] transition flex flex-col justify-between"
-              >
-                <div className="space-y-2.5">
-                  {/* Top row: Image & Quick Info */}
-                  <div className="flex gap-3">
-                    <img src={p.image} className="w-16 h-16 object-cover rounded-xl shadow-sm border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[9px] uppercase font-bold text-[#E91E8C] block leading-none">{p.brand}</span>
-                        {p.ml && (
-                          <span className="text-[8px] px-1 bg-pink-50 text-pink-700 rounded font-mono font-bold leading-none">{p.ml}</span>
-                        )}
-                      </div>
-                      <span className="font-extrabold text-gray-900 block text-sm leading-snug line-clamp-2">{p.name}</span>
-                      <span className="text-[9px] text-gray-400 block font-mono">Barcode: {p.barcode || 'N/A'}</span>
                     </div>
-                  </div>
-
-                  {/* Stock level, Prices, Category */}
-                  <div className="grid grid-cols-2 gap-2 text-[11px] p-2 bg-pink-50/15 rounded-xl border border-pink-50/50">
-                    <div>
-                      <span className="text-[8px] text-gray-400 block uppercase font-bold">Category</span>
-                      <span className="font-bold text-gray-700">{p.category}</span>
-                    </div>
-                    <div>
-                      <span className="text-[8px] text-gray-400 block uppercase font-bold">Stock Level</span>
-                      <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${p.stock <= 5 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                        {p.stock} units
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[8px] text-gray-400 block uppercase font-bold">Price</span>
-                      <span className="font-extrabold text-gray-950 font-mono">৳{p.price}</span>
-                    </div>
-                    <div>
-                      <span className="text-[8px] text-gray-400 block uppercase font-bold">Promo Price</span>
-                      <span className="font-bold text-[#E91E8C] font-mono">
-                        {p.discountPrice ? `৳${p.discountPrice}` : 'None'}
-                      </span>
-                    </div>
+                    <span className="font-extrabold text-gray-900 block text-sm leading-snug line-clamp-2 hover:text-[#E91E8C] transition-colors">{p.name}</span>
+                    <span className="text-[9px] text-gray-400 block font-mono">Barcode: {p.barcode || 'N/A'}</span>
                   </div>
                 </div>
 
-                {/* Actions Row */}
-                <div className="flex gap-2 justify-end pt-2 border-t border-pink-50/50" onClick={(e) => e.stopPropagation()}>
-                  <button 
-                    onClick={() => handleGenerateOnDemandContent(p.id)}
-                    disabled={isAiGeneratingContent === p.id}
-                    className="mr-auto bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 px-2 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
-                  >
-                    <Wand2 size={10} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
-                    <span>{isAiGeneratingContent === p.id ? "..." : "SEO Write"}</span>
-                  </button>
-
-                  <button 
-                    onClick={() => setSelectedProductForPopup(p)}
-                    className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 rounded-lg cursor-pointer transition text-[10px] font-bold flex items-center gap-1"
-                  >
-                    <Eye size={12} />
-                    <span>Info</span>
-                  </button>
-
-                  <button 
-                    onClick={() => handleStartEditProduct(p)}
-                    className="p-1.5 bg-pink-50 hover:bg-pink-100 text-pink-750 border border-pink-100 rounded-lg cursor-pointer transition text-[10px]"
-                  >
-                    <Edit size={12} />
-                  </button>
-
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteProduct(p);
-                    }}
-                    className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg cursor-pointer transition text-[10px]"
-                    title="Delete product"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                {/* Stock level, Prices, Category */}
+                <div className="grid grid-cols-2 gap-2 text-[11px] p-2.5 bg-pink-50/15 rounded-xl border border-pink-50/50">
+                  <div>
+                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Category</span>
+                    <span className="font-bold text-gray-700 truncate block">{p.category}</span>
+                  </div>
+                  <div>
+                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Stock Level</span>
+                    <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${p.stock <= 5 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                      {p.stock} units
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Base Price</span>
+                    <span className="font-extrabold text-gray-950 font-mono">৳{p.price}</span>
+                  </div>
+                  <div>
+                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Promo Price</span>
+                    <span className="font-bold text-[#E91E8C] font-mono">
+                      {p.discountPrice ? `৳${p.discountPrice}` : 'None'}
+                    </span>
+                  </div>
                 </div>
               </div>
-            ))
-          )}
-        </div>
+
+              {/* Actions Row */}
+              <div className="flex gap-1.5 justify-end pt-2 border-t border-pink-50/50" onClick={(e) => e.stopPropagation()}>
+                <button 
+                  onClick={() => handleGenerateOnDemandContent(p.id)}
+                  disabled={isAiGeneratingContent === p.id}
+                  className="mr-auto bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 px-2 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
+                  title="Auto-generate AI SEO content"
+                >
+                  <Wand2 size={10} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
+                  <span>{isAiGeneratingContent === p.id ? "..." : "SEO Write"}</span>
+                </button>
+
+                <button 
+                  onClick={() => setSelectedProductForPopup(p)}
+                  className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 rounded-lg cursor-pointer transition text-[10px] font-bold flex items-center gap-1"
+                  title="View Specs & Details"
+                >
+                  <Eye size={12} />
+                  <span>Info</span>
+                </button>
+
+                <button 
+                  onClick={() => handleStartEditProduct(p)}
+                  className="p-1.5 bg-pink-50 hover:bg-pink-100 text-pink-750 border border-pink-100 rounded-lg cursor-pointer transition text-[10px]"
+                  title="Edit Product"
+                >
+                  <Edit size={12} />
+                </button>
+
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteProduct(p);
+                  }}
+                  className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg cursor-pointer transition text-[10px]"
+                  title="Delete product"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Product Details Specifications Popup Modal */}
