@@ -1415,11 +1415,12 @@ export const StoreCatalog: React.FC = () => {
       setClActiveIndex((prev) => (prev - 1 + reels.length) % reels.length);
     };
 
-    // Calculate visible reels slice for carousel (displays 3 items starting from active index)
+    // Calculate visible reels slice for carousel (displays 1 item on mobile, 3 items on desktop)
     const getVisibleReels = () => {
-      if (reels.length <= 3) return reels;
+      const maxVisible = isMobile ? 1 : 3;
+      if (reels.length <= maxVisible) return reels;
       const visible = [];
-      for (let i = 0; i < Math.min(3, reels.length); i++) {
+      for (let i = 0; i < Math.min(maxVisible, reels.length); i++) {
         visible.push(reels[(clActiveIndex + i) % reels.length]);
       }
       return visible;
@@ -1430,9 +1431,12 @@ export const StoreCatalog: React.FC = () => {
     return (
       <div 
         key="communityLive" 
-        className="bg-[#fbf2ed] p-6 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden"
+        className="bg-[#fbf2ed] p-5 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden select-none"
         onMouseEnter={() => setClIsHovered(true)}
         onMouseLeave={() => setClIsHovered(false)}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={() => handleTouchEnd(handleNextReel, handlePrevReel)}
       >
         {/* Header with Title and Auto-Slide Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-100/80 pb-4">
