@@ -8,15 +8,19 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../services/firebase';
-import { UserProfile } from '../types';
+import { UserProfile, CreatorProfile, CreatorStatus } from '../types';
 
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
+  creatorProfile: CreatorProfile | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
+  isCreator: boolean;
+  isApprovedCreator: boolean;
+  creatorStatus: CreatorStatus | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,10 +28,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [creatorProfile, setCreatorProfile] = useState<CreatorProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
+    let creatorUnsub: (() => void) | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setLoading(true);
@@ -35,12 +41,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profileUnsub();
         profileUnsub = null;
       }
+      if (creatorUnsub) {
+        creatorUnsub();
+        creatorUnsub = null;
+      }
 
       try {
         if (currentUser) {
           setUser(currentUser);
           
           const userDocRef = doc(db, 'users', currentUser.uid);
+          const creatorDocRef = doc(db, 'creators', currentUser.uid);
+
+          // Subscribe to live creator profile updates
+          creatorUnsub = onSnapshot(creatorDocRef, (creatorSnap) => {
+            if (creatorSnap.exists()) {
+              setCreatorProfile(creatorSnap.data() as CreatorProfile);
+            } else {
+              setCreatorProfile(null);
+            }
+          }, (err) => {
+            console.warn('[AuthContext] Creator profile listener notice:', err);
+          });
 
           // Subscribe to live user document updates
           profileUnsub = onSnapshot(userDocRef, async (snap) => {
@@ -83,6 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           setUser(null);
           setProfile(null);
+          setCreatorProfile(null);
         }
       } catch (error) {
         console.error('[AuthContext] Error syncing auth state:', error);
@@ -94,6 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       unsubscribe();
       if (profileUnsub) profileUnsub();
+      if (creatorUnsub) creatorUnsub();
     };
   }, []);
 
@@ -116,6 +140,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await fbSignOut(auth);
       setUser(null);
       setProfile(null);
+      setCreatorProfile(null);
     } catch (error) {
       console.error('[AuthContext] Sign-out error:', error);
       throw error;
@@ -128,14 +153,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ? (profile.role === 'admin' || profile.role === 'super_admin' || profile.role === 'hr' || profile.role === 'inventory_manager' || profile.role === 'customer_support') 
     : false;
 
+  const isCreator = !!creatorProfile || profile?.role === 'creator';
+  const isApprovedCreator = creatorProfile?.status === 'approved';
+  const creatorStatus = creatorProfile?.status || null;
+
   return (
     <AuthContext.Provider value={{
       user,
       profile,
+      creatorProfile,
       loading,
       signInWithGoogle,
       signOut,
-      isAdmin
+      isAdmin,
+      isCreator,
+      isApprovedCreator,
+      creatorStatus
     }}>
       {children}
     </AuthContext.Provider>

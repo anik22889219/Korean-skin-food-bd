@@ -138,7 +138,130 @@ export interface AdPerformance {
   isMock?: boolean;
 }
 
-export type UserRole = 'customer' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'customer_support';
+export type UserRole = 'customer' | 'creator' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'customer_support';
+
+export type CreatorStatus = 'pending' | 'approved' | 'suspended';
+
+export type CreatorReelStatus = 'pending' | 'approved' | 'rejected' | 'published';
+
+export type MetricsSource = 'facebook_api' | 'admin_verified' | 'none';
+
+export interface CreatorLevelThreshold {
+  level: number;
+  name: string;
+  minPoints: number;
+  maxPoints: number;
+}
+
+export interface CreatorPointSettings {
+  viewsPerPoint: number;
+  likesPerPoint: number;
+  pointsPerLikeBlock: number;
+  commentsPerPoint: number;
+  pointsPerComment: number;
+  levels: CreatorLevelThreshold[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface ReelMetricAuditLog {
+  id?: string;
+  auditLogId?: string;
+  creatorReelId: string;
+  adminId: string;
+  previousPerformance?: CreatorReelPerformance;
+  newPerformance?: CreatorReelPerformance;
+  previousValues?: { views: number; likes: number; comments: number; points: number };
+  newValues?: { views: number; likes: number; comments: number; points: number };
+  reason?: string;
+  timestamp: string;
+}
+
+export interface CreatorReelPerformance {
+  views: number;
+  likes: number;
+  comments: number;
+  points: number;
+  viewPoints?: number;
+  likePoints?: number;
+  commentPoints?: number;
+  metricsSource?: MetricsSource;
+  metricsUpdatedAt?: string;
+  facebookPostId?: string;
+}
+
+export interface CreatorReel {
+  creatorReelId: string;
+  creatorId: string;
+  creatorUserId: string;
+
+  videoUrl: string;
+  thumbnailUrl: string;
+
+  caption: string;
+  description?: string;
+
+  facebookPostUrl: string;
+  facebookPostId?: string;
+  metricsSource?: MetricsSource;
+  metricsUpdatedAt?: string;
+
+  productIds?: string[];
+  productNames?: string[];
+
+  status: CreatorReelStatus;
+
+  adminNote?: string;
+
+  performance: CreatorReelPerformance;
+
+  createdAt: string;
+  updatedAt: string;
+  approvedAt?: string;
+  publishedAt?: string;
+}
+
+export interface CreatorProfile {
+  creatorId: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  profileImage: string;
+  bio: string;
+  email: string;
+  phone: string;
+  facebookUrl?: string;
+  instagramUrl?: string;
+  niche?: string;
+  shippingAddress?: string;
+  socialLinks?: {
+    instagram?: string;
+    facebook?: string;
+    tiktok?: string;
+    youtube?: string;
+  };
+  status: CreatorStatus;
+  role: 'creator';
+
+  // Statistics
+  totalReels: number;
+  totalViews: number;
+  totalLikes: number;
+  totalComments: number;
+  totalPoints: number;
+
+  // Level
+  level: number;
+  levelName: string;
+  levelProgress: number;
+  nextLevelPoints: number;
+  pointsRemaining?: number;
+  nextLevelName?: string;
+
+  // Timestamps
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface UserProfile {
   uid: string;
@@ -152,6 +275,7 @@ export interface UserProfile {
   createdAt?: any;
   department?: string;
   status?: 'active' | 'suspended';
+  creatorId?: string;
 }
 
 export interface ChatLeadItem {

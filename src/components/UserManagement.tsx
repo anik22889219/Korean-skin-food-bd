@@ -71,14 +71,15 @@ export const UserManagement: React.FC = () => {
         });
       });
 
-      // Sort by Super Admin > HR > Admin > Staff > Customer
+      // Sort by Super Admin > HR > Admin > Creator > Staff > Customer
       const rolePriority: Record<string, number> = {
         super_admin: 1,
         hr: 2,
         admin: 3,
-        inventory_manager: 4,
-        customer_support: 5,
-        customer: 6,
+        creator: 4,
+        inventory_manager: 5,
+        customer_support: 6,
+        customer: 7,
       };
 
       userList.sort((a, b) => (rolePriority[a.role] || 99) - (rolePriority[b.role] || 99));
@@ -233,6 +234,7 @@ export const UserManagement: React.FC = () => {
   const totalUsers = users.length;
   const superAdminsCount = users.filter((u) => u.role === 'super_admin').length;
   const hrCount = users.filter((u) => u.role === 'hr').length;
+  const creatorsCount = users.filter((u) => u.role === 'creator').length;
   const staffCount = users.filter((u) => ['admin', 'inventory_manager', 'customer_support'].includes(u.role)).length;
   const customersCount = users.filter((u) => u.role === 'customer').length;
 
@@ -255,6 +257,12 @@ export const UserManagement: React.FC = () => {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-pink-100 text-pink-800 border border-pink-300">
             <Shield size={12} className="text-pink-600" /> Store Admin
+          </span>
+        );
+      case 'creator':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-rose-100 text-rose-800 border border-rose-300">
+            <Sparkles size={12} className="text-rose-600" /> Creator
           </span>
         );
       case 'inventory_manager':
@@ -364,7 +372,7 @@ export const UserManagement: React.FC = () => {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-400 mb-1">
             <span className="text-[10px] font-black uppercase tracking-wider">Total Users</span>
@@ -390,6 +398,15 @@ export const UserManagement: React.FC = () => {
           </div>
           <div className="text-xl font-black text-indigo-900">{hrCount}</div>
           <span className="text-[10px] text-indigo-600/80 font-medium">People & Roles</span>
+        </div>
+
+        <div className="bg-rose-50/50 p-4 rounded-2xl border border-rose-200 shadow-sm">
+          <div className="flex items-center justify-between text-rose-600 mb-1">
+            <span className="text-[10px] font-black uppercase tracking-wider">Creators</span>
+            <Sparkles size={16} className="text-rose-600" />
+          </div>
+          <div className="text-xl font-black text-rose-900">{creatorsCount}</div>
+          <span className="text-[10px] text-rose-600/80 font-medium">K-Skin Creators</span>
         </div>
 
         <div className="bg-pink-50/50 p-4 rounded-2xl border border-pink-200 shadow-sm">
@@ -436,6 +453,7 @@ export const UserManagement: React.FC = () => {
               { id: 'super_admin', label: 'Super Admin' },
               { id: 'hr', label: 'HR' },
               { id: 'admin', label: 'Admin' },
+              { id: 'creator', label: 'Creators' },
               { id: 'inventory_manager', label: 'Inventory' },
               { id: 'customer_support', label: 'Support' },
               { id: 'customer', label: 'Customers' },
@@ -522,6 +540,7 @@ export const UserManagement: React.FC = () => {
                         title="Change User Role"
                       >
                         <option value="customer">Customer</option>
+                        <option value="creator">Creator</option>
                         <option value="customer_support">Support Rep</option>
                         <option value="inventory_manager">Inventory Manager</option>
                         <option value="admin">Store Admin</option>
@@ -647,6 +666,7 @@ export const UserManagement: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                       <option value="customer">Customer</option>
+                      <option value="creator">Creator (K-Beauty Creator)</option>
                       <option value="customer_support">Customer Support</option>
                       <option value="inventory_manager">Inventory Manager</option>
                       <option value="admin">Store Admin</option>
@@ -784,6 +804,7 @@ export const UserManagement: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                       <option value="customer">Customer</option>
+                      <option value="creator">Creator (K-Beauty Creator)</option>
                       <option value="customer_support">Customer Support</option>
                       <option value="inventory_manager">Inventory Manager</option>
                       <option value="admin">Store Admin</option>

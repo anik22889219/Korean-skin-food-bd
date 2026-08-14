@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Wand2, Mail, Phone, MapPin, MessageSquare, 
-  ExternalLink, ShieldCheck, Truck, HeartHandshake
+  ExternalLink, ShieldCheck, Truck, HeartHandshake,
+  Sparkles, Gift, Flame, ArrowRight
 } from 'lucide-react';
 import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
 import { GlobalThemeSettings } from '../types/theme';
@@ -52,6 +53,35 @@ export const Footer: React.FC = () => {
               <p className="text-[11px] text-gray-500 font-medium">Expert routine guidance via WhatsApp</p>
             </div>
           </div>
+        </div>
+
+        {/* Creator Program Spotlight Callout */}
+        <div className="bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 rounded-3xl p-5 sm:p-6 text-white shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Sparkles size={24} />
+            </div>
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black uppercase tracking-wider mb-1">
+                <Gift size={11} /> Creator Program
+              </div>
+              <h3 className="text-base sm:text-lg font-black tracking-tight leading-tight">
+                Want to become a Korean Skin Food Creator?
+              </h3>
+              <p className="text-xs text-white/90 font-medium mt-0.5">
+                Share skincare reels, earn reward points, and receive free imported Seoul PR hampers!
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/become-a-creator"
+            id="footer_become_creator_cta_btn"
+            className="w-full sm:w-auto px-6 py-3 bg-white hover:bg-pink-50 text-[#E91E8C] font-extrabold text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all shrink-0 hover:scale-105 active:scale-95"
+          >
+            <span>Become a Creator</span>
+            <ArrowRight size={16} />
+          </Link>
         </div>
 
         {/* Main Footer Grid */}
@@ -155,6 +185,25 @@ export const Footer: React.FC = () => {
               <li>
                 <Link to="/shop" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
                   <span className="text-[#E91E8C]">›</span> Shop All Skincare
+                </Link>
+              </li>
+              <li>
+                <Link 
+                  to="/become-a-creator" 
+                  id="footer_become_creator_link"
+                  className="text-[#E91E8C] hover:text-pink-700 font-bold transition-colors flex items-center justify-between gap-1.5 py-0.5"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-[#E91E8C]" /> Become a Creator
+                  </span>
+                  <span className="px-1.5 py-0.5 bg-pink-100 text-[#E91E8C] text-[9px] font-black uppercase rounded-md tracking-wider">
+                    Join
+                  </span>
+                </Link>
+              </li>
+              <li>
+                <Link to="/creator/leaderboard" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
+                  <span className="text-[#E91E8C]">›</span> Creator Leaderboard
                 </Link>
               </li>
               <li>

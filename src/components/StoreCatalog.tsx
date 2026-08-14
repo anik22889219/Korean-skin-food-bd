@@ -17,6 +17,7 @@ import { motion } from 'motion/react';
 import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
 import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
+import { TopCreatorsSection } from './TopCreatorsSection';
 
 const CATEGORIES = [
   'All', 
@@ -1559,7 +1560,12 @@ export const StoreCatalog: React.FC = () => {
       case 'reachReliability':
         return renderReachReliabilitySection();
       case 'communityLive':
-        return renderCommunityLiveSection();
+        return (
+          <>
+            <TopCreatorsSection />
+            {renderCommunityLiveSection()}
+          </>
+        );
       default:
         return null;
     }

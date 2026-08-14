@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart3, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
-  LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, Palette, Package, Bot, Users 
+  LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, Palette, Package, Bot, Users, Sparkles 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -15,6 +15,7 @@ export const AdminLayout: React.FC = () => {
 
   const navItems = [
     { to: '/admin', label: 'Dashboard Overview', badge: 'Live', icon: BarChart3, end: true },
+    { to: '/admin/creators', label: 'Creators', badge: 'Hub', icon: Sparkles },
     { to: '/admin/users', label: 'User Management', badge: 'HR & Admin', icon: Users },
     { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
     { to: '/admin/orders', label: 'Order Fulfillment', badge: 'Workflow', icon: Package },

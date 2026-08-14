@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, Outlet, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { 
@@ -7,7 +7,8 @@ import {
   Trash2, Plus, Minus, CheckCircle, ShieldCheck, Settings,
   LayoutDashboard, Tv, Globe, MessageSquare, Menu, ChevronLeft, 
   ChevronRight, Home, Compass, BarChart3, CreditCard, Boxes, 
-  TrendingUp, Wand2, MessageCircle, Gift, Lock, Camera, Sparkles
+  TrendingUp, Wand2, MessageCircle, Gift, Lock, Camera, Sparkles,
+  Search, Video, Award, Heart, HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -22,7 +23,8 @@ import { GlobalThemeSettings } from '../types/theme';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
-  const { user, profile, signOut, isAdmin, signInWithGoogle } = useAuth();
+  const location = useLocation();
+  const { user, profile, signOut, isAdmin, signInWithGoogle, creatorProfile } = useAuth();
   const { 
     cart, isCartOpen, setIsCartOpen, language, setLanguage, 
     checkoutStep, setCheckoutStep, checkoutForm, setCheckoutForm,
@@ -33,6 +35,8 @@ export const MainLayout: React.FC = () => {
   } = useCart();
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
@@ -78,8 +82,13 @@ export const MainLayout: React.FC = () => {
     }
   };
 
+  const isActivePath = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
+
   return (
-    <div className="min-h-screen bg-[#FFF5F8]/40 text-gray-800 font-sans selection:bg-[#E91E8C] selection:text-white flex flex-col pb-16 md:pb-0">
+    <div className="min-h-screen bg-[#FFF5F8]/40 text-gray-800 font-sans selection:bg-[#E91E8C] selection:text-white flex flex-col pb-20 lg:pb-0 overflow-x-hidden">
       
       {/* 1. Dynamic Auto-Sliding Announcement Bar */}
       {globalTheme.enableAnnouncement !== false && (
@@ -100,41 +109,80 @@ export const MainLayout: React.FC = () => {
       )}
 
       {/* 2. Responsive Adaptive Header */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-4 md:px-8 py-3.5 flex items-center justify-between shadow-sm">
-        {/* Left Section: Desktop Menus & Admin Shortcut */}
-        <div className="flex items-center gap-6">
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-3 sm:px-6 lg:px-8 py-3 flex items-center justify-between shadow-xs">
+        
+        {/* Left Section: Mobile Menu Trigger + Desktop Menus & Admin Shortcut */}
+        <div className="flex items-center gap-3 lg:gap-6">
+          {/* Mobile Hamburger Button */}
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="lg:hidden p-2 text-gray-700 hover:text-[#E91E8C] hover:bg-pink-50 rounded-xl transition cursor-pointer"
+            aria-label="Open Navigation Menu"
+          >
+            <Menu size={20} />
+          </button>
+
           {user && isAdmin && (
             <Link 
               to="/admin"
-              className="px-3 py-1.5 bg-slate-900 text-white rounded-xl text-xs font-bold transition-all hover:bg-[#E91E8C] flex items-center gap-1.5 shadow-xs"
+              className="hidden sm:flex px-3 py-1.5 bg-slate-900 hover:bg-[#E91E8C] text-white rounded-xl text-xs font-bold transition-all items-center gap-1.5 shadow-xs shrink-0"
               title="Go to Admin Dashboard"
             >
               <ShieldCheck size={14} className="text-pink-400" />
-              <span className="hidden sm:inline">Admin Panel</span>
+              <span>Admin Deck</span>
             </Link>
           )}
 
-          {/* Menus: Home, Shop, About Us, Contact Us */}
+          {/* Menus: Home, Shop, Become a Creator, About Us, Contact Us */}
           <nav className="hidden lg:flex items-center gap-5 text-xs font-bold text-gray-650">
-            <Link to="/" className="hover:text-[#E91E8C] hover:scale-105 transition-all py-1">{activeTranslations.home || "Home"}</Link>
-            <Link to="/shop" className="hover:text-[#E91E8C] hover:scale-105 transition-all py-1">{activeTranslations.shop || "Shop"}</Link>
-            <Link to="/about-us" className="hover:text-[#E91E8C] hover:scale-105 transition-all py-1">{language === 'bn' ? 'আমাদের সম্পর্কে' : 'About Us'}</Link>
-            <Link to="/contact-us" className="hover:text-[#E91E8C] hover:scale-105 transition-all py-1">{language === 'bn' ? 'যোগাযোগ' : 'Contact Us'}</Link>
+            <Link 
+              to="/" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/') && location.pathname === '/' ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {activeTranslations.home || "Home"}
+            </Link>
+            <Link 
+              to="/shop" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/shop') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {activeTranslations.shop || "Shop"}
+            </Link>
+            <Link 
+              to="/become-a-creator" 
+              className="hover:text-[#E91E8C] hover:scale-105 transition-all py-1 flex items-center gap-1 text-[#E91E8C] font-extrabold"
+            >
+              <Sparkles size={13} />
+              <span>{language === 'bn' ? 'ক্রিয়েটর হোন' : 'Become a Creator'}</span>
+            </Link>
+            <Link 
+              to="/about-us" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/about-us') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'আমাদের সম্পর্কে' : 'About Us'}
+            </Link>
+            <Link 
+              to="/contact-us" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/contact-us') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'যোগাযোগ' : 'Contact Us'}
+            </Link>
           </nav>
         </div>
 
         {/* Center Section: Branding Logo */}
-        <Link to="/" className="flex items-center gap-2.5 group">
+        <Link to="/" className="flex items-center gap-2 group shrink-0">
           {globalTheme.logoUrl ? (
-            <img src={globalTheme.logoUrl} alt={globalTheme.logoText} className="h-9 object-contain" />
+            <img src={globalTheme.logoUrl} alt={globalTheme.logoText} className="h-8 sm:h-9 object-contain" />
           ) : (
             <>
               <div className="w-8 h-8 bg-[#E91E8C] rounded-full flex items-center justify-center shadow-md shadow-[#E91E8C]/25 border border-[#FF62B2] group-hover:scale-105 transition-transform duration-300">
                 <Wand2 className="text-white" size={14} />
               </div>
-              <div>
-                <h1 className="text-sm md:text-base font-extrabold text-gray-900 tracking-tight leading-none">{globalTheme.logoText || 'Korean Skin Food BD'}</h1>
-                <p className="text-[9px] text-pink-600 mt-0.5 font-bold tracking-wider hidden sm:block uppercase">
+              <div className="text-left">
+                <h1 className="text-xs sm:text-sm md:text-base font-extrabold text-gray-900 tracking-tight leading-none">
+                  {globalTheme.logoText || 'Korean Skin Food BD'}
+                </h1>
+                <p className="text-[8px] sm:text-[9px] text-pink-600 font-bold tracking-wider hidden sm:block uppercase mt-0.5">
                   {globalTheme.logoTagline || activeTranslations.tagline}
                 </p>
               </div>
@@ -143,9 +191,9 @@ export const MainLayout: React.FC = () => {
         </Link>
 
         {/* Right Section: Header Live Text + Image Search, Language Switcher, Cart Trigger, Login */}
-        <div className="flex items-center gap-2.5">
-          {/* Header Live Search Input with Dropdown & Image Search button */}
-          <div className="hidden md:block w-64 lg:w-72">
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
+          {/* Desktop Search Bar */}
+          <div className="hidden md:block w-56 lg:w-72">
             <HeaderSearch
               products={allProducts}
               onOpenImageSearch={() => setIsImageSearchOpen(true)}
@@ -156,11 +204,20 @@ export const MainLayout: React.FC = () => {
             />
           </div>
 
+          {/* Mobile Search Toggle Button */}
+          <button
+            onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+            className="md:hidden p-2 text-gray-700 hover:text-[#E91E8C] hover:bg-pink-50 rounded-xl transition cursor-pointer"
+            title="Search Store"
+          >
+            <Search size={18} />
+          </button>
+
           {/* Mobile Image Search Icon Button */}
           <button
             onClick={() => setIsImageSearchOpen(true)}
-            className="md:hidden flex items-center gap-1 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white p-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
-            title="Search Products"
+            className="md:hidden flex items-center gap-1 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white p-2 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
+            title="Search Products by Photo"
           >
             <Camera size={16} />
           </button>
@@ -170,13 +227,10 @@ export const MainLayout: React.FC = () => {
             onClick={() => setLanguage(language === 'en' ? 'bn' : 'en')}
             aria-label="Toggle Language English / Bengali"
             title={language === 'en' ? 'বাংলা ভাষায় পরিবর্তন করুন' : 'Switch to English'}
-            className="flex items-center gap-1.5 bg-pink-50/90 hover:bg-pink-100 text-gray-800 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer border border-pink-200/80 transition-all shadow-xs hover:shadow-sm active:scale-95 group"
+            className="flex items-center gap-1 bg-pink-50/90 hover:bg-pink-100 text-gray-800 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer border border-pink-200/80 transition-all shadow-xs active:scale-95 group"
           >
-            <Languages size={15} className="text-[#E91E8C] shrink-0 group-hover:rotate-12 transition-transform" />
-            <span className="font-extrabold text-gray-800">
-              {language === 'en' ? 'বাংলা' : 'English'}
-            </span>
-            <span className="text-[9px] px-1 py-0.2 bg-[#E91E8C] text-white rounded font-black uppercase tracking-wider ml-0.5">
+            <Languages size={14} className="text-[#E91E8C] shrink-0" />
+            <span className="text-[10px] font-black uppercase tracking-wider text-[#E91E8C]">
               {language === 'en' ? 'BN' : 'EN'}
             </span>
           </button>
@@ -184,21 +238,22 @@ export const MainLayout: React.FC = () => {
           {/* Cart Icon trigger */}
           <button 
             onClick={() => setIsCartOpen(true)}
-            className="relative p-2.5 bg-white hover:bg-pink-50 rounded-xl border border-pink-200 cursor-pointer transition text-gray-700 shadow-sm"
+            className="relative p-2 sm:p-2.5 bg-white hover:bg-pink-50 rounded-xl border border-pink-200 cursor-pointer transition text-gray-700 shadow-xs"
+            aria-label="Shopping Cart"
           >
             <ShoppingBag size={16} />
             {cart.length > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 bg-[#E91E8C] text-white text-[8px] font-black rounded-full flex items-center justify-center animate-bounce border border-white">
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 sm:w-4.5 sm:h-4.5 bg-[#E91E8C] text-white text-[8px] font-black rounded-full flex items-center justify-center animate-bounce border border-white">
                 {cart.reduce((sum, i) => sum + i.quantity, 0)}
               </span>
             )}
           </button>
 
-          {/* Login Button or Profile Image dropdown */}
+          {/* User Profile Avatar / Login Button */}
           {!user ? (
             <Link 
               to="/login"
-              className="p-2.5 bg-white hover:bg-pink-50 rounded-xl border border-pink-200 cursor-pointer transition text-gray-750 shadow-sm flex items-center justify-center"
+              className="p-2 sm:p-2.5 bg-white hover:bg-pink-50 rounded-xl border border-pink-200 cursor-pointer transition text-gray-750 shadow-xs flex items-center justify-center"
               title="Login"
               id="login_icon_btn"
             >
@@ -232,30 +287,41 @@ export const MainLayout: React.FC = () => {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 10 }}
-                      className="absolute right-0 mt-2 w-48 bg-white border border-pink-100 rounded-2xl shadow-xl z-50 py-2.5 text-xs font-semibold text-gray-700"
+                      className="absolute right-0 mt-2 w-52 bg-white border border-pink-100 rounded-2xl shadow-xl z-50 py-2.5 text-xs font-semibold text-gray-700"
                     >
                       <div className="px-4 py-2 border-b border-pink-50">
-                        <p className="font-extrabold text-gray-955 truncate leading-none mb-1">{profile?.name || 'K-Beauty User'}</p>
+                        <p className="font-extrabold text-gray-900 truncate leading-none mb-1">{profile?.name || 'K-Beauty User'}</p>
                         <p className="text-[10px] text-gray-400 truncate font-mono">{profile?.email}</p>
                       </div>
                       
                       <Link 
                         to="/profile" 
                         onClick={() => setProfileMenuOpen(false)}
-                        className="w-full text-left px-4 py-2 hover:bg-pink-50/40 flex items-center gap-2 transition"
+                        className="w-full text-left px-4 py-2.5 hover:bg-pink-50/40 flex items-center gap-2 transition font-bold text-gray-800"
                       >
-                        <User size={13} className="text-[#E91E8C]" />
-                        <span>My Profile</span>
+                        <User size={14} className="text-[#E91E8C]" />
+                        <span>My Account & Orders</span>
                       </Link>
+
+                      {(creatorProfile || profile?.role === 'creator') && (
+                        <Link 
+                          to="/creator/dashboard" 
+                          onClick={() => setProfileMenuOpen(false)}
+                          className="w-full text-left px-4 py-2 hover:bg-pink-50/40 flex items-center gap-2 transition text-pink-600 font-extrabold"
+                        >
+                          <Sparkles size={14} className="text-[#E91E8C]" />
+                          <span>Creator Studio</span>
+                        </Link>
+                      )}
 
                       {isAdmin && (
                         <Link 
                           to="/admin" 
                           onClick={() => setProfileMenuOpen(false)}
-                          className="w-full text-left px-4 py-2 hover:bg-pink-50/40 flex items-center gap-2 transition text-slate-800"
+                          className="w-full text-left px-4 py-2 hover:bg-pink-50/40 flex items-center gap-2 transition text-slate-800 font-bold"
                         >
-                          <Settings size={13} className="text-slate-950" />
-                          <span>Admin Dashboard</span>
+                          <Settings size={14} className="text-slate-900" />
+                          <span>Operations Admin</span>
                         </Link>
                       )}
 
@@ -263,7 +329,7 @@ export const MainLayout: React.FC = () => {
                         onClick={() => { setProfileMenuOpen(false); handleLogout(); }}
                         className="w-full text-left px-4 py-2.5 hover:bg-red-50 text-red-500 flex items-center gap-2 transition border-t border-pink-50 mt-1 font-bold cursor-pointer"
                       >
-                        <LogOut size={13} />
+                        <LogOut size={14} />
                         <span>Sign Out</span>
                       </button>
                     </motion.div>
@@ -274,6 +340,174 @@ export const MainLayout: React.FC = () => {
           )}
         </div>
       </header>
+
+      {/* Mobile Expandable Search Bar Drawer */}
+      <AnimatePresence>
+        {mobileSearchOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="md:hidden bg-white border-b border-pink-100 p-3 shadow-sm z-25 overflow-hidden"
+          >
+            <HeaderSearch
+              products={allProducts}
+              onOpenImageSearch={() => {
+                setMobileSearchOpen(false);
+                setIsImageSearchOpen(true);
+              }}
+              onAddToCart={(product) => {
+                addToCart(product);
+                setIsCartOpen(true);
+                setMobileSearchOpen(false);
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Sidebar Navigation Drawer */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-50 flex">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileMenuOpen(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+
+            <motion.div 
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'tween', duration: 0.25 }}
+              className="relative w-4/5 max-w-xs bg-white h-full shadow-2xl z-50 flex flex-col justify-between p-5 border-r border-pink-100 overflow-y-auto"
+            >
+              <div className="space-y-6">
+                {/* Brand Header */}
+                <div className="flex items-center justify-between pb-4 border-b border-pink-100">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-[#E91E8C] rounded-full flex items-center justify-center text-white">
+                      <Wand2 size={14} />
+                    </div>
+                    <span className="font-black text-sm text-gray-900">Korean Skin Food</span>
+                  </div>
+                  <button 
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Nav Links List */}
+                <nav className="space-y-1.5 text-xs font-bold text-gray-700">
+                  <Link
+                    to="/"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/') && location.pathname === '/' ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Home size={16} />
+                    <span>{activeTranslations.home || "Home"}</span>
+                  </Link>
+
+                  <Link
+                    to="/shop"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/shop') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Compass size={16} />
+                    <span>{activeTranslations.shop || "Shop"}</span>
+                  </Link>
+
+                  <Link
+                    to="/become-a-creator"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3.5 py-3 rounded-2xl text-[#E91E8C] bg-pink-50/70 hover:bg-pink-100 transition font-extrabold border border-pink-200/60"
+                  >
+                    <Sparkles size={16} />
+                    <span>{language === 'bn' ? 'ক্রিয়েটর হোন' : 'Become a Creator'}</span>
+                  </Link>
+
+                  <Link
+                    to="/about-us"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/about-us') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Globe size={16} />
+                    <span>{language === 'bn' ? 'আমাদের সম্পর্কে' : 'About Us'}</span>
+                  </Link>
+
+                  <Link
+                    to="/contact-us"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/contact-us') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <MessageCircle size={16} />
+                    <span>{language === 'bn' ? 'যোগাযোগ' : 'Contact Us'}</span>
+                  </Link>
+
+                  <div className="pt-3 border-t border-pink-100 my-2" />
+
+                  <Link
+                    to="/profile"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/profile') ? 'bg-slate-900 text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <User size={16} />
+                    <span>{language === 'bn' ? 'আমার প্রোফাইল ও অর্ডার' : 'My Account & Orders'}</span>
+                  </Link>
+
+                  {user && isAdmin && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-3 px-3.5 py-3 rounded-2xl bg-slate-900 text-amber-300 font-black"
+                    >
+                      <ShieldCheck size={16} />
+                      <span>Admin Control Deck</span>
+                    </Link>
+                  )}
+                </nav>
+              </div>
+
+              {/* Bottom Drawer Actions */}
+              <div className="pt-4 border-t border-pink-100 space-y-2">
+                {user ? (
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                    className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition"
+                  >
+                    <LogOut size={14} />
+                    <span>Sign Out</span>
+                  </button>
+                ) : (
+                  <Link
+                    to="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full py-2.5 bg-[#E91E8C] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-md shadow-pink-500/20"
+                  >
+                    <User size={14} />
+                    <span>Sign In to Account</span>
+                  </Link>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* 3. Render Storefront Content */}
       <main className="flex-1 min-w-0">
@@ -286,13 +520,13 @@ export const MainLayout: React.FC = () => {
       {/* 5. Cart Drawer overlay */}
       <AnimatePresence>
         {isCartOpen && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-end">
             <motion.div 
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'tween', duration: 0.3 }}
-              className="bg-white w-full max-w-md h-full flex flex-col justify-between shadow-2xl relative border-l border-pink-100"
+              className="bg-white w-full max-w-full sm:max-w-md h-full flex flex-col justify-between shadow-2xl relative border-l border-pink-100"
             >
               {/* Drawer Header */}
               <div className="p-4 border-b border-pink-100 flex justify-between items-center bg-white">
@@ -315,7 +549,7 @@ export const MainLayout: React.FC = () => {
                     {cart.length === 0 ? (
                       <div className="py-24 text-center text-gray-500 space-y-3">
                         <ShoppingBag size={42} className="mx-auto opacity-20 text-gray-400" />
-                        <p className="text-xs font-bold text-gray-650">Your skincare basket is empty.</p>
+                        <p className="text-xs font-bold text-gray-600">Your skincare basket is empty.</p>
                         <button 
                           onClick={() => setIsCartOpen(false)} 
                           className="px-4 py-2 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-sm"
@@ -326,12 +560,12 @@ export const MainLayout: React.FC = () => {
                     ) : (
                       <div className="space-y-3">
                         {cart.map(item => (
-                          <div key={item.product.id} className="bg-pink-50/15 p-3 rounded-2xl border border-pink-100/40 flex items-center justify-between text-xs">
+                          <div key={item.product.id} className="bg-pink-50/20 p-3 rounded-2xl border border-pink-100/50 flex items-center justify-between text-xs">
                             <div className="flex items-center gap-3 min-w-0">
-                              <img src={item.product.image} className="w-12 h-12 object-cover rounded-xl shadow-sm border border-pink-100/30 shrink-0" referrerPolicy="no-referrer" />
+                              <img src={item.product.image} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
                               <div className="min-w-0">
-                                <h4 className="font-bold text-gray-805 leading-tight truncate">
-                                  {language === 'en' ? item.product.name : item.product.nameBN}
+                                <h4 className="font-bold text-gray-800 leading-tight truncate">
+                                  {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
                                 </h4>
                                 <span className="text-[#E91E8C] font-extrabold block mt-0.5 font-mono">
                                   ৳{item.product.discountPrice || item.product.price}
@@ -422,7 +656,7 @@ export const MainLayout: React.FC = () => {
                     <form onSubmit={handleCheckoutSubmit} className="space-y-4 text-xs">
                       <div className="space-y-1">
                         <span className="text-[#E91E8C] font-black uppercase text-xs tracking-wider block">{activeTranslations.billingInfo}</span>
-                        <p className="text-[10px] text-gray-405 font-semibold">Cash on Delivery details inside Bangladesh</p>
+                        <p className="text-[10px] text-gray-500 font-semibold">Cash on Delivery details inside Bangladesh</p>
                       </div>
 
                       <div>
@@ -444,46 +678,60 @@ export const MainLayout: React.FC = () => {
                           required
                           value={checkoutForm.phone}
                           onChange={(e) => setCheckoutForm({ ...checkoutForm, phone: e.target.value })}
-                          placeholder="e.g., 01700000000"
-                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none font-mono focus:border-[#E91E8C]"
+                          placeholder="017XXXXXXXX"
+                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.selectDelivery}</label>
-                        <select 
-                          value={checkoutForm.area}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, area: e.target.value as any })}
-                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
-                        >
-                          <option value="dhaka">Inside Dhaka (৳80 delivery fee)</option>
-                          <option value="outside">Outside Dhaka (৳150 delivery fee)</option>
-                        </select>
+                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.deliveryCity}</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCheckoutForm({ ...checkoutForm, city: 'Inside Dhaka' })}
+                            className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                              checkoutForm.city === 'Inside Dhaka'
+                                ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
+                                : 'bg-white text-gray-700 border-pink-100 hover:bg-pink-50'
+                            }`}
+                          >
+                            Inside Dhaka (৳80)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCheckoutForm({ ...checkoutForm, city: 'Outside Dhaka' })}
+                            className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                              checkoutForm.city === 'Outside Dhaka'
+                                ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
+                                : 'bg-white text-gray-700 border-pink-100 hover:bg-pink-50'
+                            }`}
+                          >
+                            Outside Dhaka (৳150)
+                          </button>
+                        </div>
                       </div>
 
                       <div>
-                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.deliveryAddress}</label>
+                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.address}</label>
                         <textarea 
+                          rows={2} 
                           required
-                          rows={2}
                           value={checkoutForm.address}
                           onChange={(e) => setCheckoutForm({ ...checkoutForm, address: e.target.value })}
-                          placeholder="Flat, House, Road, Area, District"
-                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
+                          placeholder="House, Road, Area, Ward/Thana..."
+                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] resize-none"
                         />
                       </div>
 
                       {/* Loyalty Points Redemption Box */}
-                      {availablePoints > 0 && (
-                        <div className="bg-gradient-to-r from-pink-50 to-purple-50 p-3.5 rounded-2xl border border-pink-200/80 space-y-2">
+                      {user && availablePoints > 0 && (
+                        <div className="bg-gradient-to-r from-pink-50/80 to-purple-50/80 p-3.5 rounded-2xl border border-pink-200/80 space-y-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-[#E91E8C] text-white flex items-center justify-center font-bold text-[10px] shadow-sm">
-                                <Gift size={12} />
-                              </div>
+                              <Sparkles size={16} className="text-[#E91E8C]" />
                               <div>
-                                <span className="font-extrabold text-gray-900 text-xs block">K-Beauty Loyalty Points</span>
-                                <span className="text-[10px] text-gray-500 font-medium">You have <strong className="text-[#E91E8C] font-mono">{availablePoints} Points</strong> (৳{availablePoints} value)</span>
+                                <span className="font-extrabold text-gray-900 block text-xs">Glow Loyalty Balance</span>
+                                <span className="text-[10px] text-gray-500 font-semibold">{availablePoints} Available Points</span>
                               </div>
                             </div>
                             <label className="relative inline-flex items-center cursor-pointer">
@@ -545,7 +793,7 @@ export const MainLayout: React.FC = () => {
                     </div>
                     <div className="space-y-1">
                       <h4 className="font-extrabold text-gray-900 text-sm">Order Placed Successfully!</h4>
-                      <p className="text-[11px] text-gray-500">Thank you for shopping with Korean Skin Food BD. Track your order under the profile dashboard.</p>
+                      <p className="text-[11px] text-gray-500">Thank you for shopping with Korean Skin Food BD. Track your order under your profile dashboard.</p>
                     </div>
                   </div>
                 )}
@@ -575,18 +823,30 @@ export const MainLayout: React.FC = () => {
       <WhatsAppChatBot />
 
       {/* Sticky Bottom Navigation for Mobile Devices */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-pink-100 py-2.5 px-6 flex items-center justify-between z-45 shadow-xl pb-safe">
-        <Link to="/" className="flex flex-col items-center gap-1 text-gray-500 hover:text-[#E91E8C] active:text-[#E91E8C] transition-all">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-pink-100 py-2 px-4 flex items-center justify-around z-40 shadow-xl pb-safe">
+        <Link 
+          to="/" 
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
+            isActivePath('/') && location.pathname === '/' ? 'text-[#E91E8C] font-extrabold' : 'text-gray-500 hover:text-[#E91E8C]'
+          }`}
+        >
           <Home size={18} />
-          <span className="text-[9px] font-bold">{activeTranslations.home || "Home"}</span>
+          <span className="text-[9px]">{activeTranslations.home || "Home"}</span>
         </Link>
-        <Link to="/shop" className="flex flex-col items-center gap-1 text-gray-500 hover:text-[#E91E8C] active:text-[#E91E8C] transition-all">
+
+        <Link 
+          to="/shop" 
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
+            isActivePath('/shop') ? 'text-[#E91E8C] font-extrabold' : 'text-gray-500 hover:text-[#E91E8C]'
+          }`}
+        >
           <Compass size={18} />
-          <span className="text-[9px] font-bold">{activeTranslations.shop || "Shop"}</span>
+          <span className="text-[9px]">{activeTranslations.shop || "Shop"}</span>
         </Link>
+
         <button 
           onClick={() => setIsCartOpen(true)}
-          className="relative flex flex-col items-center gap-1 text-gray-500 hover:text-[#E91E8C] active:text-[#E91E8C] transition-all cursor-pointer"
+          className="relative flex flex-col items-center gap-0.5 py-1 px-2.5 text-gray-500 hover:text-[#E91E8C] active:text-[#E91E8C] transition-all cursor-pointer"
         >
           <div className="relative">
             <ShoppingBag size={18} />
@@ -598,17 +858,26 @@ export const MainLayout: React.FC = () => {
           </div>
           <span className="text-[9px] font-bold">{activeTranslations.cart || "Cart"}</span>
         </button>
-        <Link to="/profile" className="flex flex-col items-center gap-1 text-gray-500 hover:text-[#E91E8C] active:text-[#E91E8C] transition-all">
+
+        <Link 
+          to="/profile" 
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
+            isActivePath('/profile') ? 'text-[#E91E8C] font-extrabold' : 'text-gray-500 hover:text-[#E91E8C]'
+          }`}
+        >
           <User size={18} />
-          <span className="text-[9px] font-bold">{language === 'bn' ? 'প্রোফাইল' : 'Profile'}</span>
+          <span className="text-[9px]">{language === 'bn' ? 'প্রোফাইল' : 'Profile'}</span>
         </Link>
+
         {user && isAdmin && (
           <Link 
             to="/admin"
-            className="flex flex-col items-center gap-1 text-[#E91E8C] transition-all cursor-pointer"
+            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${
+              isActivePath('/admin') ? 'text-[#E91E8C] font-extrabold' : 'text-slate-700 hover:text-[#E91E8C]'
+            }`}
           >
             <ShieldCheck size={18} />
-            <span className="text-[9px] font-bold">Admin</span>
+            <span className="text-[9px]">Admin</span>
           </Link>
         )}
       </div>

@@ -21,6 +21,15 @@ import { AdminOrders } from './components/AdminOrders';
 import { AdminSlackSettings } from './components/AdminSlackSettings';
 import { AdminAIAgents } from './components/AdminAIAgents';
 import { UserManagement } from './components/UserManagement';
+import { AdminCreators } from './components/AdminCreators';
+import { CreatorRoute } from './components/CreatorRoute';
+import { CreatorLayout } from './components/CreatorLayout';
+import { CreatorDashboard } from './components/CreatorDashboard';
+import { CreatorProfilePage } from './components/CreatorProfilePage';
+import { CreatorReelsPage } from './components/CreatorReelsPage';
+import { CreatorReelUploadPage } from './components/CreatorReelUploadPage';
+import { CreatorLeaderboardPage } from './components/CreatorLeaderboardPage';
+import { BecomeCreatorPage } from './components/BecomeCreatorPage';
 import { AboutUs } from './components/AboutUs';
 import { ContactUs } from './components/ContactUs';
 import PosRegister from './components/PosRegister';
@@ -65,6 +74,8 @@ export default function App() {
             <Route path="/" element={<MainLayout />}>
               <Route index element={<StoreCatalog />} />
               <Route path="shop" element={<ShopCategoryPage />} />
+              <Route path="become-a-creator" element={<BecomeCreatorPage />} />
+              <Route path="creator/apply" element={<BecomeCreatorPage />} />
               <Route path="about-us" element={<AboutUs />} />
               <Route path="contact-us" element={<ContactUs />} />
               <Route path="product/:id" element={<ProductDetail />} />
@@ -73,6 +84,18 @@ export default function App() {
               {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
               <Route element={<ProtectedRoute />}>
                 <Route path="profile" element={<Profile />} />
+              </Route>
+
+              {/* CREATOR SYSTEM ROUTES */}
+              <Route path="creator" element={<CreatorRoute />}>
+                <Route element={<CreatorLayout />}>
+                  <Route index element={<Navigate to="dashboard" replace />} />
+                  <Route path="dashboard" element={<CreatorDashboard />} />
+                  <Route path="profile" element={<CreatorProfilePage />} />
+                  <Route path="reels" element={<CreatorReelsPage />} />
+                  <Route path="reels/upload" element={<CreatorReelUploadPage />} />
+                  <Route path="leaderboard" element={<CreatorLeaderboardPage />} />
+                </Route>
               </Route>
             </Route>
 
@@ -83,6 +106,7 @@ export default function App() {
             <Route element={<AdminRoute />}>
               <Route path="admin" element={<AdminLayout />}>
                 <Route index element={<AdminDashboardHome />} />
+                <Route path="creators" element={<AdminCreators />} />
                 <Route path="users" element={<UserManagement />} />
                 <Route path="orders" element={<AdminOrders />} />
                 <Route path="theme-editor" element={<AdminThemeEditor />} />

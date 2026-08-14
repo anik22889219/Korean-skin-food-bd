@@ -1,7 +1,9 @@
-import type { App as SlackApp, ExpressReceiver as SlackReceiver } from '@slack/bolt';
 import { SlackUser, SlackPermission, SlackRole } from '../types';
 import { db } from './firebase';
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+
+type SlackApp = any;
+type SlackReceiver = any;
 
 // In-memory cache with TTL for ultra-fast permission checks
 const slackUserCache = new Map<string, { user: SlackUser; timestamp: number }>();
@@ -55,7 +57,8 @@ export async function initializeSlackSDK() {
 
   if (botToken && signingSecret && botToken !== '' && signingSecret !== '') {
     try {
-      const boltModule = await import('@slack/bolt');
+      const packageName = '@slack/bolt';
+      const boltModule = await import(/* @vite-ignore */ packageName);
       const { App, ExpressReceiver } = boltModule;
 
       receiver = new ExpressReceiver({

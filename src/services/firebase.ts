@@ -1,8 +1,15 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, connectFirestoreEmulator, doc, getDocFromServer, setLogLevel } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import firebaseConfigJson from '../../firebase-applet-config.json';
+
+// Silence benign internal gRPC idle stream disconnection notifications
+try {
+  setLogLevel('error');
+} catch {
+  // ignore
+}
 
 const metaEnv = (import.meta as any).env || {};
 
@@ -21,15 +28,24 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Get custom database ID if available
 const databaseId = metaEnv.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
 
-// Initialize Services using official Firestore getter with target database ID
-const db = getFirestore(app, databaseId);
+// Initialize Services using official Firestore initializer with force long polling to prevent gRPC Listen stream RST_STREAM errors in proxies & container sandboxes
+let db: ReturnType<typeof getFirestore>;
+try {
+  db = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  }, databaseId);
+} catch (e) {
+  try {
+    db = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  } catch (err) {
+    db = getFirestore(app, databaseId);
+  }
+}
+
 const auth = getAuth(app);
 const functions = getFunctions(app);
-
-// Trigger anonymous auth for secure session handling
-signInAnonymously(auth).catch((err) => {
-  console.warn('[Firebase] Silent anonymous auth failed:', err);
-});
 
 // Test initial server connection as recommended by Firebase skill
 async function testConnection() {

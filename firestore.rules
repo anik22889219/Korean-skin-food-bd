@@ -14,14 +14,73 @@ service cloud.firestore {
       allow create: if isStaff() || (
         request.auth != null && 
         request.auth.uid == userId && 
-        (!('role' in request.resource.data) || request.resource.data.role == 'customer')
+        (!('role' in request.resource.data) || request.resource.data.role in ['customer', 'creator'])
       );
       allow update: if isStaff() || (
         request.auth != null && 
         request.auth.uid == userId && 
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || request.resource.data.role == resource.data.role)
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || request.resource.data.role == resource.data.role || request.resource.data.role == 'creator')
       );
       allow delete: if isStaff() || (request.auth != null && request.auth.uid == userId);
+    }
+
+    // creators
+    match /creators/{creatorId} {
+      allow read: if true;
+
+      allow create: if isStaff() || (
+        request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.role == 'creator' &&
+        request.resource.data.totalPoints == 0 &&
+        request.resource.data.totalReels == 0 &&
+        request.resource.data.totalViews == 0 &&
+        request.resource.data.totalLikes == 0 &&
+        request.resource.data.totalComments == 0
+      );
+
+      allow update: if isStaff() || (
+        request.auth != null &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.status != 'suspended' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'username', 'profileImage', 'bio', 'phone', 'facebookUrl', 'instagramUrl', 'niche', 'updatedAt'
+        ])
+      );
+
+      allow delete: if isStaff();
+    }
+
+    // creator_reels
+    match /creator_reels/{creatorReelId} {
+      allow read: if true;
+
+      allow create: if isStaff() || (
+        request.auth != null &&
+        request.resource.data.creatorUserId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.performance.views == 0 &&
+        request.resource.data.performance.likes == 0 &&
+        request.resource.data.performance.comments == 0 &&
+        request.resource.data.performance.points == 0 &&
+        get(/databases/$(database)/documents/creators/$(request.auth.uid)).data.status == 'approved'
+      );
+
+      allow update: if isStaff() || (
+        request.auth != null &&
+        resource.data.creatorUserId == request.auth.uid &&
+        get(/databases/$(database)/documents/creators/$(request.auth.uid)).data.status == 'approved' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'caption', 'tags', 'updatedAt', 'videoUrl', 'facebookPostUrl'
+        ])
+      );
+
+      allow delete: if isStaff() || (
+        request.auth != null &&
+        resource.data.creatorUserId == request.auth.uid &&
+        resource.data.status in ['pending', 'rejected']
+      );
     }
 
     // products
@@ -70,6 +129,15 @@ service cloud.firestore {
     match /site_settings/{settingId} {
       allow read: if true;
       allow write: if isStaff();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    match /reel_metric_audits/{auditId} {
+      allow read, write: if isStaff();
     }
 
     match /draft_orders/{draftId} {

@@ -152,9 +152,85 @@
         "linkedAt": { "type": "string" }
       },
       "required": ["slackUserId", "firestoreUserId", "email", "role", "permissions", "linkedAt"]
+    },
+    "CreatorProfile": {
+      "title": "CreatorProfile",
+      "description": "Creator user profile with status, level, and performance metrics",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "profileImage": { "type": "string" },
+        "bio": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "suspended"] },
+        "role": { "type": "string", "enum": ["creator"] },
+        "totalReels": { "type": "number" },
+        "totalViews": { "type": "number" },
+        "totalLikes": { "type": "number" },
+        "totalComments": { "type": "number" },
+        "totalPoints": { "type": "number" },
+        "level": { "type": "number" },
+        "levelName": { "type": "string" },
+        "levelProgress": { "type": "number" },
+        "nextLevelPoints": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["creatorId", "userId", "username", "displayName", "status", "role"]
+    },
+    "CreatorReel": {
+      "title": "CreatorReel",
+      "description": "Short video reels uploaded by creators with status tracking and moderation",
+      "type": "object",
+      "properties": {
+        "creatorReelId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "creatorUserId": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "caption": { "type": "string" },
+        "description": { "type": "string" },
+        "facebookPostUrl": { "type": "string" },
+        "facebookPostId": { "type": "string" },
+        "metricsSource": { "type": "string", "enum": ["facebook_api", "admin_verified", "none"] },
+        "metricsUpdatedAt": { "type": "string" },
+        "productIds": { "type": "array", "items": { "type": "string" } },
+        "productNames": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "published"] },
+        "adminNote": { "type": "string" },
+        "performance": {
+          "type": "object",
+          "properties": {
+            "views": { "type": "number" },
+            "likes": { "type": "number" },
+            "comments": { "type": "number" },
+            "points": { "type": "number" },
+            "metricsSource": { "type": "string" },
+            "metricsUpdatedAt": { "type": "string" },
+            "facebookPostId": { "type": "string" }
+          }
+        },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "approvedAt": { "type": "string" },
+        "publishedAt": { "type": "string" }
+      },
+      "required": ["creatorReelId", "creatorId", "creatorUserId", "videoUrl", "caption", "facebookPostUrl", "status"]
     }
   },
   "firestore": {
+    "/creator_reels/{creatorReelId}": {
+      "schema": "CreatorReel",
+      "description": "Short video reels uploaded by creators with status tracking and moderation"
+    },
+    "/creators/{creatorId}": {
+      "schema": "CreatorProfile",
+      "description": "Creator profiles, status, levels and performance metrics"
+    },
     "/slack_users/{slackUserId}": {
       "schema": "SlackUser",
       "description": "Slack user ID authorization mappings to Firestore admin profiles"

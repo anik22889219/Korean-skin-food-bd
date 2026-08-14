@@ -1,6 +1,6 @@
 {
   "name": "Korean Skin Food BD",
-  "description": "AI-driven K-beauty e-commerce storefront & POS for Bangladesh",
+  "description": "AI-driven K-beauty e-commerce storefront, POS & Creator Network for Bangladesh",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
