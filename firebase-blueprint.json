@@ -10,7 +10,12 @@
         "email": { "type": "string" },
         "phone": { "type": "string" },
         "loyaltyPoints": { "type": "number" },
-        "role": { "type": "string", "enum": ["customer", "admin", "inventory_manager", "customer_support", "super_admin"] }
+        "role": { "type": "string", "enum": ["customer", "creator", "admin", "inventory_manager", "customer_support", "super_admin", "hr"] },
+        "photoURL": { "type": "string" },
+        "address": { "type": "string" },
+        "department": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "creatorId": { "type": "string" }
       },
       "required": ["uid", "name", "role"]
     },
@@ -166,6 +171,11 @@
         "bio": { "type": "string" },
         "email": { "type": "string" },
         "phone": { "type": "string" },
+        "facebookUrl": { "type": "string" },
+        "instagramUrl": { "type": "string" },
+        "niche": { "type": "string" },
+        "shippingAddress": { "type": "string" },
+        "socialLinks": { "type": "object" },
         "status": { "type": "string", "enum": ["pending", "approved", "suspended"] },
         "role": { "type": "string", "enum": ["creator"] },
         "totalReels": { "type": "number" },
@@ -182,6 +192,28 @@
       },
       "required": ["creatorId", "userId", "username", "displayName", "status", "role"]
     },
+    "PublicCreatorProfile": {
+      "title": "PublicCreatorProfile",
+      "description": "Public-safe creator profiles exposing only non-sensitive metrics for the leaderboard",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "profileImage": { "type": "string" },
+        "bio": { "type": "string" },
+        "level": { "type": "number" },
+        "levelName": { "type": "string" },
+        "totalPoints": { "type": "number" },
+        "totalViews": { "type": "number" },
+        "totalLikes": { "type": "number" },
+        "totalComments": { "type": "number" },
+        "totalReels": { "type": "number" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["creatorId", "username", "displayName", "level", "totalPoints"]
+    },
     "CreatorReel": {
       "title": "CreatorReel",
       "description": "Short video reels uploaded by creators with status tracking and moderation",
@@ -192,6 +224,13 @@
         "creatorUserId": { "type": "string" },
         "videoUrl": { "type": "string" },
         "thumbnailUrl": { "type": "string" },
+        "cloudinaryPublicId": { "type": "string" },
+        "secureUrl": { "type": "string" },
+        "resourceType": { "type": "string", "enum": ["video", "image"] },
+        "duration": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "videoMetadata": { "type": "object" },
         "caption": { "type": "string" },
         "description": { "type": "string" },
         "facebookPostUrl": { "type": "string" },
@@ -223,6 +262,10 @@
     }
   },
   "firestore": {
+    "/public_creators/{creatorId}": {
+      "schema": "PublicCreatorProfile",
+      "description": "Public read-only creator profiles containing no sensitive personal data"
+    },
     "/creator_reels/{creatorReelId}": {
       "schema": "CreatorReel",
       "description": "Short video reels uploaded by creators with status tracking and moderation"

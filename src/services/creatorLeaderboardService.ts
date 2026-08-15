@@ -5,11 +5,13 @@ import {
   where, 
   orderBy, 
   limit,
-  onSnapshot 
+  onSnapshot,
+  doc,
+  getDoc 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { CreatorProfile, CreatorReel } from '../types';
-import { CREATORS_COLLECTION } from './creatorService';
+import { CREATORS_COLLECTION, PUBLIC_CREATORS_COLLECTION } from './creatorService';
 import { CREATOR_REELS_COLLECTION } from './creatorReelService';
 
 export type LeaderboardPeriod = 'all_time' | 'this_month' | 'this_week';
@@ -36,7 +38,7 @@ export interface PublicCreatorLeaderboardEntry {
   Expose strictly public creator profile info.
  */
 export function sanitizePublicCreatorProfile(
-  creator: CreatorProfile,
+  creator: any,
   overrides?: {
     rank?: number;
     points?: number;
@@ -89,23 +91,39 @@ export function sortLeaderboard<T extends { totalPoints: number; totalViews: num
 }
 
 /**
- * Fetch Leaderboard entries with period filtering and optimized Firestore queries
+ * Fetch Leaderboard entries from public_creators with period filtering and fallback to creators for approved staff
  */
 export async function getLeaderboard(
   period: LeaderboardPeriod = 'all_time',
   limitCount: number = 100
 ): Promise<PublicCreatorLeaderboardEntry[]> {
   try {
-    // 1. Fetch approved creators
-    const creatorsQuery = query(
-      collection(db, CREATORS_COLLECTION),
-      where('status', '==', 'approved')
-    );
-    const creatorsSnap = await getDocs(creatorsQuery);
-    const approvedCreators: CreatorProfile[] = [];
-    creatorsSnap.forEach((docSnap) => {
-      approvedCreators.push(docSnap.data() as CreatorProfile);
-    });
+    // 1. Fetch approved public creator records
+    let approvedCreators: any[] = [];
+    try {
+      const publicQuery = query(
+        collection(db, PUBLIC_CREATORS_COLLECTION),
+        where('status', '==', 'approved')
+      );
+      const publicSnap = await getDocs(publicQuery);
+      publicSnap.forEach((docSnap) => {
+        approvedCreators.push(docSnap.data());
+      });
+    } catch (e) {
+      // Fallback for staff or direct access
+      try {
+        const creatorsQuery = query(
+          collection(db, CREATORS_COLLECTION),
+          where('status', '==', 'approved')
+        );
+        const creatorsSnap = await getDocs(creatorsQuery);
+        creatorsSnap.forEach((docSnap) => {
+          approvedCreators.push(docSnap.data() as CreatorProfile);
+        });
+      } catch (err) {
+        console.warn('Could not read creators collection fallback:', err);
+      }
+    }
 
     if (period === 'all_time') {
       const sorted = sortLeaderboard(approvedCreators);
@@ -114,7 +132,7 @@ export async function getLeaderboard(
       );
     }
 
-    // Period calculations for 'this_month' or 'this_week' using actual stored reel data
+    // Period calculations for 'this_month' or 'this_week' using published/approved reels
     const now = new Date();
     let startDate: Date;
 
@@ -173,7 +191,7 @@ export async function getLeaderboard(
 
   } catch (error) {
     console.error('Error fetching creator leaderboard:', error);
-    handleFirestoreError(error, OperationType.LIST, CREATORS_COLLECTION, false);
+    handleFirestoreError(error, OperationType.LIST, PUBLIC_CREATORS_COLLECTION, false);
     return [];
   }
 }
@@ -185,13 +203,13 @@ export function subscribeToLeaderboard(
   period: LeaderboardPeriod,
   onUpdate: (entries: PublicCreatorLeaderboardEntry[]) => void
 ) {
-  const creatorsQuery = query(
-    collection(db, CREATORS_COLLECTION),
+  const publicQuery = query(
+    collection(db, PUBLIC_CREATORS_COLLECTION),
     where('status', '==', 'approved')
   );
 
   return onSnapshot(
-    creatorsQuery,
+    publicQuery,
     async () => {
       try {
         const entries = await getLeaderboard(period);
@@ -201,8 +219,9 @@ export function subscribeToLeaderboard(
       }
     },
     (err) => {
-      console.warn('Leaderboard real-time query error:', err);
-      onUpdate([]);
+      console.warn('Leaderboard real-time query fallback warning:', err);
+      // Fallback
+      getLeaderboard(period).then(onUpdate).catch(() => onUpdate([]));
     }
   );
 }
@@ -218,16 +237,22 @@ export async function getPublicCreatorWithRank(creatorIdOrUsername: string): Pro
     );
     if (target) return target;
 
-    // Fallback if not on top 500 approved leaderboard or still pending
-    const creatorSnap = await getDocs(
+    // Fallback if not on top 500 approved leaderboard or looking up specific public creator
+    const pubSnap = await getDoc(doc(db, PUBLIC_CREATORS_COLLECTION, creatorIdOrUsername));
+    if (pubSnap.exists()) {
+      const pubData = pubSnap.data();
+      return sanitizePublicCreatorProfile(pubData, { rank: 999 });
+    }
+
+    const querySnap = await getDocs(
       query(
-        collection(db, CREATORS_COLLECTION), 
-        where('creatorId', '==', creatorIdOrUsername),
+        collection(db, PUBLIC_CREATORS_COLLECTION), 
+        where('username', '==', creatorIdOrUsername.toLowerCase()),
         where('status', '==', 'approved')
       )
     );
-    if (!creatorSnap.empty) {
-      const creatorData = creatorSnap.docs[0].data() as CreatorProfile;
+    if (!querySnap.empty) {
+      const creatorData = querySnap.docs[0].data();
       return sanitizePublicCreatorProfile(creatorData, { rank: 999 });
     }
 

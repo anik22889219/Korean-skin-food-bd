@@ -198,10 +198,26 @@ export interface CreatorReel {
   videoUrl: string;
   thumbnailUrl: string;
 
+  // Cloudinary Video Metadata
+  cloudinaryPublicId?: string;
+  secureUrl?: string;
+  resourceType?: 'video' | 'image';
+  duration?: number;
+  width?: number;
+  height?: number;
+  videoMetadata?: {
+    format?: string;
+    bytes?: number;
+    aspectRatio?: string;
+    fps?: number;
+    [key: string]: any;
+  };
+
   caption: string;
   description?: string;
 
   facebookPostUrl: string;
+  normalizedFacebookUrl?: string;
   facebookPostId?: string;
   metricsSource?: MetricsSource;
   metricsUpdatedAt?: string;
@@ -261,6 +277,25 @@ export interface CreatorProfile {
   // Timestamps
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PublicCreatorProfile {
+  creatorId: string;
+  username: string;
+  displayName: string;
+  profileImage: string;
+  bio?: string;
+  level: number;
+  levelName: string;
+  totalPoints: number;
+  totalViews: number;
+  totalLikes: number;
+  totalComments: number;
+  totalReels: number;
+  rank?: number;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UserProfile {

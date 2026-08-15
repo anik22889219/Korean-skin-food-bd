@@ -7,47 +7,26 @@ import {
   query, 
   where 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { CreatorReel, MetricsSource } from '../types';
+import { 
+  getCreatorPointSettings,
+  calculateReelPoints,
+  recalculateCreatorPointsAndLevel,
+  recordMetricAuditLog
+} from './creatorPointService';
+import { extractFacebookPostId, normalizeFacebookUrl } from '../utils/facebookUrl';
 
 export const CREATOR_REELS_COLLECTION = 'creator_reels';
 export const CREATORS_COLLECTION = 'creators';
 
-/**
- * Extract Facebook Post/Reel ID from various Facebook URL formats
- */
-export function extractFacebookPostId(url: string): string | null {
-  if (!url) return null;
-  const cleanUrl = url.trim();
-
-  // Reel URL e.g. /reel/123456789/
-  const reelMatch = cleanUrl.match(/\/reel\/([0-9a-zA-Z_-]+)/i);
-  if (reelMatch && reelMatch[1]) return reelMatch[1];
-
-  // Watch URL e.g. /watch/?v=123456789
-  const watchMatch = cleanUrl.match(/[?&]v=([0-9a-zA-Z_-]+)/i);
-  if (watchMatch && watchMatch[1]) return watchMatch[1];
-
-  // Video URL e.g. /videos/123456789/
-  const videoMatch = cleanUrl.match(/\/videos\/([0-9a-zA-Z_-]+)/i);
-  if (videoMatch && videoMatch[1]) return videoMatch[1];
-
-  // Post / permalink fbid e.g. story_fbid=123456789
-  const fbidMatch = cleanUrl.match(/[?&]story_fbid=([0-9a-zA-Z_-]+)/i);
-  if (fbidMatch && fbidMatch[1]) return fbidMatch[1];
-
-  // Posts match e.g. /posts/123456789 or /posts/pfbid...
-  const postsMatch = cleanUrl.match(/\/posts\/([0-9a-zA-Z_-]+)/i);
-  if (postsMatch && postsMatch[1]) return postsMatch[1];
-
-  return null;
-}
+export { extractFacebookPostId };
 
 /**
- * Recalculates and updates totalViews, totalLikes, totalComments for a creator
+ * Recalculates and updates totalViews, totalLikes, totalComments, and totalReels for a creator
  * based solely on approved and published reels.
  */
-export async function recalculateCreatorTotals(creatorUserId: string | string): Promise<{
+export async function recalculateCreatorTotals(creatorUserId: string): Promise<{
   totalViews: number;
   totalLikes: number;
   totalComments: number;
@@ -56,7 +35,7 @@ export async function recalculateCreatorTotals(creatorUserId: string | string): 
   try {
     const q = query(
       collection(db, CREATOR_REELS_COLLECTION),
-      where('creatorUserId', '==', creatorUserId)
+      where('creatorUserId', '==', String(creatorUserId))
     );
     const querySnap = await getDocs(q);
 
@@ -77,7 +56,7 @@ export async function recalculateCreatorTotals(creatorUserId: string | string): 
 
     // Update Creator profile doc
     const now = new Date().toISOString();
-    const creatorRef = doc(db, CREATORS_COLLECTION, creatorUserId);
+    const creatorRef = doc(db, CREATORS_COLLECTION, String(creatorUserId));
     const creatorSnap = await getDoc(creatorRef);
 
     if (creatorSnap.exists()) {
@@ -97,15 +76,9 @@ export async function recalculateCreatorTotals(creatorUserId: string | string): 
   }
 }
 
-import { 
-  getCreatorPointSettings,
-  calculateReelPoints,
-  recalculateCreatorPointsAndLevel,
-  recordMetricAuditLog
-} from './creatorPointService';
-
 /**
  * Admin action: Manually set verified Facebook metrics (views, likes, comments)
+ * Sets metricsSource to 'admin_verified' and recalculates points server-authoritatively.
  */
 export async function updateAdminVerifiedMetrics(params: {
   creatorReelId: string;
@@ -145,9 +118,9 @@ export async function updateAdminVerifiedMetrics(params: {
       points: Number(reelData.performance?.points || 0),
     };
 
-    const parsedViews = Math.max(0, Math.floor(views));
-    const parsedLikes = Math.max(0, Math.floor(likes));
-    const parsedComments = Math.max(0, Math.floor(comments));
+    const parsedViews = Math.max(0, Math.floor(Number(views) || 0));
+    const parsedLikes = Math.max(0, Math.floor(Number(likes) || 0));
+    const parsedComments = Math.max(0, Math.floor(Number(comments) || 0));
 
     const settings = await getCreatorPointSettings();
     const pointCalc = calculateReelPoints(
@@ -182,6 +155,8 @@ export async function updateAdminVerifiedMetrics(params: {
       facebookPostId: postId,
       metricsSource,
       metricsUpdatedAt: now,
+      lastSyncError: null,
+      syncStatus: 'synced',
       updatedAt: now,
     });
 
@@ -206,7 +181,7 @@ export async function updateAdminVerifiedMetrics(params: {
 }
 
 /**
- * Fetch reel metrics via Express API
+ * Fetch reel metrics via Express API (Public or Creator view)
  */
 export async function fetchReelMetricsFromApi(creatorReelId: string): Promise<{
   success: boolean;
@@ -232,16 +207,25 @@ export async function postAdminReelMetricsApi(creatorReelId: string, payload: {
   likes?: number;
   comments?: number;
   metricsSource?: MetricsSource;
+  reason?: string;
 }): Promise<{
   success: boolean;
   message?: string;
   error?: string;
   performance?: any;
+  creatorResult?: any;
 }> {
   try {
+    const user = auth.currentUser;
+    const token = user ? await user.getIdToken() : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`/api/admin/creator-reels/${creatorReelId}/metrics`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
     return await response.json();
@@ -252,21 +236,35 @@ export async function postAdminReelMetricsApi(creatorReelId: string, payload: {
 
 /**
  * Trigger Facebook Graph API live metrics fetch via Express API
+ * Passes Firebase authorization header and handles graceful metric preservation on error.
  */
 export async function refreshFacebookApiMetricsApi(creatorReelId: string): Promise<{
   success: boolean;
   apiAvailable?: boolean;
   performance?: any;
+  creatorResult?: any;
   message?: string;
   error?: string;
+  preservedPerformance?: any;
 }> {
   try {
+    const user = auth.currentUser;
+    const token = user ? await user.getIdToken() : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`/api/admin/creator-reels/${creatorReelId}/refresh-facebook`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
     });
     return await response.json();
   } catch (err: any) {
-    return { success: false, apiAvailable: false, error: err.message || 'Network error executing Facebook API request' };
+    return { 
+      success: false, 
+      apiAvailable: false, 
+      error: err.message || 'Network error executing Facebook API request' 
+    };
   }
 }

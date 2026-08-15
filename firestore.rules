@@ -24,9 +24,22 @@ service cloud.firestore {
       allow delete: if isStaff() || (request.auth != null && request.auth.uid == userId);
     }
 
-    // creators
-    match /creators/{creatorId} {
+    // public_creators (Public read-safe collection for leaderboard, containing NO private personal info)
+    match /public_creators/{creatorId} {
       allow read: if true;
+      allow write: if isStaff() || (
+        request.auth != null && (request.auth.uid == creatorId || request.auth.uid == request.resource.data.creatorId)
+      );
+    }
+
+    // creators (Private Creator Profile - only visible to staff or the creator themselves)
+    match /creators/{creatorId} {
+      allow read: if isStaff() || (
+        request.auth != null && (
+          request.auth.uid == creatorId ||
+          (resource != null && resource.data.userId == request.auth.uid)
+        )
+      );
 
       allow create: if isStaff() || (
         request.auth != null &&
@@ -37,15 +50,29 @@ service cloud.firestore {
         request.resource.data.totalReels == 0 &&
         request.resource.data.totalViews == 0 &&
         request.resource.data.totalLikes == 0 &&
-        request.resource.data.totalComments == 0
+        request.resource.data.totalComments == 0 &&
+        request.resource.data.level == 1 &&
+        request.resource.data.levelProgress == 0
       );
 
+      // Creator can only update non-sensitive personal fields.
+      // Modifying points, views, likes, comments, level, levelProgress, status, or role is strictly forbidden for creators.
       allow update: if isStaff() || (
         request.auth != null &&
         resource.data.userId == request.auth.uid &&
         resource.data.status != 'suspended' &&
+        request.resource.data.status == resource.data.status &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.level == resource.data.level &&
+        request.resource.data.levelName == resource.data.levelName &&
+        request.resource.data.levelProgress == resource.data.levelProgress &&
+        request.resource.data.totalPoints == resource.data.totalPoints &&
+        request.resource.data.totalViews == resource.data.totalViews &&
+        request.resource.data.totalLikes == resource.data.totalLikes &&
+        request.resource.data.totalComments == resource.data.totalComments &&
+        request.resource.data.totalReels == resource.data.totalReels &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'username', 'profileImage', 'bio', 'phone', 'facebookUrl', 'instagramUrl', 'niche', 'updatedAt'
+          'displayName', 'username', 'profileImage', 'bio', 'phone', 'facebookUrl', 'instagramUrl', 'niche', 'shippingAddress', 'socialLinks', 'updatedAt'
         ])
       );
 
@@ -54,7 +81,11 @@ service cloud.firestore {
 
     // creator_reels
     match /creator_reels/{creatorReelId} {
-      allow read: if true;
+      allow read: if isStaff() || (
+        // Public can read approved/published reels, creators can read their own submissions
+        resource.data.status in ['approved', 'published'] ||
+        (request.auth != null && (resource.data.creatorUserId == request.auth.uid || resource.data.creatorId == request.auth.uid))
+      );
 
       allow create: if isStaff() || (
         request.auth != null &&
@@ -67,12 +98,16 @@ service cloud.firestore {
         get(/databases/$(database)/documents/creators/$(request.auth.uid)).data.status == 'approved'
       );
 
+      // Creator cannot approve themselves or alter performance metrics/points
       allow update: if isStaff() || (
         request.auth != null &&
         resource.data.creatorUserId == request.auth.uid &&
         get(/databases/$(database)/documents/creators/$(request.auth.uid)).data.status == 'approved' &&
+        request.resource.data.status == resource.data.status &&
+        request.resource.data.performance == resource.data.performance &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'title', 'caption', 'tags', 'updatedAt', 'videoUrl', 'facebookPostUrl'
+          'title', 'caption', 'tags', 'updatedAt', 'videoUrl', 'thumbnailUrl', 'description', 'facebookPostUrl', 'productIds', 'productNames',
+          'cloudinaryPublicId', 'secureUrl', 'resourceType', 'duration', 'width', 'height', 'videoMetadata'
         ])
       );
 

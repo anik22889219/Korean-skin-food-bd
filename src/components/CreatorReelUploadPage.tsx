@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { productService } from '../services/productService';
 import { createCreatorReel } from '../services/creatorReelService';
-import { cloudinaryService } from '../services/cloudinaryService';
+import { uploadFileToCloudinary, CloudinaryUploadResult } from '../services/cloudinaryService';
 import { Product } from '../types';
 import { 
   Upload, 
@@ -19,7 +19,11 @@ import {
   Globe, 
   Link as LinkIcon, 
   Loader2,
-  Play
+  Play,
+  Film,
+  Info,
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -36,11 +40,27 @@ export const CreatorReelUploadPage: React.FC = () => {
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   
+  // Cloudinary Uploaded Metadata states
+  const [cloudinaryMeta, setCloudinaryMeta] = useState<{
+    publicId?: string;
+    secureUrl?: string;
+    resourceType?: 'video' | 'image';
+    duration?: number;
+    width?: number;
+    height?: number;
+    videoMetadata?: Record<string, any>;
+  }>({});
+
+  // Local object URL for instant preview while uploading
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string>('');
+  const [selectedFileSize, setSelectedFileSize] = useState<number>(0);
+
   // UI states
   const [products, setProducts] = useState<Product[]>([]);
   const [productSearch, setProductSearch] = useState('');
   const [uploadProgress, setUploadProgress] = useState<number>(0);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadPhase, setUploadPhase] = useState<'idle' | 'uploading' | 'processing' | 'completed' | 'error'>('idle');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -53,6 +73,15 @@ export const CreatorReelUploadPage: React.FC = () => {
     return () => unsub();
   }, []);
 
+  // Cleanup object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (localPreviewUrl) {
+        URL.revokeObjectURL(localPreviewUrl);
+      }
+    };
+  }, [localPreviewUrl]);
+
   // Facebook URL regex validator
   const isValidFbUrl = (url: string) => {
     if (!url.trim()) return false;
@@ -60,14 +89,40 @@ export const CreatorReelUploadPage: React.FC = () => {
     return fbRegex.test(url.trim());
   };
 
-  // Handle local video file selection
+  // Helper to extract local video dimensions & duration from File before or during upload
+  const probeVideoFile = (file: File): Promise<{ duration: number; width: number; height: number }> => {
+    return new Promise((resolve) => {
+      const tempVideo = document.createElement('video');
+      tempVideo.preload = 'metadata';
+      const tempUrl = URL.createObjectURL(file);
+      tempVideo.src = tempUrl;
+
+      tempVideo.onloadedmetadata = () => {
+        URL.revokeObjectURL(tempUrl);
+        resolve({
+          duration: Math.round(tempVideo.duration || 0),
+          width: tempVideo.videoWidth || 0,
+          height: tempVideo.videoHeight || 0,
+        });
+      };
+
+      tempVideo.onerror = () => {
+        URL.revokeObjectURL(tempUrl);
+        resolve({ duration: 0, width: 0, height: 0 });
+      };
+    });
+  };
+
+  // Handle local video file selection and actual Cloudinary upload
   const handleFileSelect = async (file: File) => {
     setErrorMsg(null);
 
     // Validate file type
     const validVideoTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/m4v', 'video/x-msvideo', 'video/mkv'];
-    if (!file.type.startsWith('video/') && !validVideoTypes.some(t => file.type.includes(t) || file.name.endsWith('.mp4') || file.name.endsWith('.mov'))) {
-      setErrorMsg('Please select a valid video file (MP4, MOV, WebM, M4V).');
+    const isVideoType = file.type.startsWith('video/') || validVideoTypes.some(t => file.type.includes(t) || file.name.toLowerCase().endsWith('.mp4') || file.name.toLowerCase().endsWith('.mov') || file.name.toLowerCase().endsWith('.webm'));
+    
+    if (!isVideoType) {
+      setErrorMsg('Please select a valid video file format (MP4, MOV, WebM, M4V).');
       return;
     }
 
@@ -78,58 +133,74 @@ export const CreatorReelUploadPage: React.FC = () => {
       return;
     }
 
-    setIsUploading(true);
-    setUploadProgress(10);
+    // Set local ephemeral preview
+    if (localPreviewUrl) {
+      URL.revokeObjectURL(localPreviewUrl);
+    }
+    const previewObjUrl = URL.createObjectURL(file);
+    setLocalPreviewUrl(previewObjUrl);
+    setSelectedFileName(file.name);
+    setSelectedFileSize(file.size);
+
+    setUploadPhase('uploading');
+    setUploadProgress(0);
 
     try {
-      // Simulate smooth upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev >= 85) {
-            clearInterval(progressInterval);
-            return 85;
+      // Step 1: Probe local dimensions
+      const localMeta = await probeVideoFile(file);
+
+      // Step 2: Upload real File directly to Cloudinary with accurate XHR progress tracking
+      const result: CloudinaryUploadResult = await uploadFileToCloudinary(file, {
+        resourceType: 'video',
+        folder: 'kbeauty_creators',
+        tags: 'creator_reel,kbeauty',
+        onProgress: (percent) => {
+          setUploadProgress(percent);
+          if (percent >= 100) {
+            setUploadPhase('processing');
           }
-          return prev + 15;
-        });
-      }, 250);
+        },
+      });
 
-      // Read as Data URL
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const dataUrl = e.target?.result as string;
+      // Step 3: Process and store Cloudinary metadata
+      const duration = result.duration || localMeta.duration;
+      const width = result.width || localMeta.width;
+      const height = result.height || localMeta.height;
+      const secureUrl = result.secureUrl || result.url;
 
-        try {
-          // Upload to Cloudinary media library service
-          const cloudAsset = await cloudinaryService.uploadImage(file.name, dataUrl, 'video');
-          clearInterval(progressInterval);
-          setUploadProgress(100);
+      setVideoUrl(secureUrl);
+      setCloudinaryMeta({
+        publicId: result.publicId,
+        secureUrl: secureUrl,
+        resourceType: 'video',
+        duration,
+        width,
+        height,
+        videoMetadata: {
+          format: result.format,
+          bytes: result.bytes || file.size,
+          aspectRatio: result.aspectRatio || (width && height ? `${width}:${height}` : undefined),
+          fps: result.fps,
+          cloudinaryPublicId: result.publicId,
+          ...result.videoMetadata,
+        },
+      });
 
-          setVideoUrl((cloudAsset as any).secure_url || cloudAsset.url || dataUrl);
-          if (!thumbnailUrl) {
-            // Generate poster thumbnail placeholder
-            setThumbnailUrl('https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60');
-          }
-          setIsUploading(false);
-        } catch (err: any) {
-          clearInterval(progressInterval);
-          console.warn('Cloudinary upload fallback to data URL:', err);
-          // Fallback to local Data URL for preview & storage if direct Cloudinary API key isn't configured
-          setVideoUrl(dataUrl);
-          setUploadProgress(100);
-          setIsUploading(false);
-        }
-      };
+      // Generate Cloudinary auto poster or fallback
+      if (result.publicId && secureUrl.includes('cloudinary.com')) {
+        // Generate poster image URL from video
+        const posterUrl = secureUrl.replace(/\.[^/.]+$/, '.jpg');
+        setThumbnailUrl(posterUrl);
+      } else if (!thumbnailUrl) {
+        setThumbnailUrl('https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60');
+      }
 
-      reader.onerror = () => {
-        clearInterval(progressInterval);
-        setErrorMsg('Failed to read video file.');
-        setIsUploading(false);
-      };
-
-      reader.readAsDataURL(file);
+      setUploadPhase('completed');
+      setUploadProgress(100);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error processing video upload.');
-      setIsUploading(false);
+      console.error('[Cloudinary Upload Error]:', err);
+      setUploadPhase('error');
+      setErrorMsg(err.message || 'Failed to upload video to Cloudinary. Please verify your internet connection and Cloudinary settings.');
     }
   };
 
@@ -181,7 +252,12 @@ export const CreatorReelUploadPage: React.FC = () => {
     }
 
     if (!videoUrl) {
-      setErrorMsg('Please upload a video file or provide a video URL.');
+      setErrorMsg('Please upload a video file to Cloudinary or provide a valid video URL.');
+      return;
+    }
+
+    if (videoUrl.startsWith('data:')) {
+      setErrorMsg('Raw video Data URLs are not allowed. Please upload the video to Cloudinary.');
       return;
     }
 
@@ -211,6 +287,13 @@ export const CreatorReelUploadPage: React.FC = () => {
         creatorUserId: user?.uid || '',
         videoUrl,
         thumbnailUrl: thumbnailUrl || 'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60',
+        cloudinaryPublicId: cloudinaryMeta.publicId || '',
+        secureUrl: cloudinaryMeta.secureUrl || videoUrl,
+        resourceType: 'video',
+        duration: cloudinaryMeta.duration || 0,
+        width: cloudinaryMeta.width || 0,
+        height: cloudinaryMeta.height || 0,
+        videoMetadata: cloudinaryMeta.videoMetadata || {},
         caption: caption.trim(),
         description: description.trim(),
         facebookPostUrl: facebookPostUrl.trim(),
@@ -218,7 +301,7 @@ export const CreatorReelUploadPage: React.FC = () => {
         productNames,
       });
 
-      setSuccessMsg('Reel submitted successfully! It is now pending admin moderation.');
+      setSuccessMsg('Reel submitted successfully! Video metadata stored and pending admin moderation.');
       setTimeout(() => {
         navigate('/creator/reels');
       }, 1500);
@@ -327,11 +410,16 @@ export const CreatorReelUploadPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Section 1: Video File Selection & Cloudinary Storage */}
           <div className="space-y-2">
-            <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-              1. Video File Upload <span className="text-rose-500">*</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                1. Video File Upload (Cloudinary Storage) <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                <ShieldCheck size={12} className="text-emerald-600" /> Secure Cloud Upload
+              </span>
+            </div>
 
-            {!videoUrl ? (
+            {!videoUrl && uploadPhase !== 'uploading' && uploadPhase !== 'processing' ? (
               <div
                 onDragEnter={handleDrag}
                 onDragOver={handleDrag}
@@ -365,67 +453,128 @@ export const CreatorReelUploadPage: React.FC = () => {
                     Click to browse or drag & drop video file here
                   </span>
                   <p className="text-[11px] text-slate-500">
-                    Supports MP4, MOV, WebM (Max size: 100MB)
+                    Direct video upload to Cloudinary (MP4, MOV, WebM · Max 100MB)
+                  </p>
+                </div>
+              </div>
+            ) : uploadPhase === 'uploading' || uploadPhase === 'processing' ? (
+              <div className="border-2 border-pink-200 bg-pink-50/30 rounded-3xl p-8 text-center space-y-4">
+                <div className="w-14 h-14 rounded-2xl bg-pink-100 text-pink-600 flex items-center justify-center mx-auto animate-pulse">
+                  <Film size={26} />
+                </div>
+
+                <div className="space-y-1">
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    {uploadPhase === 'uploading' ? 'Uploading Video to Cloudinary...' : 'Processing Cloudinary Metadata...'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 truncate max-w-sm mx-auto">
+                    {selectedFileName} ({selectedFileSize ? `${(selectedFileSize / (1024 * 1024)).toFixed(1)} MB` : ''})
                   </p>
                 </div>
 
-                {isUploading && (
-                  <div className="mt-4 max-w-xs mx-auto space-y-2">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
-                      <span>Uploading to Media Server...</span>
-                      <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-gradient-to-r from-pink-500 to-rose-600 transition-all duration-300" 
-                        style={{ width: `${uploadProgress}%` }}
-                      />
-                    </div>
+                <div className="max-w-md mx-auto space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-extrabold text-pink-900">
+                    <span>{uploadPhase === 'uploading' ? `Upload Progress: ${uploadProgress}%` : 'Finalizing secure link...'}</span>
+                    <span>{uploadProgress}%</span>
                   </div>
-                )}
+                  <div className="w-full h-2.5 bg-pink-100 rounded-full overflow-hidden p-0.5">
+                    <div 
+                      className="h-full bg-gradient-to-r from-pink-500 via-rose-500 to-pink-600 rounded-full transition-all duration-300" 
+                      style={{ width: `${Math.max(uploadProgress, 5)}%` }}
+                    />
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="space-y-3 bg-slate-900 p-4 rounded-3xl border border-slate-800">
                 <div className="relative rounded-2xl overflow-hidden bg-black aspect-video flex items-center justify-center">
                   <video 
-                    src={videoUrl} 
+                    src={localPreviewUrl || videoUrl} 
                     controls 
                     className="w-full h-full max-h-64 object-contain"
                   />
                 </div>
 
+                {/* Cloudinary Metadata Summary Box */}
+                <div className="bg-slate-800/80 rounded-2xl p-3 text-[11px] text-slate-300 space-y-1.5 border border-slate-700">
+                  <div className="flex items-center justify-between font-bold text-white">
+                    <span className="flex items-center gap-1.5 text-emerald-400">
+                      <CheckCircle2 size={14} /> Cloudinary Video Ready
+                    </span>
+                    {cloudinaryMeta.publicId && (
+                      <span className="font-mono text-[10px] text-slate-400 truncate max-w-[200px]">
+                        ID: {cloudinaryMeta.publicId}
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-2 pt-1 text-[10px] text-slate-400">
+                    <div>
+                      <span className="block text-slate-500">Duration:</span>
+                      <span className="font-bold text-slate-200">{cloudinaryMeta.duration ? `${cloudinaryMeta.duration}s` : 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Resolution:</span>
+                      <span className="font-bold text-slate-200">
+                        {cloudinaryMeta.width && cloudinaryMeta.height ? `${cloudinaryMeta.width}x${cloudinaryMeta.height}` : 'Standard'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Type:</span>
+                      <span className="font-bold text-slate-200 uppercase">{cloudinaryMeta.resourceType || 'video'}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between px-2 pt-1 text-xs">
-                  <span className="text-emerald-400 font-bold flex items-center gap-1.5 text-[11px]">
-                    <CheckCircle2 size={14} /> Video Upload Ready
+                  <span className="text-slate-400 text-[10px] truncate max-w-xs">
+                    {videoUrl}
                   </span>
 
                   <button
                     type="button"
                     onClick={() => {
+                      if (localPreviewUrl) {
+                        URL.revokeObjectURL(localPreviewUrl);
+                      }
+                      setLocalPreviewUrl(null);
                       setVideoUrl('');
+                      setCloudinaryMeta({});
                       setUploadProgress(0);
+                      setUploadPhase('idle');
                     }}
-                    className="text-rose-400 hover:text-rose-300 text-[11px] font-extrabold cursor-pointer"
+                    className="text-rose-400 hover:text-rose-300 text-[11px] font-extrabold cursor-pointer flex items-center gap-1"
                   >
-                    Change Video
+                    <RefreshCw size={12} />
+                    <span>Change Video</span>
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Direct Video URL Fallback */}
-            {!videoUrl && (
+            {/* Direct Video URL Fallback (Only when no video selected) */}
+            {!videoUrl && uploadPhase === 'idle' && (
               <div className="pt-2">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                  Or Paste Direct Video CDN Link:
+                  Or Paste Existing Cloudinary CDN Link:
                 </span>
                 <div className="relative">
                   <LinkIcon size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="url"
-                    placeholder="https://res.cloudinary.com/... or https://..."
+                    placeholder="https://res.cloudinary.com/.../video/upload/..."
                     value={videoUrl}
-                    onChange={(e) => setVideoUrl(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setVideoUrl(val);
+                      if (val.includes('cloudinary.com')) {
+                        setCloudinaryMeta({
+                          secureUrl: val,
+                          resourceType: 'video',
+                        });
+                        setThumbnailUrl(val.replace(/\.[^/.]+$/, '.jpg'));
+                      }
+                    }}
                     className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500"
                   />
                 </div>
@@ -580,9 +729,9 @@ export const CreatorReelUploadPage: React.FC = () => {
           <div className="pt-4 border-t border-slate-100">
             <button
               type="submit"
-              disabled={isSubmitting || isUploading || !videoUrl || !caption.trim() || !isValidFbUrl(facebookPostUrl)}
+              disabled={isSubmitting || uploadPhase === 'uploading' || uploadPhase === 'processing' || !videoUrl || !caption.trim() || !isValidFbUrl(facebookPostUrl)}
               className={`w-full py-3.5 px-6 rounded-2xl font-black text-xs text-white shadow-lg flex items-center justify-center gap-2 cursor-pointer transition ${
-                isSubmitting || isUploading || !videoUrl || !caption.trim() || !isValidFbUrl(facebookPostUrl)
+                isSubmitting || uploadPhase === 'uploading' || uploadPhase === 'processing' || !videoUrl || !caption.trim() || !isValidFbUrl(facebookPostUrl)
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
                   : 'bg-gradient-to-r from-pink-600 via-rose-600 to-pink-700 hover:from-pink-700 hover:to-rose-700 shadow-pink-600/25 scale-[1.01]'
               }`}

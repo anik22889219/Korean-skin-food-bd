@@ -5,7 +5,7 @@ import { productService } from '../services/productService';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { KOREAN_BRANDS } from '../data/brands';
+import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
 import { 
   ShoppingBag, Search, SlidersHorizontal, CheckCircle, X,
   Globe, Store, Zap, ShieldCheck, FileText, ChevronRight, ChevronLeft,
@@ -67,26 +67,14 @@ export const StoreCatalog: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Available brands list combining static catalog & active store products
+  // Available brands list combining static catalog & active store products with case deduplication
   const availableBrands = useMemo(() => {
-    const brandSet = new Set<string>();
-    KOREAN_BRANDS.forEach(b => brandSet.add(b));
-    products.forEach(p => {
-      if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
-    });
-    return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+    return getUniqueBrandList(products);
   }, [products]);
 
-  // Product counts per brand for badges
+  // Product counts per brand for badges (case-insensitive keys)
   const brandProductCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    products.forEach(p => {
-      if (p.brand) {
-        const key = p.brand.trim().toLowerCase();
-        counts[key] = (counts[key] || 0) + 1;
-      }
-    });
-    return counts;
+    return getBrandProductCounts(products);
   }, [products]);
 
   // Filtered brands for brand modal/search
@@ -203,7 +191,7 @@ export const StoreCatalog: React.FC = () => {
         (p.category && p.category.toLowerCase() === selectedCategory.toLowerCase());
 
       const matchesBrand = selectedBrand === 'All' || 
-        (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+        (p.brand && isSameBrand(p.brand, selectedBrand));
 
       const matchesSkinType = selectedSkinType === 'All' || 
         (p.skinTypes && p.skinTypes.some(s => s.toLowerCase() === selectedSkinType.toLowerCase()));
@@ -727,7 +715,7 @@ export const StoreCatalog: React.FC = () => {
             </span>
             {POPULAR_BRANDS_SHORTCUTS.map((bName) => {
               const count = bName === 'All' ? products.length : (brandProductCounts[bName.toLowerCase()] || 0);
-              const isActive = selectedBrand === bName;
+              const isActive = bName === 'All' ? selectedBrand === 'All' : isSameBrand(selectedBrand, bName);
               return (
                 <button
                   key={bName}

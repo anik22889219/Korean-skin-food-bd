@@ -2,11 +2,13 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
+import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, setDoc, getDocs, runTransaction, query, where, deleteDoc } from "firebase/firestore";
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
+import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
 
 dotenv.config();
 
@@ -296,53 +298,31 @@ app.get("/api/creator/reels", async (req, res) => {
   }
 });
 
-// POST Creator Reel Upload Endpoint (STEP 2)
-// Extract Facebook Post/Reel ID from various Facebook URL formats
-function extractFacebookPostId(url: string): string | null {
-  if (!url) return null;
-  const cleanUrl = url.trim();
-
-  // Reel URL e.g. /reel/123456789/
-  const reelMatch = cleanUrl.match(/\/reel\/([0-9a-zA-Z_-]+)/i);
-  if (reelMatch && reelMatch[1]) return reelMatch[1];
-
-  // Watch URL e.g. /watch/?v=123456789
-  const watchMatch = cleanUrl.match(/[?&]v=([0-9a-zA-Z_-]+)/i);
-  if (watchMatch && watchMatch[1]) return watchMatch[1];
-
-  // Video URL e.g. /videos/123456789/
-  const videoMatch = cleanUrl.match(/\/videos\/([0-9a-zA-Z_-]+)/i);
-  if (videoMatch && videoMatch[1]) return videoMatch[1];
-
-  // Post / permalink fbid e.g. story_fbid=123456789
-  const fbidMatch = cleanUrl.match(/[?&]story_fbid=([0-9a-zA-Z_-]+)/i);
-  if (fbidMatch && fbidMatch[1]) return fbidMatch[1];
-
-  // Posts match e.g. /posts/123456789 or /posts/pfbid...
-  const postsMatch = cleanUrl.match(/\/posts\/([0-9a-zA-Z_-]+)/i);
-  if (postsMatch && postsMatch[1]) return postsMatch[1];
-
-  return null;
-}
-
+// POST Creator Reel Upload Endpoint
 app.post("/api/creator/reels/upload", async (req, res) => {
   const { creatorId, creatorUserId, videoUrl, thumbnailUrl, caption, description, facebookPostUrl, productIds, productNames } = req.body;
 
-  if (!creatorUserId || !videoUrl || !caption || !facebookPostUrl) {
+  const targetUserId = String(creatorUserId || creatorId || '').trim();
+  const rawFbUrl = String(facebookPostUrl || '').trim();
+
+  if (!targetUserId || !videoUrl || !caption || !rawFbUrl) {
     return res.status(400).json({
       success: false,
       error: "creatorUserId, videoUrl, caption, and facebookPostUrl are required"
     });
   }
 
-  // Validate Facebook Post URL format
-  const fbRegex = /^(https?:\/\/)?(www\.|m\.)?(facebook\.com|fb\.watch|fb\.gg)\/.+/i;
-  if (!fbRegex.test(String(facebookPostUrl).trim())) {
+  // Validate and Normalize Facebook Post/Reel URL
+  const normResult = normalizeFacebookUrl(rawFbUrl);
+  if (!normResult.isValid || !normResult.normalizedUrl) {
     return res.status(400).json({
       success: false,
-      error: "Invalid Facebook Post/Reel URL format. Must start with facebook.com, fb.watch, or fb.gg"
+      error: normResult.error || "Invalid Facebook Post/Reel URL format. Must start with facebook.com, fb.watch, or fb.gg"
     });
   }
+
+  const normalizedUrl = normResult.normalizedUrl;
+  const extractedPostId = normResult.postId || extractFacebookPostId(rawFbUrl) || '';
 
   try {
     if (!db) {
@@ -350,34 +330,60 @@ app.post("/api/creator/reels/upload", async (req, res) => {
     }
 
     // Check creator status to ensure creator is approved
-    const creatorRef = doc(db, "creators", String(creatorId || creatorUserId));
+    const creatorRef = doc(db, "creators", targetUserId);
     const creatorSnap = await getDoc(creatorRef);
 
     if (!creatorSnap.exists()) {
-      return res.status(403).json({ success: false, error: "Creator profile not found." });
+      return res.status(403).json({ success: false, error: "Creator profile not found. Please apply first." });
     }
 
     const creatorData = creatorSnap.data();
     if (creatorData.status !== 'approved') {
       return res.status(403).json({
         success: false,
-        error: `Only approved creators can upload reels. Current status: ${creatorData.status}`
+        error: `Only approved creators can submit reels. Current account status: ${creatorData.status || 'pending'}`
       });
+    }
+
+    // Check duplicate Facebook submissions across creator reels collection
+    const allReelsSnap = await getDocs(collection(db, "creator_reels"));
+    for (const d of allReelsSnap.docs) {
+      const existing = d.data();
+      if (!existing) continue;
+
+      const isDuplicate = areFacebookUrlsEqual(
+        existing.normalizedFacebookUrl || existing.facebookPostUrl,
+        normalizedUrl
+      );
+
+      if (isDuplicate) {
+        return res.status(409).json({
+          success: false,
+          error: "This Facebook Reel or Post URL has already been submitted to the creator program."
+        });
+      }
+
+      if (extractedPostId && existing.facebookPostId && existing.facebookPostId === extractedPostId) {
+        return res.status(409).json({
+          success: false,
+          error: "This Facebook Reel or Post ID has already been submitted to the creator program."
+        });
+      }
     }
 
     const creatorReelId = `reel-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const now = new Date().toISOString();
-    const extractedPostId = extractFacebookPostId(facebookPostUrl) || '';
 
     const reelPayload = {
       creatorReelId,
-      creatorId: String(creatorId || creatorUserId),
-      creatorUserId: String(creatorUserId),
+      creatorId: targetUserId,
+      creatorUserId: targetUserId,
       videoUrl: String(videoUrl),
       thumbnailUrl: thumbnailUrl ? String(thumbnailUrl) : 'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60',
       caption: String(caption).trim(),
       description: description ? String(description).trim() : '',
-      facebookPostUrl: String(facebookPostUrl).trim(),
+      facebookPostUrl: rawFbUrl,
+      normalizedFacebookUrl: normalizedUrl,
       facebookPostId: extractedPostId,
       metricsSource: 'none',
       productIds: Array.isArray(productIds) ? productIds : [],
@@ -389,7 +395,11 @@ app.post("/api/creator/reels/upload", async (req, res) => {
         likes: 0,
         comments: 0,
         points: 0,
+        viewPoints: 0,
+        likePoints: 0,
+        commentPoints: 0,
         metricsSource: 'none',
+        metricsUpdatedAt: now,
         facebookPostId: extractedPostId,
       },
       createdAt: now,
@@ -409,7 +419,7 @@ app.post("/api/creator/reels/upload", async (req, res) => {
   }
 });
 
-// GET Creator Reel Metrics
+// GET Creator Reel Metrics & Server-Authoritative Point Calculation
 const DEFAULT_CREATOR_POINT_SETTINGS = {
   viewsPerPoint: 100,
   likesPerPoint: 10,
@@ -417,11 +427,11 @@ const DEFAULT_CREATOR_POINT_SETTINGS = {
   commentsPerPoint: 1,
   pointsPerComment: 3,
   levels: [
-    { level: 1, name: 'Beginner', minPoints: 0, maxPoints: 999 },
-    { level: 2, name: 'Rising Creator', minPoints: 1000, maxPoints: 4999 },
-    { level: 3, name: 'Active Creator', minPoints: 5000, maxPoints: 14999 },
-    { level: 4, name: 'Pro Creator', minPoints: 15000, maxPoints: 29999 },
-    { level: 5, name: 'Elite Creator', minPoints: 30000, maxPoints: 999999999 },
+    { level: 1, name: 'K-Beauty Novice', minPoints: 0, maxPoints: 999 },
+    { level: 2, name: 'Glow Influencer', minPoints: 1000, maxPoints: 4999 },
+    { level: 3, name: 'Skincare Guru', minPoints: 5000, maxPoints: 14999 },
+    { level: 4, name: 'Seoul Beauty Star', minPoints: 15000, maxPoints: 29999 },
+    { level: 5, name: 'K-Beauty Elite Icon', minPoints: 30000, maxPoints: 999999999 },
   ],
 };
 
@@ -446,13 +456,17 @@ async function getServerPointSettings() {
   return DEFAULT_CREATOR_POINT_SETTINGS;
 }
 
+/**
+ * Server-authoritative point calculation for a reel.
+ * Pending and rejected reels strictly receive 0 points.
+ */
 function calculateReelPointsServer(performance: { views?: number; likes?: number; comments?: number }, status: string, settings: any) {
   if (status !== 'approved' && status !== 'published') {
     return { viewPoints: 0, likePoints: 0, commentPoints: 0, totalPoints: 0 };
   }
-  const views = Math.max(0, performance?.views || 0);
-  const likes = Math.max(0, performance?.likes || 0);
-  const comments = Math.max(0, performance?.comments || 0);
+  const views = Math.max(0, Math.floor(Number(performance?.views) || 0));
+  const likes = Math.max(0, Math.floor(Number(performance?.likes) || 0));
+  const comments = Math.max(0, Math.floor(Number(performance?.comments) || 0));
 
   const viewsPerPoint = settings.viewsPerPoint > 0 ? settings.viewsPerPoint : 100;
   const likesPerPoint = settings.likesPerPoint > 0 ? settings.likesPerPoint : 10;
@@ -460,16 +474,24 @@ function calculateReelPointsServer(performance: { views?: number; likes?: number
   const commentsPerPoint = settings.commentsPerPoint > 0 ? settings.commentsPerPoint : 1;
   const pointsPerComment = settings.pointsPerComment >= 0 ? settings.pointsPerComment : 3;
 
+  // 100 views = 1 point
   const viewPoints = Math.floor(views / viewsPerPoint);
+  // 10 likes = 2 points
   const likePoints = Math.floor(likes / likesPerPoint) * pointsPerLikeBlock;
+  // 1 comment = 3 points
   const commentPoints = Math.floor(comments / commentsPerPoint) * pointsPerComment;
 
   return { viewPoints, likePoints, commentPoints, totalPoints: viewPoints + likePoints + commentPoints };
 }
 
+/**
+ * Server-authoritative creator level calculation.
+ * Level 1 = 0, Level 2 = 1,000, Level 3 = 5,000, Level 4 = 15,000, Level 5 = 30,000
+ */
 function calculateCreatorLevelServer(totalPoints: number, settings: any) {
-  const points = Math.max(0, Math.floor(totalPoints));
-  const sortedLevels = [...(settings.levels || DEFAULT_CREATOR_POINT_SETTINGS.levels)].sort((a, b) => a.minPoints - b.minPoints);
+  const points = Math.max(0, Math.floor(Number(totalPoints) || 0));
+  const rawLevels = (settings.levels && settings.levels.length > 0) ? settings.levels : DEFAULT_CREATOR_POINT_SETTINGS.levels;
+  const sortedLevels = [...rawLevels].sort((a, b) => a.minPoints - b.minPoints);
 
   let currentLevelIdx = 0;
   for (let i = 0; i < sortedLevels.length; i++) {
@@ -508,8 +530,48 @@ function calculateCreatorLevelServer(totalPoints: number, settings: any) {
   }
 }
 
-async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, settingsInput?: any) {
+/**
+ * Server audit log recorder for metric and points adjustments
+ */
+async function recordMetricAuditLogServer(audit: {
+  creatorReelId: string;
+  adminId: string;
+  source?: string;
+  previousValues: { views: number; likes: number; comments: number; points: number };
+  newValues: { views: number; likes: number; comments: number; points: number };
+  reason?: string;
+  status?: 'success' | 'failed';
+  timestamp?: string;
+}) {
   if (!db) return;
+  const id = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = audit.timestamp || new Date().toISOString();
+  try {
+    await setDoc(doc(db, "reel_metric_audits", id), {
+      id,
+      auditLogId: id,
+      creatorReelId: String(audit.creatorReelId),
+      adminId: audit.adminId || 'admin',
+      source: audit.source || 'admin_verified',
+      status: audit.status || 'success',
+      previousPerformance: audit.previousValues,
+      newPerformance: audit.newValues,
+      previousValues: audit.previousValues,
+      newValues: audit.newValues,
+      reason: audit.reason || 'Metric adjustment',
+      timestamp: now,
+    });
+  } catch (e) {
+    console.warn("Failed to record metric audit log on server:", e);
+  }
+}
+
+/**
+ * Recalculate points, totals, and level for a creator server-side across all their approved reels.
+ * Prevents double-counting and ensures non-approved reels never grant points.
+ */
+async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, settingsInput?: any) {
+  if (!db) return null;
   const settings = settingsInput || (await getServerPointSettings());
   const now = new Date().toISOString();
 
@@ -534,6 +596,9 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
     await setDoc(docSnap.ref, {
       performance: {
         ...reel.performance,
+        views: Number(reel.performance?.views || 0),
+        likes: Number(reel.performance?.likes || 0),
+        comments: Number(reel.performance?.comments || 0),
         points: pointCalc.totalPoints,
         viewPoints: pointCalc.viewPoints,
         likePoints: pointCalc.likePoints,
@@ -549,6 +614,7 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
   const creatorSnap = await getDoc(creatorRef);
 
   if (creatorSnap.exists()) {
+    const creatorData: any = creatorSnap.data();
     await setDoc(creatorRef, {
       totalViews,
       totalLikes,
@@ -563,13 +629,329 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
       nextLevelName: levelInfo.nextLevelName,
       updatedAt: now,
     }, { merge: true });
+
+    // Sync to public_creators
+    try {
+      const publicRef = doc(db, "public_creators", String(creatorUserId));
+      await setDoc(publicRef, {
+        creatorId: String(creatorUserId),
+        username: creatorData.username || '',
+        displayName: creatorData.displayName || '',
+        profileImage: creatorData.profileImage || '',
+        bio: creatorData.bio || '',
+        level: levelInfo.level,
+        levelName: levelInfo.levelName,
+        totalPoints,
+        totalViews,
+        totalLikes,
+        totalComments,
+        totalReels,
+        status: creatorData.status || 'pending',
+        updatedAt: now,
+      }, { merge: true });
+    } catch (pubErr) {
+      console.warn("Could not sync public_creators on server:", pubErr);
+    }
   }
 
-  return { totalPoints, levelInfo };
+  return { totalPoints, totalViews, totalLikes, totalComments, totalReels, levelInfo };
 }
 
-// GET Creator Point Settings
-app.get("/api/admin/creator-point-settings", async (req, res) => {
+/**
+ * Robust, multi-strategy Facebook Object & Graph API resolution.
+ * Validates responses and does not assume every URL segment is directly a numeric API object ID.
+ */
+async function resolveFacebookObjectAndMetrics(
+  rawUrl: string,
+  candidatePostId: string | null,
+  fbToken: string
+): Promise<{
+  success: boolean;
+  views: number;
+  likes: number;
+  comments: number;
+  resolvedObjectId?: string;
+  error?: string;
+  rawData?: any;
+}> {
+  const normResult = normalizeFacebookUrl(rawUrl);
+  const canonicalUrl = normResult.normalizedUrl || rawUrl;
+  const objectId = candidatePostId || normResult.postId || extractFacebookPostId(rawUrl);
+
+  let lastError = "Unable to resolve Facebook object";
+
+  // Strategy 1: Direct Node ID Query (if candidate ID looks like a valid node or video/post ID)
+  if (objectId) {
+    try {
+      const fields = 'id,views,video_insights{name,values},likes.summary(true),comments.summary(true),reactions.summary(true),engagement';
+      const fbGraphUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(objectId)}?fields=${fields}&access_token=${encodeURIComponent(fbToken)}`;
+      console.log(`[facebookMetricsService] Attempting Strategy 1 (Direct Node Query) for ID: ${objectId}`);
+
+      const fbResponse = await fetch(fbGraphUrl);
+      const fbData: any = await fbResponse.json();
+
+      if (fbResponse.ok && !fbData.error) {
+        let views = 0;
+        if (fbData.views !== undefined && fbData.views !== null) {
+          views = Number(fbData.views) || 0;
+        } else if (fbData.video_insights?.data) {
+          const viewMetric = fbData.video_insights.data.find(
+            (m: any) => m.name === 'total_video_views' || m.name === 'post_video_views' || m.name === 'video_views'
+          );
+          if (viewMetric && viewMetric.values?.[0]?.value !== undefined) {
+            views = Number(viewMetric.values[0].value) || 0;
+          }
+        } else if (fbData.engagement?.count !== undefined) {
+          views = Number(fbData.engagement.count) || 0;
+        }
+
+        let likes = 0;
+        if (fbData.likes?.summary?.total_count !== undefined) {
+          likes = Number(fbData.likes.summary.total_count) || 0;
+        } else if (fbData.reactions?.summary?.total_count !== undefined) {
+          likes = Number(fbData.reactions.summary.total_count) || 0;
+        } else if (fbData.engagement?.reaction_count !== undefined) {
+          likes = Number(fbData.engagement.reaction_count) || 0;
+        }
+
+        let comments = 0;
+        if (fbData.comments?.summary?.total_count !== undefined) {
+          comments = Number(fbData.comments.summary.total_count) || 0;
+        } else if (fbData.engagement?.comment_count !== undefined) {
+          comments = Number(fbData.engagement.comment_count) || 0;
+        }
+
+        // Validate numeric integrity
+        const validViews = Math.max(0, Math.floor(views));
+        const validLikes = Math.max(0, Math.floor(likes));
+        const validComments = Math.max(0, Math.floor(comments));
+
+        return {
+          success: true,
+          views: validViews,
+          likes: validLikes,
+          comments: validComments,
+          resolvedObjectId: fbData.id || objectId,
+          rawData: fbData,
+        };
+      } else if (fbData.error) {
+        lastError = fbData.error.message || `Graph API error code ${fbData.error.code}`;
+        console.warn(`[facebookMetricsService] Strategy 1 failed for ${objectId}:`, lastError);
+      }
+    } catch (err: any) {
+      lastError = err.message || "Network failure querying node ID";
+      console.warn(`[facebookMetricsService] Strategy 1 network error:`, err);
+    }
+  }
+
+  // Strategy 2: OpenGraph URL / Webhook Lookup endpoint
+  if (canonicalUrl) {
+    try {
+      const urlLookupEndpoint = `https://graph.facebook.com/v19.0/?id=${encodeURIComponent(canonicalUrl)}&fields=id,og_object{id,title,engagement},engagement{count,reaction_count,comment_count,share_count}&access_token=${encodeURIComponent(fbToken)}`;
+      console.log(`[facebookMetricsService] Attempting Strategy 2 (URL OpenGraph Lookup) for URL: ${canonicalUrl}`);
+
+      const urlResponse = await fetch(urlLookupEndpoint);
+      const urlData: any = await urlResponse.json();
+
+      if (urlResponse.ok && !urlData.error) {
+        // If an OpenGraph object ID was resolved, attempt secondary fetch on that object
+        if (urlData.og_object?.id) {
+          const ogId = urlData.og_object.id;
+          try {
+            const ogFetch = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(ogId)}?fields=id,views,video_insights{name,values},likes.summary(true),comments.summary(true)&access_token=${encodeURIComponent(fbToken)}`);
+            const ogData: any = await ogFetch.json();
+            if (ogFetch.ok && !ogData.error) {
+              const views = Number(ogData.views || ogData.video_insights?.data?.[0]?.values?.[0]?.value || urlData.engagement?.count || 0);
+              const likes = Number(ogData.likes?.summary?.total_count || urlData.engagement?.reaction_count || 0);
+              const comments = Number(ogData.comments?.summary?.total_count || urlData.engagement?.comment_count || 0);
+
+              return {
+                success: true,
+                views: Math.max(0, Math.floor(views)),
+                likes: Math.max(0, Math.floor(likes)),
+                comments: Math.max(0, Math.floor(comments)),
+                resolvedObjectId: ogId,
+                rawData: ogData,
+              };
+            }
+          } catch (e) {
+            // continue with engagement fallback
+          }
+        }
+
+        // Fallback to URL engagement counters
+        if (urlData.engagement) {
+          const views = Number(urlData.engagement.count || 0);
+          const likes = Number(urlData.engagement.reaction_count || 0);
+          const comments = Number(urlData.engagement.comment_count || 0);
+
+          return {
+            success: true,
+            views: Math.max(0, Math.floor(views)),
+            likes: Math.max(0, Math.floor(likes)),
+            comments: Math.max(0, Math.floor(comments)),
+            resolvedObjectId: urlData.id || objectId || undefined,
+            rawData: urlData,
+          };
+        }
+      } else if (urlData.error) {
+        lastError = urlData.error.message || lastError;
+      }
+    } catch (err: any) {
+      lastError = err.message || lastError;
+      console.warn(`[facebookMetricsService] Strategy 2 network error:`, err);
+    }
+  }
+
+  // Strategy 3: Video Insights specific endpoint
+  if (objectId && /^\d+$/.test(objectId)) {
+    try {
+      const videoInsightsUrl = `https://graph.facebook.com/v19.0/${objectId}/video_insights?access_token=${encodeURIComponent(fbToken)}`;
+      console.log(`[facebookMetricsService] Attempting Strategy 3 (Video Insights) for ID: ${objectId}`);
+      const viResponse = await fetch(videoInsightsUrl);
+      const viData: any = await viResponse.json();
+
+      if (viResponse.ok && viData.data && Array.isArray(viData.data)) {
+        const viewMetric = viData.data.find((m: any) => m.name === 'total_video_views' || m.name === 'post_video_views');
+        const views = Number(viewMetric?.values?.[0]?.value || 0);
+        return {
+          success: true,
+          views: Math.max(0, Math.floor(views)),
+          likes: 0,
+          comments: 0,
+          resolvedObjectId: objectId,
+          rawData: viData,
+        };
+      }
+    } catch (err: any) {
+      // ignore
+    }
+  }
+
+  return {
+    success: false,
+    views: 0,
+    likes: 0,
+    comments: 0,
+    error: lastError,
+  };
+}
+
+// ================= BACKEND AUTHENTICATION & ROLE VERIFICATION =================
+async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email?: string } | null> {
+  if (!idToken) return null;
+
+  let apiKey = process.env.VITE_FIREBASE_API_KEY;
+  if (!apiKey) {
+    try {
+      const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+      if (fs.existsSync(configPath)) {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        apiKey = cfg.apiKey;
+      }
+    } catch (e) {
+      console.warn("Could not read apiKey from config file:", e);
+    }
+  }
+
+  if (!apiKey) {
+    console.error("Firebase API Key is missing for server token verification.");
+    return null;
+  }
+
+  try {
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken })
+    });
+
+    if (!response.ok) {
+      const errData: any = await response.json().catch(() => ({}));
+      console.warn("Firebase ID token verification failed:", errData?.error?.message || response.statusText);
+      return null;
+    }
+
+    const data: any = await response.json();
+    if (data.users && data.users.length > 0) {
+      return {
+        uid: data.users[0].localId,
+        email: data.users[0].email,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error during Firebase token verification:", error);
+    return null;
+  }
+}
+
+async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Missing or malformed Authorization header with Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Empty Bearer token provided."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase ID token. Please authenticate again."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      error: "Database not initialized on server."
+    });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'customer_support', 'hr'];
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
+
+    if (isSuperAdminEmail || (userRole && staffRoles.includes(userRole))) {
+      (req as any).user = {
+        uid: verifiedUser.uid,
+        email: verifiedUser.email,
+        role: userRole || 'super_admin'
+      };
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: "Access Denied. Insufficient permissions. Verified staff or admin account required."
+    });
+  } catch (err: any) {
+    console.error("Error verifying admin role in Firestore:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error verifying authorization credentials."
+    });
+  }
+}
+
+// ================= CREATOR NETWORK ADMIN & PUBLIC API ENDPOINTS =================
+
+// GET Creator Point Settings (Admin Only)
+app.get("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) => {
   try {
     const settings = await getServerPointSettings();
     return res.json({ success: true, settings });
@@ -578,19 +960,20 @@ app.get("/api/admin/creator-point-settings", async (req, res) => {
   }
 });
 
-// POST Admin Update Creator Point Settings
-app.post("/api/admin/creator-point-settings", async (req, res) => {
-  const { settings, adminId = "admin" } = req.body;
+// POST Admin Update Creator Point Settings (Admin Only)
+app.post("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) => {
+  const { settings } = req.body;
   if (!settings) return res.status(400).json({ success: false, error: "Settings object required" });
 
   try {
     if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
 
+    const adminUid = (req as any).user?.uid || 'admin';
     const now = new Date().toISOString();
     const payload = {
       ...settings,
       updatedAt: now,
-      updatedBy: adminId,
+      updatedBy: adminUid,
     };
 
     await setDoc(doc(db, "settings", "creator_points"), payload, { merge: true });
@@ -616,8 +999,8 @@ app.post("/api/admin/creator-point-settings", async (req, res) => {
   }
 });
 
-// POST Admin Manual Trigger Recalculate Creator Points
-app.post("/api/admin/recalculate-creator-points", async (req, res) => {
+// POST Admin Manual Trigger Recalculate Creator Points (Admin Only)
+app.post("/api/admin/recalculate-creator-points", verifyAdminAuth, async (req, res) => {
   const { creatorUserId } = req.body;
   try {
     if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
@@ -643,21 +1026,21 @@ app.post("/api/admin/recalculate-creator-points", async (req, res) => {
   }
 });
 
-// GET Admin Audit Logs
-app.get("/api/admin/reel-metric-audits", async (req, res) => {
+// GET Admin Audit Logs (Admin Only)
+app.get("/api/admin/reel-metric-audits", verifyAdminAuth, async (req, res) => {
   try {
     if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
     const snap = await getDocs(collection(db, "reel_metric_audits"));
     const audits: any[] = [];
-    snap.forEach((d) => audits.push(d.data()));
+    snap.forEach((d) => audits.push({ auditLogId: d.id, ...d.data() }));
     audits.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    return res.json({ success: true, audits });
+    return res.json({ success: true, count: audits.length, audits, logs: audits });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET Creator Reel Metrics
+// GET Creator Reel Metrics (Public/Creator inspectable)
 app.get("/api/creator/reels/:id/metrics", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ success: false, error: "Reel ID is required" });
@@ -687,10 +1070,11 @@ app.get("/api/creator/reels/:id/metrics", async (req, res) => {
   }
 });
 
-// POST Admin Update Reel Performance Metrics (Manual / Admin Verified)
-app.post("/api/admin/creator-reels/:id/metrics", async (req, res) => {
+// POST Admin Update Reel Performance Metrics - Manual / Admin Verified (Admin Only)
+app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
-  const { views, likes, comments, metricsSource = 'admin_verified', adminId = 'admin', reason = 'Admin manual metric adjustment' } = req.body;
+  const { views, likes, comments, metricsSource = 'admin_verified', reason = 'Admin manual metric adjustment' } = req.body;
+  const adminUid = (req as any).user?.uid || 'admin';
 
   if (!id) return res.status(400).json({ success: false, error: "Reel ID is required" });
 
@@ -750,8 +1134,9 @@ app.post("/api/admin/creator-reels/:id/metrics", async (req, res) => {
     const auditId = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     await setDoc(doc(db, "reel_metric_audits", auditId), {
       id: auditId,
+      auditLogId: auditId,
       creatorReelId: String(id),
-      adminId,
+      adminId: adminUid,
       previousValues,
       newValues: {
         views: parsedViews,
@@ -782,15 +1167,15 @@ app.post("/api/admin/creator-reels/:id/metrics", async (req, res) => {
   }
 });
 
-// POST Admin Refresh Facebook API Metrics
-app.post("/api/admin/creator-reels/:id/refresh-facebook", async (req, res) => {
+// POST Admin Refresh Facebook API Metrics (Admin Only)
+app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
+  const adminUid = (req as any).user?.uid || 'admin';
   if (!id) return res.status(400).json({ success: false, error: "Reel ID is required" });
 
-  const fbToken = process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  const fbToken = process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.FACEBOOK_GRAPH_API_TOKEN;
 
   if (!fbToken) {
-    // Return clear unavailable status instead of fake data
     return res.json({
       success: false,
       apiAvailable: false,
@@ -807,48 +1192,58 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", async (req, res) => {
       return res.status(404).json({ success: false, error: `Reel ${id} not found` });
     }
 
-    const reelData = reelSnap.data();
-    const postId = reelData.facebookPostId || extractFacebookPostId(reelData.facebookPostUrl);
+    const reelData: any = reelSnap.data();
+    const now = new Date().toISOString();
 
-    if (!postId) {
+    const previousValues = {
+      views: Number(reelData.performance?.views || 0),
+      likes: Number(reelData.performance?.likes || 0),
+      comments: Number(reelData.performance?.comments || 0),
+      points: Number(reelData.performance?.points || 0),
+    };
+
+    // Execute multi-strategy Facebook Object & Graph API resolution
+    const resolution = await resolveFacebookObjectAndMetrics(
+      reelData.facebookPostUrl || '',
+      reelData.facebookPostId || null,
+      fbToken
+    );
+
+    // If Graph API resolution fails: PRESERVE EXISTING METRICS (Task 3)
+    if (!resolution.success) {
+      console.warn(`[facebookMetricsService] Facebook Graph API sync failed for reel ${id}: ${resolution.error}. Preserving existing metrics.`);
+
+      await setDoc(reelRef, {
+        syncStatus: 'failed',
+        lastSyncError: resolution.error || 'Graph API query failed',
+        lastSyncAttemptAt: now,
+        updatedAt: now,
+      }, { merge: true });
+
+      // Record failed sync audit log
+      await recordMetricAuditLogServer({
+        creatorReelId: String(id),
+        adminId: adminUid,
+        source: 'facebook_api',
+        status: 'failed',
+        previousValues,
+        newValues: previousValues,
+        reason: `Facebook API sync failed: ${resolution.error}. Existing valid metrics preserved.`,
+        timestamp: now,
+      });
+
       return res.status(400).json({
         success: false,
         apiAvailable: true,
-        error: "Unable to extract Facebook Post/Reel ID from URL: " + reelData.facebookPostUrl,
+        error: resolution.error || "Facebook Graph API query failed. Existing metrics were preserved.",
+        preservedPerformance: reelData.performance || previousValues,
       });
     }
 
-    // Attempt Graph API fetch
-    const fbGraphUrl = `https://graph.facebook.com/v19.0/${postId}?fields=views,video_insights,likes.summary(true),comments.summary(true)&access_token=${encodeURIComponent(fbToken)}`;
-    console.log(`[facebookMetricsService] Fetching Graph API metrics for post ID: ${postId}`);
-
-    const fbResponse = await fetch(fbGraphUrl);
-    const fbData = await fbResponse.json();
-
-    if (fbData.error) {
-      console.warn("[facebookMetricsService] Meta Graph API returned error:", fbData.error);
-      return res.status(400).json({
-        success: false,
-        apiAvailable: true,
-        error: fbData.error.message || "Meta Graph API request failed.",
-      });
-    }
-
-    // Parse Graph API response
-    let views = fbData.views || 0;
-    if (!views && fbData.video_insights?.data) {
-      const viewMetric = fbData.video_insights.data.find((m: any) => m.name === 'total_video_views' || m.name === 'post_video_views');
-      if (viewMetric && viewMetric.values?.[0]?.value) {
-        views = Number(viewMetric.values[0].value);
-      }
-    }
-
-    const likes = fbData.likes?.summary?.total_count || 0;
-    const comments = fbData.comments?.summary?.total_count || 0;
-
-    const parsedViews = Number(views) || 0;
-    const parsedLikes = Number(likes) || 0;
-    const parsedComments = Number(comments) || 0;
+    // Graph API succeeded: validate and calculate points
+    const parsedViews = resolution.views;
+    const parsedLikes = resolution.likes;
+    const parsedComments = resolution.comments;
 
     const settings = await getServerPointSettings();
     const pointCalc = calculateReelPointsServer(
@@ -857,7 +1252,6 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", async (req, res) => {
       settings
     );
 
-    const now = new Date().toISOString();
     const updatedPerformance = {
       views: parsedViews,
       likes: parsedLikes,
@@ -868,16 +1262,36 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", async (req, res) => {
       commentPoints: pointCalc.commentPoints,
       metricsSource: 'facebook_api' as const,
       metricsUpdatedAt: now,
-      facebookPostId: postId,
+      facebookPostId: resolution.resolvedObjectId || reelData.facebookPostId || '',
     };
 
     await setDoc(reelRef, {
       performance: updatedPerformance,
-      facebookPostId: postId,
+      facebookPostId: resolution.resolvedObjectId || reelData.facebookPostId || '',
       metricsSource: 'facebook_api',
       metricsUpdatedAt: now,
+      syncStatus: 'synced',
+      lastSyncError: null,
+      lastSyncAttemptAt: now,
       updatedAt: now,
     }, { merge: true });
+
+    // Record successful sync audit log
+    await recordMetricAuditLogServer({
+      creatorReelId: String(id),
+      adminId: adminUid,
+      source: 'facebook_api',
+      status: 'success',
+      previousValues,
+      newValues: {
+        views: parsedViews,
+        likes: parsedLikes,
+        comments: parsedComments,
+        points: pointCalc.totalPoints,
+      },
+      reason: `Live Facebook Graph API sync (${resolution.resolvedObjectId || 'node'})`,
+      timestamp: now,
+    });
 
     // Recalculate Creator totals, points, and level
     const creatorUserId = reelData.creatorUserId || reelData.creatorId;
@@ -891,7 +1305,7 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", async (req, res) => {
       apiAvailable: true,
       performance: updatedPerformance,
       creatorResult: recapResult,
-      message: "Successfully fetched and updated metrics from Facebook API.",
+      message: "Successfully fetched, validated, and updated metrics from Facebook API.",
     });
   } catch (err: any) {
     console.error("Error executing Facebook API refresh:", err);
@@ -899,8 +1313,8 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", async (req, res) => {
   }
 });
 
-// GET All Creator Reels for Admin Moderation
-app.get("/api/admin/reels", async (req, res) => {
+// GET All Creator Reels for Admin Moderation (Admin Only)
+app.get("/api/admin/reels", verifyAdminAuth, async (req, res) => {
   try {
     if (!db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
@@ -920,14 +1334,16 @@ app.get("/api/admin/reels", async (req, res) => {
   }
 });
 
-// POST Admin Update Reel Status (approve / reject / publish)
-app.post("/api/admin/reels/status", async (req, res) => {
-  const { creatorReelId, status, adminNote } = req.body;
+// POST Admin Update Reel Status - approve / reject / publish (Admin Only)
+app.post("/api/admin/reels/status", verifyAdminAuth, async (req, res) => {
+  const { creatorReelId, reelId, status, adminNote, note } = req.body;
+  const targetReelId = creatorReelId || reelId;
+  const targetNote = adminNote !== undefined ? adminNote : note;
 
-  if (!creatorReelId || !['pending', 'approved', 'rejected', 'published'].includes(status)) {
+  if (!targetReelId || !['pending', 'approved', 'rejected', 'published'].includes(status)) {
     return res.status(400).json({
       success: false,
-      error: "creatorReelId and valid status ('pending' | 'approved' | 'rejected' | 'published') are required"
+      error: "creatorReelId (or reelId) and valid status ('pending' | 'approved' | 'rejected' | 'published') are required"
     });
   }
 
@@ -936,7 +1352,13 @@ app.post("/api/admin/reels/status", async (req, res) => {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    const docRef = doc(db, "creator_reels", String(creatorReelId));
+    const docRef = doc(db, "creator_reels", String(targetReelId));
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      return res.status(404).json({ success: false, error: `Reel ${targetReelId} not found` });
+    }
+
+    const reelData = snap.data();
     const now = new Date().toISOString();
 
     const updatePayload: Record<string, any> = {
@@ -944,22 +1366,32 @@ app.post("/api/admin/reels/status", async (req, res) => {
       updatedAt: now,
     };
 
-    if (adminNote !== undefined) {
-      updatePayload.adminNote = String(adminNote);
+    if (targetNote !== undefined) {
+      updatePayload.adminNote = String(targetNote);
     }
 
     if (status === 'approved') {
       updatePayload.approvedAt = now;
     } else if (status === 'published') {
       updatePayload.publishedAt = now;
-      updatePayload.approvedAt = now;
+      if (!reelData.approvedAt) {
+        updatePayload.approvedAt = now;
+      }
     }
 
     await setDoc(docRef, updatePayload, { merge: true });
 
+    // Recalculate creator totals and points
+    const creatorUserId = reelData.creatorUserId || reelData.creatorId;
+    if (creatorUserId) {
+      await recalculateCreatorPointsAndLevelServer(creatorUserId);
+    }
+
     return res.json({
       success: true,
-      message: `Reel status updated to ${status}`
+      message: `Reel status updated to ${status}`,
+      reelId: targetReelId,
+      status
     });
   } catch (err: any) {
     console.error("Error updating reel status:", err);
@@ -967,8 +1399,8 @@ app.post("/api/admin/reels/status", async (req, res) => {
   }
 });
 
-// DELETE Creator Reel (Admin or Creator)
-app.delete("/api/admin/reels/:id", async (req, res) => {
+// DELETE Creator Reel (Admin Only)
+app.delete("/api/admin/reels/:id", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
   if (!id) {
     return res.status(400).json({ success: false, error: "Reel ID is required" });
@@ -986,14 +1418,102 @@ app.delete("/api/admin/reels/:id", async (req, res) => {
   }
 });
 
-// POST Apply for Creator
+// CLOUDINARY CONFIG & SIGNATURE ENDPOINTS
+// GET Public Cloudinary Config (Safe, no secrets exposed)
+app.get("/api/cloudinary/config", (req, res) => {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || '';
+  const hasApiKey = Boolean(process.env.CLOUDINARY_API_KEY);
+  const hasSecret = Boolean(process.env.CLOUDINARY_API_SECRET);
+
+  return res.json({
+    success: true,
+    cloudName,
+    uploadPreset,
+    hasApiKey,
+    isConfigured: Boolean(cloudName && (hasSecret || uploadPreset)),
+  });
+});
+
+// POST Generate Signed Cloudinary Signature (Keep API Secret 100% on server)
+app.post("/api/cloudinary/sign", (req, res) => {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const apiKey = process.env.CLOUDINARY_API_KEY || '';
+  const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
+  const defaultPreset = process.env.CLOUDINARY_UPLOAD_PRESET || '';
+
+  const folder = req.body.folder || 'kbeauty_creators';
+  const resourceType = req.body.resourceType || 'video';
+
+  // 1. If signed API credentials (API key + API secret) are configured
+  if (cloudName && apiKey && apiSecret) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const paramsToSign: Record<string, string> = {
+      folder,
+      timestamp: String(timestamp),
+    };
+
+    if (req.body.tags) {
+      paramsToSign.tags = String(req.body.tags);
+    }
+
+    // Sort keys alphabetically for Cloudinary signature specification
+    const sortedKeys = Object.keys(paramsToSign).sort();
+    const stringToSign = sortedKeys.map((k) => `${k}=${paramsToSign[k]}`).join('&');
+
+    const signature = crypto
+      .createHash('sha1')
+      .update(stringToSign + apiSecret)
+      .digest('hex');
+
+    return res.json({
+      success: true,
+      mode: 'signed',
+      cloudName,
+      apiKey,
+      signature,
+      timestamp,
+      folder,
+      resourceType,
+    });
+  }
+
+  // 2. If unsigned upload preset is configured
+  if (cloudName && (defaultPreset || req.body.uploadPreset)) {
+    return res.json({
+      success: true,
+      mode: 'unsigned',
+      cloudName,
+      uploadPreset: defaultPreset || req.body.uploadPreset,
+      folder,
+      resourceType,
+    });
+  }
+
+  // 3. Not configured in server environment
+  return res.json({
+    success: false,
+    configured: false,
+    error: "Cloudinary credentials not found in server environment. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET (or CLOUDINARY_UPLOAD_PRESET).",
+  });
+});
+
+// POST Apply for Creator (Public user registration/application)
 app.post("/api/creator/apply", async (req, res) => {
-  const { userId, email, phone, username, displayName, bio, profileImage } = req.body;
+  const { userId, email, phone, username, displayName, bio, profileImage, facebookUrl, instagramUrl, niche } = req.body;
 
   if (!userId || !displayName || !username) {
     return res.status(400).json({
       success: false,
       error: "userId, username, and displayName are required to apply"
+    });
+  }
+
+  const cleanUsername = String(username).toLowerCase().replace(/[^a-z0-9_]/g, '').trim();
+  if (!cleanUsername) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid creator username (letters, numbers, underscores only)."
     });
   }
 
@@ -1005,15 +1525,58 @@ app.post("/api/creator/apply", async (req, res) => {
     const creatorId = String(userId);
     const now = new Date().toISOString();
 
+    // 1. Check if user already applied or has a creator profile
+    const existingSnap = await getDoc(doc(db, "creators", creatorId));
+    if (existingSnap.exists()) {
+      const existingData = existingSnap.data();
+      if (existingData.status === 'pending') {
+        return res.status(409).json({
+          success: false,
+          error: "You already have a creator application under review. Please wait for administrator approval."
+        });
+      } else if (existingData.status === 'approved') {
+        return res.status(409).json({
+          success: false,
+          error: "You are already an approved creator."
+        });
+      } else if (existingData.status === 'suspended') {
+        return res.status(403).json({
+          success: false,
+          error: "Your creator account is currently suspended. Please contact support."
+        });
+      } else {
+        return res.status(409).json({
+          success: false,
+          error: "A creator profile already exists for this account."
+        });
+      }
+    }
+
+    // 2. Check if username is taken by someone else
+    const usernameQuery = query(collection(db, "creators"), where("username", "==", cleanUsername));
+    const usernameSnap = await getDocs(usernameQuery);
+    if (!usernameSnap.empty) {
+      const existingUser = usernameSnap.docs[0].data();
+      if (existingUser.userId !== creatorId && existingUser.creatorId !== creatorId) {
+        return res.status(409).json({
+          success: false,
+          error: `The handle @${cleanUsername} is already registered by another creator. Please choose a different username.`
+        });
+      }
+    }
+
     const creatorPayload = {
       creatorId,
       userId: creatorId,
-      username: String(username).toLowerCase().replace(/[^a-z0-9_]/g, ''),
-      displayName: String(displayName),
+      username: cleanUsername,
+      displayName: String(displayName).trim(),
       profileImage: profileImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
-      bio: bio || '',
-      email: email || '',
-      phone: phone || '',
+      bio: bio ? String(bio).trim() : '',
+      email: email ? String(email).trim() : '',
+      phone: phone ? String(phone).trim() : '',
+      facebookUrl: facebookUrl ? String(facebookUrl).trim() : '',
+      instagramUrl: instagramUrl ? String(instagramUrl).trim() : '',
+      niche: niche ? String(niche).trim() : 'K-Beauty & Skincare Reviews',
       status: 'pending',
       role: 'creator',
       totalReels: 0,
@@ -1031,6 +1594,28 @@ app.post("/api/creator/apply", async (req, res) => {
 
     // Save to creators collection
     await setDoc(doc(db, "creators", creatorId), creatorPayload);
+
+    // Save public sync
+    try {
+      await setDoc(doc(db, "public_creators", creatorId), {
+        creatorId,
+        username: cleanUsername,
+        displayName: String(displayName).trim(),
+        profileImage: creatorPayload.profileImage,
+        bio: creatorPayload.bio,
+        level: 1,
+        levelName: 'K-Beauty Novice',
+        totalPoints: 0,
+        totalViews: 0,
+        totalLikes: 0,
+        totalComments: 0,
+        totalReels: 0,
+        status: 'pending',
+        updatedAt: now,
+      }, { merge: true });
+    } catch (pubErr) {
+      console.warn("Could not sync public creator profile on apply:", pubErr);
+    }
 
     // Update user collection role safely
     try {
@@ -1054,14 +1639,14 @@ app.post("/api/creator/apply", async (req, res) => {
   }
 });
 
-// POST Admin Update Creator Status
-app.post("/api/admin/creator/status", async (req, res) => {
-  const { creatorId, status } = req.body;
+// POST Admin Update Creator Status (Admin Only)
+app.post("/api/admin/creator/status", verifyAdminAuth, async (req, res) => {
+  const { creatorId, status, reason } = req.body;
 
-  if (!creatorId || !['pending', 'approved', 'suspended'].includes(status)) {
+  if (!creatorId || !['pending', 'approved', 'suspended', 'rejected'].includes(status)) {
     return res.status(400).json({
       success: false,
-      error: "creatorId and valid status ('pending' | 'approved' | 'suspended') are required"
+      error: "creatorId and valid status ('pending' | 'approved' | 'suspended' | 'rejected') are required"
     });
   }
 
@@ -1071,14 +1656,39 @@ app.post("/api/admin/creator/status", async (req, res) => {
     }
 
     const docRef = doc(db, "creators", String(creatorId));
+    const now = new Date().toISOString();
     await setDoc(docRef, {
       status,
-      updatedAt: new Date().toISOString()
+      statusReason: reason || null,
+      updatedAt: now,
     }, { merge: true });
+
+    // Sync to public_creators
+    try {
+      await setDoc(doc(db, "public_creators", String(creatorId)), {
+        status,
+        updatedAt: now,
+      }, { merge: true });
+    } catch (pErr) {
+      console.warn("Public creator sync warning on status update:", pErr);
+    }
+
+    // Sync role doc if user exists
+    try {
+      const userRef = doc(db, "users", String(creatorId));
+      await setDoc(userRef, { 
+        role: status === 'approved' ? 'creator' : 'customer',
+        updatedAt: now 
+      }, { merge: true });
+    } catch (uErr) {
+      console.warn("User doc sync warning:", uErr);
+    }
 
     return res.json({
       success: true,
-      message: `Creator status updated to ${status}`
+      message: `Creator status updated to ${status}`,
+      creatorId,
+      status
     });
   } catch (err: any) {
     console.error("Error updating creator status:", err);
@@ -1086,8 +1696,8 @@ app.post("/api/admin/creator/status", async (req, res) => {
   }
 });
 
-// GET All Creators (Admin endpoint)
-app.get("/api/creators", async (req, res) => {
+// GET All Creators for Admin (Admin Only)
+app.get("/api/admin/creators", verifyAdminAuth, async (req, res) => {
   try {
     if (!db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
@@ -1096,7 +1706,26 @@ app.get("/api/creators", async (req, res) => {
     const querySnap = await getDocs(collection(db, "creators"));
     const creators: any[] = [];
     querySnap.forEach((d) => {
-      creators.push(d.data());
+      creators.push({ creatorId: d.id, ...d.data() });
+    });
+
+    return res.json({ success: true, count: creators.length, creators });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET All Creators alias (Admin Only)
+app.get("/api/creators", verifyAdminAuth, async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ success: false, error: "Database not initialized on server" });
+    }
+
+    const querySnap = await getDocs(collection(db, "creators"));
+    const creators: any[] = [];
+    querySnap.forEach((d) => {
+      creators.push({ creatorId: d.id, ...d.data() });
     });
 
     return res.json({ success: true, count: creators.length, creators });
@@ -3157,387 +3786,6 @@ app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
     success: false,
     error: "Steadfast API is not configured or consignment status lookup failed."
   });
-});
-
-// ================= CREATOR MANAGEMENT ADMIN API ENDPOINTS WITH BACKEND AUTHORIZATION =================
-async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const userIdHeader = (req.headers['x-user-id'] as string) || '';
-  const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'customer_support', 'hr'];
-
-  if (userIdHeader && db) {
-    try {
-      const userSnap = await getDoc(doc(db, "users", userIdHeader));
-      if (userSnap.exists()) {
-        const userRole = userSnap.data()?.role;
-        if (staffRoles.includes(userRole)) {
-          return next();
-        }
-        return res.status(403).json({
-          success: false,
-          error: "Access Denied. Insufficient role permissions.",
-        });
-      }
-    } catch (e) {
-      console.warn("Error verifying user role in backend auth:", e);
-    }
-  }
-
-  // If userIdHeader is missing or not a verified staff member:
-  return res.status(403).json({
-    success: false,
-    error: "Access Denied. Only verified staff/admin accounts can access admin management APIs.",
-  });
-}
-
-// 1. Get List of All Creators (Admin authorized)
-app.get("/api/admin/creators", verifyAdminAuth, async (req, res) => {
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const creatorsSnap = await getDocs(collection(db, "creators"));
-    const creatorsList: any[] = [];
-    creatorsSnap.forEach((docSnap) => {
-      creatorsList.push({ creatorId: docSnap.id, ...docSnap.data() });
-    });
-    res.json({ success: true, count: creatorsList.length, creators: creatorsList });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 2. Change Creator Status (Approve, Suspend, Reject, Reactivate)
-app.post("/api/admin/creator/status", verifyAdminAuth, async (req, res) => {
-  const { creatorId, status, reason } = req.body;
-  if (!creatorId || !status) {
-    return res.status(400).json({ success: false, error: "creatorId and status are required" });
-  }
-
-  const validStatuses = ['pending', 'approved', 'suspended', 'rejected'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ success: false, error: "Invalid status value" });
-  }
-
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const creatorRef = doc(db, "creators", creatorId);
-    await setDoc(creatorRef, { 
-      status, 
-      statusReason: reason || null,
-      updatedAt: new Date().toISOString() 
-    }, { merge: true });
-
-    // Sync role doc if user exists
-    try {
-      const userRef = doc(db, "users", creatorId);
-      await setDoc(userRef, { role: "creator", updatedAt: new Date().toISOString() }, { merge: true });
-    } catch (uErr) {
-      console.warn("User doc sync warning:", uErr);
-    }
-
-    res.json({
-      success: true,
-      message: `Creator status successfully updated to ${status}`,
-      creatorId,
-      status
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 3. Change Reel Status (Approve, Reject, Publish)
-app.post("/api/admin/reels/status", verifyAdminAuth, async (req, res) => {
-  const { reelId, status, note } = req.body;
-  if (!reelId || !status) {
-    return res.status(400).json({ success: false, error: "reelId and status are required" });
-  }
-
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const reelRef = doc(db, "creator_reels", reelId);
-    const updates: any = {
-      status,
-      adminNote: note || null,
-      updatedAt: new Date().toISOString()
-    };
-
-    if (status === 'approved') updates.approvedAt = new Date().toISOString();
-    if (status === 'published') updates.publishedAt = new Date().toISOString();
-
-    await setDoc(reelRef, updates, { merge: true });
-
-    res.json({
-      success: true,
-      message: `Reel status updated to ${status}`,
-      reelId,
-      status
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 4. Update Verified Metrics for Reel (Admin Overrides)
-app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, res) => {
-  const { id } = req.params;
-  const { views, likes, comments, metricsSource, reason } = req.body;
-
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const reelRef = doc(db, "creator_reels", id);
-    const reelSnap = await getDoc(reelRef);
-
-    if (!reelSnap.exists()) {
-      return res.status(404).json({ success: false, error: "Reel not found" });
-    }
-
-    const reelData = reelSnap.data();
-    const parsedViews = Math.max(0, parseInt(views) || 0);
-    const parsedLikes = Math.max(0, parseInt(likes) || 0);
-    const parsedComments = Math.max(0, parseInt(comments) || 0);
-
-    // Get current point settings doc
-    let viewsPerPoint = 100;
-    let likesPerPoint = 10;
-    let pointsPerLikeBlock = 2;
-    let commentsPerPoint = 1;
-    let pointsPerComment = 3;
-
-    try {
-      const settingsSnap = await getDoc(doc(db, "settings", "creator_points"));
-      if (settingsSnap.exists()) {
-        const s = settingsSnap.data();
-        viewsPerPoint = s.viewsPerPoint || 100;
-        likesPerPoint = s.likesPerPoint || 10;
-        pointsPerLikeBlock = s.pointsPerLikeBlock || 2;
-        commentsPerPoint = s.commentsPerPoint || 1;
-        pointsPerComment = s.pointsPerComment || 3;
-      }
-    } catch (sErr) {
-      console.warn("Could not load settings for points calculation:", sErr);
-    }
-
-    const viewPoints = Math.floor(parsedViews / viewsPerPoint);
-    const likePoints = Math.floor(parsedLikes / likesPerPoint) * pointsPerLikeBlock;
-    const commentPoints = Math.floor(parsedComments / commentsPerPoint) * pointsPerComment;
-    const totalPoints = (reelData.status === 'approved' || reelData.status === 'published')
-      ? (viewPoints + likePoints + commentPoints)
-      : 0;
-
-    const newPerformance = {
-      views: parsedViews,
-      likes: parsedLikes,
-      comments: parsedComments,
-      points: totalPoints,
-      viewPoints,
-      likePoints,
-      commentPoints,
-      metricsSource: metricsSource || 'admin_verified',
-      metricsUpdatedAt: new Date().toISOString()
-    };
-
-    await setDoc(reelRef, {
-      performance: newPerformance,
-      metricsSource: metricsSource || 'admin_verified',
-      metricsUpdatedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-
-    // Record Audit Log
-    try {
-      const auditRef = doc(collection(db, "reel_metric_audits"));
-      await setDoc(auditRef, {
-        auditLogId: auditRef.id,
-        creatorReelId: id,
-        adminId: (req.headers['x-user-id'] as string) || 'admin',
-        previousValues: reelData.performance || { views: 0, likes: 0, comments: 0, points: 0 },
-        newValues: { views: parsedViews, likes: parsedLikes, comments: parsedComments, points: totalPoints },
-        newPerformance,
-        reason: reason || 'Admin verified metrics update',
-        timestamp: new Date().toISOString()
-      });
-    } catch (auditErr) {
-      console.warn("Audit log creation warning:", auditErr);
-    }
-
-    res.json({
-      success: true,
-      message: "Verified metrics updated successfully",
-      performance: newPerformance
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 5. Trigger Live Facebook API Refresh
-app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async (req, res) => {
-  const { id } = req.params;
-
-  const fbAccessToken = process.env.FACEBOOK_GRAPH_API_TOKEN || process.env.META_ACCESS_TOKEN;
-  if (!fbAccessToken) {
-    return res.json({
-      success: false,
-      apiAvailable: false,
-      message: "Facebook Graph API credentials not configured in environment. Admin verified mode available."
-    });
-  }
-
-  try {
-    res.json({
-      success: true,
-      apiAvailable: true,
-      message: "Facebook Graph API metrics synced successfully"
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 6. Point Settings API (Get / Save)
-app.get("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) => {
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const settingsSnap = await getDoc(doc(db, "settings", "creator_points"));
-    if (settingsSnap.exists()) {
-      return res.json({ success: true, settings: settingsSnap.data() });
-    }
-    return res.json({
-      success: true,
-      settings: {
-        viewsPerPoint: 100,
-        likesPerPoint: 10,
-        pointsPerLikeBlock: 2,
-        commentsPerPoint: 1,
-        pointsPerComment: 3,
-        levels: [
-          { level: 1, name: 'Beginner', minPoints: 0 },
-          { level: 2, name: 'Rising Creator', minPoints: 1000 },
-          { level: 3, name: 'Active Creator', minPoints: 5000 },
-          { level: 4, name: 'Pro Creator', minPoints: 15000 },
-          { level: 5, name: 'Elite Creator', minPoints: 30000 },
-        ]
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) => {
-  const { settings } = req.body;
-  if (!settings) {
-    return res.status(400).json({ success: false, error: "Settings object is required" });
-  }
-
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const docRef = doc(db, "settings", "creator_points");
-    await setDoc(docRef, {
-      ...settings,
-      updatedAt: new Date().toISOString(),
-      updatedBy: (req.headers['x-user-id'] as string) || 'admin'
-    }, { merge: true });
-
-    res.json({
-      success: true,
-      message: "Creator point rules & level thresholds saved successfully",
-      settings
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 7. Trigger Recalculation of All Creator Points
-app.post("/api/admin/recalculate-creator-points", verifyAdminAuth, async (req, res) => {
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const creatorsSnap = await getDocs(collection(db, "creators"));
-    let updatedCount = 0;
-
-    for (const creatorDoc of creatorsSnap.docs) {
-      const creatorId = creatorDoc.id;
-      const reelsQuery = query(collection(db, "creator_reels"), where("creatorUserId", "==", creatorId));
-      const reelsSnap = await getDocs(reelsQuery);
-
-      let totalViews = 0;
-      let totalLikes = 0;
-      let totalComments = 0;
-      let totalPoints = 0;
-      let totalReels = 0;
-
-      reelsSnap.forEach((rSnap) => {
-        const r = rSnap.data();
-        if (r.status === 'approved' || r.status === 'published') {
-          totalReels += 1;
-          totalViews += Number(r.performance?.views || 0);
-          totalLikes += Number(r.performance?.likes || 0);
-          totalComments += Number(r.performance?.comments || 0);
-          totalPoints += Number(r.performance?.points || 0);
-        }
-      });
-
-      await setDoc(doc(db, "creators", creatorId), {
-        totalViews,
-        totalLikes,
-        totalComments,
-        totalPoints,
-        totalReels,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-
-      updatedCount++;
-    }
-
-    res.json({
-      success: true,
-      message: `Recalculated points & levels for ${updatedCount} creators`,
-      updatedCreators: updatedCount
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 8. Get Audit Logs
-app.get("/api/admin/reel-metric-audits", verifyAdminAuth, async (req, res) => {
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized" });
-  }
-
-  try {
-    const auditsSnap = await getDocs(collection(db, "reel_metric_audits"));
-    const logs: any[] = [];
-    auditsSnap.forEach((docSnap) => {
-      logs.push({ auditLogId: docSnap.id, ...docSnap.data() });
-    });
-    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-    res.json({ success: true, count: logs.length, logs });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
 });
 
 async function startServer() {

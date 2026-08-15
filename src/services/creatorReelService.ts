@@ -9,21 +9,31 @@ import {
   query, 
   where, 
   orderBy,
+  runTransaction,
   onSnapshot 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { CreatorReel, CreatorReelStatus } from '../types';
+import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from '../utils/facebookUrl';
+import { recalculateCreatorPointsAndLevel } from './creatorPointService';
 
 export const CREATOR_REELS_COLLECTION = 'creator_reels';
 
 /**
- * Create a new Creator Reel submission
+ * Create a new Creator Reel submission with Cloudinary metadata and Facebook URL duplicate protection
  */
 export async function createCreatorReel(params: {
   creatorId: string;
   creatorUserId: string;
   videoUrl: string;
   thumbnailUrl?: string;
+  cloudinaryPublicId?: string;
+  secureUrl?: string;
+  resourceType?: 'video' | 'image';
+  duration?: number;
+  width?: number;
+  height?: number;
+  videoMetadata?: Record<string, any>;
   caption: string;
   description?: string;
   facebookPostUrl: string;
@@ -33,67 +43,114 @@ export async function createCreatorReel(params: {
   const creatorReelId = `reel-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
   const now = new Date().toISOString();
 
-  // Basic Facebook URL validation
-  const cleanFbUrl = params.facebookPostUrl.trim();
-  const fbRegex = /^(https?:\/\/)?(www\.|m\.)?(facebook\.com|fb\.watch|fb\.gg)\/.+/i;
-  if (!cleanFbUrl || !fbRegex.test(cleanFbUrl)) {
-    throw new Error('Please enter a valid Facebook Reel or Post URL (e.g., https://facebook.com/reel/...)');
-  }
-
-  if (!params.videoUrl) {
-    throw new Error('Video file or video URL is required.');
+  if (!params.creatorUserId) {
+    throw new Error('Creator User ID is required to submit a reel.');
   }
 
   if (!params.caption || !params.caption.trim()) {
     throw new Error('Reel caption is required.');
   }
 
-  // 1. Verify creator status (Must be approved)
+  if (!params.videoUrl) {
+    throw new Error('Video file or video URL is required.');
+  }
+
+  // Guard: Never store large base64 Data URLs in Firestore
+  if (params.videoUrl.startsWith('data:')) {
+    throw new Error('Direct video Data URLs cannot be saved to the database. Please upload the video to Cloudinary.');
+  }
+
+  // 1. Validate and Normalize Facebook Post/Reel URL
+  const normResult = normalizeFacebookUrl(params.facebookPostUrl);
+  if (!normResult.isValid || !normResult.normalizedUrl) {
+    throw new Error(normResult.error || 'Please enter a valid Facebook Reel or Post URL (e.g. https://facebook.com/reel/...)');
+  }
+
+  const normalizedUrl = normResult.normalizedUrl;
+  const originalFbUrl = params.facebookPostUrl.trim();
+  const facebookPostId = normResult.postId || extractFacebookPostId(originalFbUrl) || '';
+
+  // 2. Verify creator profile & approval status
   try {
     const creatorRef = doc(db, 'creators', params.creatorUserId);
     const creatorSnap = await getDoc(creatorRef);
-    if (!creatorSnap.exists() || creatorSnap.data()?.status !== 'approved') {
-      const currentStatus = creatorSnap.exists() ? creatorSnap.data()?.status : 'unregistered';
-      throw new Error(`Only approved creators can submit reels. Your creator account status is: ${currentStatus}`);
+
+    if (!creatorSnap.exists()) {
+      throw new Error('Creator profile not found. Please apply to become a creator first.');
     }
-  } catch (err: any) {
-    if (err.message.includes('Only approved creators')) throw err;
-    console.warn('Could not verify creator status prior to reel creation:', err);
+
+    const creatorData = creatorSnap.data();
+    if (creatorData.status !== 'approved') {
+      throw new Error(`Only approved creators can submit reels. Your current account status is: ${creatorData.status || 'pending'}`);
+    }
+  } catch (creatorErr: any) {
+    if (creatorErr.message.includes('approved creators') || creatorErr.message.includes('not found')) {
+      throw creatorErr;
+    }
+    console.warn('Could not verify creator status pre-check:', creatorErr);
   }
 
-  // 2. Check for duplicate Facebook Reel URL
+  // 3. Prevent Duplicate Facebook submissions across the network
   try {
-    const dupQuery = query(
-      collection(db, CREATOR_REELS_COLLECTION),
-      where('facebookPostUrl', '==', cleanFbUrl)
-    );
-    const dupSnap = await getDocs(dupQuery);
-    if (!dupSnap.empty) {
-      throw new Error('This Facebook Reel/Post URL has already been submitted to the creator program.');
+    const allReelsSnap = await getDocs(collection(db, CREATOR_REELS_COLLECTION));
+    for (const reelDoc of allReelsSnap.docs) {
+      const existing = reelDoc.data() as CreatorReel;
+      if (!existing) continue;
+
+      const isDuplicate = areFacebookUrlsEqual(
+        existing.normalizedFacebookUrl || existing.facebookPostUrl,
+        normalizedUrl
+      );
+
+      if (isDuplicate) {
+        throw new Error('This Facebook Reel/Post URL has already been submitted to the creator program.');
+      }
+
+      // If both have post IDs, compare IDs directly
+      if (facebookPostId && existing.facebookPostId && existing.facebookPostId === facebookPostId) {
+        throw new Error('This Facebook Reel/Post ID has already been submitted to the creator program.');
+      }
     }
   } catch (dupErr: any) {
-    if (dupErr.message.includes('already been submitted')) throw dupErr;
-    console.warn('Duplicate Facebook Reel URL check warning:', dupErr);
+    if (dupErr.message.includes('already been submitted')) {
+      throw dupErr;
+    }
+    console.warn('Duplicate Facebook Reel URL pre-check warning:', dupErr);
   }
 
+  // 4. Construct Reel Document with initial pending status and 0 points
   const newReel: CreatorReel = {
     creatorReelId,
-    creatorId: params.creatorId,
+    creatorId: params.creatorId || params.creatorUserId,
     creatorUserId: params.creatorUserId,
     videoUrl: params.videoUrl,
     thumbnailUrl: params.thumbnailUrl || 'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60',
+    cloudinaryPublicId: params.cloudinaryPublicId || '',
+    secureUrl: params.secureUrl || params.videoUrl,
+    resourceType: params.resourceType || 'video',
+    duration: params.duration || 0,
+    width: params.width || 0,
+    height: params.height || 0,
+    videoMetadata: params.videoMetadata || {},
     caption: params.caption.trim(),
     description: params.description ? params.description.trim() : '',
-    facebookPostUrl: params.facebookPostUrl.trim(),
+    facebookPostUrl: originalFbUrl,
+    normalizedFacebookUrl: normalizedUrl,
+    facebookPostId: facebookPostId,
     productIds: params.productIds || [],
     productNames: params.productNames || [],
-    status: 'pending',
+    status: 'pending', // Always initial pending status for moderation
     adminNote: '',
     performance: {
       views: 0,
       likes: 0,
       comments: 0,
       points: 0,
+      viewPoints: 0,
+      likePoints: 0,
+      commentPoints: 0,
+      metricsSource: 'none',
+      metricsUpdatedAt: now,
     },
     createdAt: now,
     updatedAt: now,
@@ -151,8 +208,6 @@ export async function getAllCreatorReelsForAdmin(): Promise<CreatorReel[]> {
   }
 }
 
-import { recalculateCreatorPointsAndLevel } from './creatorPointService';
-
 /**
  * Admin action: Update status (approve, reject, publish) & admin note
  */
@@ -203,12 +258,19 @@ export async function updateReelStatusByAdmin(
 }
 
 /**
- * Delete a creator reel
+ * Delete a creator reel and recalculate creator totals
  */
 export async function deleteCreatorReel(creatorReelId: string): Promise<void> {
   try {
     const docRef = doc(db, CREATOR_REELS_COLLECTION, creatorReelId);
+    const snap = await getDoc(docRef);
+    const creatorUserId = snap.exists() ? (snap.data() as CreatorReel).creatorUserId : null;
+
     await deleteDoc(docRef);
+
+    if (creatorUserId) {
+      await recalculateCreatorPointsAndLevel(creatorUserId);
+    }
   } catch (error) {
     console.error('Error deleting creator reel:', error);
     handleFirestoreError(error, OperationType.DELETE, `${CREATOR_REELS_COLLECTION}/${creatorReelId}`);

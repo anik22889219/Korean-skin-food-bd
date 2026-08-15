@@ -3,6 +3,7 @@ import { db, handleFirestoreError, OperationType } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
+import { getCanonicalBrandName } from '../data/brands';
 
 // Ensure initial products cache starts empty
 let productsCache: Product[] = [];
@@ -33,9 +34,11 @@ onSnapshot(collection(db, 'products'), (snapshot) => {
   const prods: Product[] = [];
   snapshot.forEach((docSnap) => {
     const data = docSnap.data() as Product;
+    const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
     prods.push({
       ...data,
       id: docSnap.id || data.id,
+      brand: normalizedBrand,
       barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode)
     });
   });
@@ -116,8 +119,9 @@ export const productService = {
 
   createProduct(product: Omit<Product, 'qrCodeUrl'>): Product {
     const barcodeNormalized = normalizeBarcode(product.barcode);
+    const normalizedBrand = getCanonicalBrandName(product.brand) || product.brand;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${product.id}`;
-    const newProduct: Product = { ...product, barcodeNormalized, qrCodeUrl };
+    const newProduct: Product = { ...product, brand: normalizedBrand, barcodeNormalized, qrCodeUrl };
     
     // Update local cache synchronously
     productsCache = productsCache.filter(p => p.id !== product.id);
@@ -147,7 +151,8 @@ export const productService = {
   updateProduct(product: Product): Product {
     const oldProduct = productsCache.find(p => p.id === product.id);
     const barcodeNormalized = normalizeBarcode(product.barcode);
-    const updatedProduct: Product = { ...product, barcodeNormalized };
+    const normalizedBrand = getCanonicalBrandName(product.brand) || product.brand;
+    const updatedProduct: Product = { ...product, brand: normalizedBrand, barcodeNormalized };
     
     // Update local cache synchronously
     productsCache = productsCache.map(p => p.id === product.id ? updatedProduct : p);

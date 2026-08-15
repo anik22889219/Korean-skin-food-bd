@@ -25,7 +25,7 @@ import {
   Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { KOREAN_BRANDS } from '../data/brands';
+import { KOREAN_BRANDS, getUniqueBrandList, isSameBrand, getCanonicalBrandName } from '../data/brands';
 
 const CATEGORIES = [
   'All', 
@@ -71,14 +71,9 @@ export const ProductManagement: React.FC = () => {
   const [isAiGeneratingContent, setIsAiGeneratingContent] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
-  // Memoized unique brands for filter
+  // Memoized unique brands for filter (case-deduplicated)
   const availableBrandsForFilter = useMemo(() => {
-    const brandSet = new Set<string>();
-    KOREAN_BRANDS.forEach(b => brandSet.add(b));
-    products.forEach(p => {
-      if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
-    });
-    return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+    return getUniqueBrandList(products);
   }, [products]);
 
   // Cloudinary media library popup states
@@ -728,8 +723,10 @@ export const ProductManagement: React.FC = () => {
       }
 
       const normBc = normalizeBarcode(rawBc);
+      const normBrand = getCanonicalBrandName(editingProduct.brand) || editingProduct.brand;
       const updatedProd: Product = {
         ...editingProduct,
+        brand: normBrand,
         barcode: rawBc,
         barcodeNormalized: normBc
       };
@@ -936,11 +933,14 @@ export const ProductManagement: React.FC = () => {
 
   // Filtered list
   const filteredProducts = products.filter((p) => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.barcode?.includes(searchQuery);
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch = !q || 
+                          (p.name && p.name.toLowerCase().includes(q)) || 
+                          (p.nameBN && p.nameBN.toLowerCase().includes(q)) || 
+                          (p.brand && p.brand.toLowerCase().includes(q)) ||
+                          (p.barcode && p.barcode.includes(q));
     const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter;
-    const matchesBrand = brandFilter === 'All' || p.brand.toLowerCase() === brandFilter.toLowerCase();
+    const matchesBrand = brandFilter === 'All' || (p.brand && isSameBrand(p.brand, brandFilter));
     return matchesSearch && matchesCategory && matchesBrand;
   });
 
@@ -1694,7 +1694,7 @@ export const ProductManagement: React.FC = () => {
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                   />
                   <datalist id="korean-brands-list">
-                    {KOREAN_BRANDS.map((brandName) => (
+                    {availableBrandsForFilter.map((brandName) => (
                       <option key={brandName} value={brandName} />
                     ))}
                   </datalist>

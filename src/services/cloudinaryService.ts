@@ -1,5 +1,5 @@
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 export interface CloudinaryImage {
   id: string;
@@ -7,6 +7,38 @@ export interface CloudinaryImage {
   name: string;
   createdAt: string;
   type?: 'image' | 'video';
+  publicId?: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface CloudinaryUploadResult {
+  publicId: string;
+  secureUrl: string;
+  url: string;
+  resourceType: 'video' | 'image';
+  format: string;
+  bytes: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  aspectRatio?: string;
+  fps?: number;
+  createdAt?: string;
+  originalFilename?: string;
+  videoMetadata?: {
+    format?: string;
+    bytes?: number;
+    duration?: number;
+    width?: number;
+    height?: number;
+    aspectRatio?: string;
+    fps?: number;
+    audio?: any;
+    video?: any;
+    [key: string]: any;
+  };
 }
 
 const DEFAULT_SEEDED_IMAGES: CloudinaryImage[] = [
@@ -65,8 +97,8 @@ let cloudinaryImagesCache: CloudinaryImage[] = [];
 // Real-time snapshot of the Cloudinary Media Library from Firestore
 onSnapshot(collection(db, 'cloudinary_images'), (snapshot) => {
   const images: CloudinaryImage[] = [];
-  snapshot.forEach((doc) => {
-    images.push(doc.data() as CloudinaryImage);
+  snapshot.forEach((docSnap) => {
+    images.push(docSnap.data() as CloudinaryImage);
   });
   
   if (images.length === 0) {
@@ -85,6 +117,135 @@ onSnapshot(collection(db, 'cloudinary_images'), (snapshot) => {
     handleFirestoreError(err, OperationType.GET, 'cloudinary_images', false);
   }
 });
+
+/**
+ * Real direct upload of video or image file to Cloudinary with progress monitoring
+ */
+export async function uploadFileToCloudinary(
+  file: File,
+  options: {
+    resourceType?: 'video' | 'image' | 'auto';
+    folder?: string;
+    onProgress?: (percent: number) => void;
+    tags?: string;
+  } = {}
+): Promise<CloudinaryUploadResult> {
+  const resourceType = options.resourceType === 'auto'
+    ? (file.type.startsWith('video/') ? 'video' : 'image')
+    : (options.resourceType || (file.type.startsWith('video/') ? 'video' : 'image'));
+  const folder = options.folder || (resourceType === 'video' ? 'kbeauty_creators' : 'kbeauty_products');
+
+  // Step 1: Request signature / config from server API
+  let signData: any = null;
+  try {
+    const signRes = await fetch('/api/cloudinary/sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        folder,
+        resourceType,
+        tags: options.tags,
+      }),
+    });
+    if (signRes.ok) {
+      signData = await signRes.json();
+    }
+  } catch (err) {
+    console.warn('[Cloudinary] Could not fetch signature from server:', err);
+  }
+
+  // Check localStorage overrides if configured in UI
+  const localCloudName = typeof localStorage !== 'undefined' ? localStorage.getItem('cloudinary_cloud_name')?.trim() : '';
+  const localPreset = typeof localStorage !== 'undefined' ? localStorage.getItem('cloudinary_upload_preset')?.trim() : '';
+
+  const cloudName = signData?.cloudName || localCloudName || 'dxvmfaxeh';
+  const uploadPreset = signData?.uploadPreset || localPreset || 'ml_default';
+
+  // Step 2: Build FormData with actual File (NEVER Base64 Data URL)
+  const formData = new FormData();
+  formData.append('file', file);
+
+  if (signData?.mode === 'signed' && signData.signature && signData.apiKey) {
+    // Signed upload: uses secure signature generated server-side
+    formData.append('api_key', signData.apiKey);
+    formData.append('timestamp', String(signData.timestamp));
+    formData.append('signature', signData.signature);
+    formData.append('folder', signData.folder || folder);
+    if (options.tags) formData.append('tags', options.tags);
+  } else {
+    // Unsigned preset upload
+    formData.append('upload_preset', uploadPreset);
+    if (folder) formData.append('folder', folder);
+  }
+
+  const endpointUrl = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
+
+  // Step 3: Perform upload with XHR for accurate progress monitoring
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', endpointUrl, true);
+
+    if (options.onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percentComplete = Math.round((e.loaded / e.total) * 100);
+          options.onProgress?.(percentComplete);
+        }
+      };
+    }
+
+    xhr.onload = async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText);
+          const result: CloudinaryUploadResult = {
+            publicId: res.public_id || '',
+            secureUrl: res.secure_url || res.url,
+            url: res.url || res.secure_url,
+            resourceType: res.resource_type || resourceType,
+            format: res.format || '',
+            bytes: res.bytes || file.size,
+            duration: res.duration !== undefined ? Number(res.duration) : undefined,
+            width: res.width !== undefined ? Number(res.width) : undefined,
+            height: res.height !== undefined ? Number(res.height) : undefined,
+            aspectRatio: res.aspect_ratio ? String(res.aspect_ratio) : (res.width && res.height ? `${res.width}:${res.height}` : undefined),
+            fps: res.frame_rate ? Number(res.frame_rate) : undefined,
+            createdAt: res.created_at || new Date().toISOString(),
+            originalFilename: res.original_filename || file.name,
+            videoMetadata: {
+              format: res.format,
+              bytes: res.bytes,
+              duration: res.duration,
+              width: res.width,
+              height: res.height,
+              aspectRatio: res.aspect_ratio,
+              fps: res.frame_rate,
+              audio: res.audio,
+              video: res.video,
+            },
+          };
+          resolve(result);
+        } catch (parseErr: any) {
+          reject(new Error('Failed to parse Cloudinary response: ' + parseErr.message));
+        }
+      } else {
+        try {
+          const errRes = JSON.parse(xhr.responseText);
+          const msg = errRes.error?.message || `Cloudinary upload failed with status ${xhr.status}`;
+          reject(new Error(msg));
+        } catch {
+          reject(new Error(`Cloudinary upload failed with status ${xhr.status}: ${xhr.statusText}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Network error during video upload to Cloudinary. Please verify internet connection and Cloudinary settings.'));
+    };
+
+    xhr.send(formData);
+  });
+}
 
 export const cloudinaryService = {
   getImages(): CloudinaryImage[] {
@@ -110,7 +271,7 @@ export const cloudinaryService = {
       }
       return newImage;
     } catch (err) {
-      console.error('Failed to upload image to mock library:', err);
+      console.error('Failed to upload image to media library:', err);
       handleFirestoreError(err, OperationType.WRITE, 'cloudinary_images');
       throw err;
     }
@@ -127,3 +288,4 @@ export const cloudinaryService = {
     }
   }
 };
+

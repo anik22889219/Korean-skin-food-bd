@@ -11,22 +11,30 @@ try {
   // ignore
 }
 
-const metaEnv = (import.meta as any).env || {};
+const getEnvVar = (key: string): string | undefined => {
+  if (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.[key]) {
+    return (import.meta as any).env[key];
+  }
+  if (typeof process !== 'undefined' && process?.env?.[key]) {
+    return process.env[key];
+  }
+  return undefined;
+};
 
 const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || firebaseConfigJson.apiKey,
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigJson.authDomain,
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || firebaseConfigJson.projectId,
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigJson.storageBucket,
-  messagingSenderId: metaEnv.VITE_FIREBASE_SENDER_ID || firebaseConfigJson.messagingSenderId,
-  appId: metaEnv.VITE_FIREBASE_APP_ID || firebaseConfigJson.appId
+  apiKey: getEnvVar('VITE_FIREBASE_API_KEY') || firebaseConfigJson.apiKey,
+  authDomain: getEnvVar('VITE_FIREBASE_AUTH_DOMAIN') || firebaseConfigJson.authDomain,
+  projectId: getEnvVar('VITE_FIREBASE_PROJECT_ID') || firebaseConfigJson.projectId,
+  storageBucket: getEnvVar('VITE_FIREBASE_STORAGE_BUCKET') || firebaseConfigJson.storageBucket,
+  messagingSenderId: getEnvVar('VITE_FIREBASE_SENDER_ID') || firebaseConfigJson.messagingSenderId,
+  appId: getEnvVar('VITE_FIREBASE_APP_ID') || firebaseConfigJson.appId
 };
 
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Get custom database ID if available
-const databaseId = metaEnv.VITE_FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
+const databaseId = getEnvVar('VITE_FIREBASE_FIRESTORE_DATABASE_ID') || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
 
 // Initialize Services using official Firestore initializer with force long polling to prevent gRPC Listen stream RST_STREAM errors in proxies & container sandboxes
 let db: ReturnType<typeof getFirestore>;
@@ -60,7 +68,7 @@ async function testConnection() {
 testConnection();
 
 // Connect to Emulators ONLY if explicitly configured to use them
-if (metaEnv.VITE_USE_FIREBASE_EMULATOR === 'true') {
+if (getEnvVar('VITE_USE_FIREBASE_EMULATOR') === 'true') {
   try {
     // Check if the user is running emulators on standard ports
     // We wrap in a try-catch to prevent crash if not running

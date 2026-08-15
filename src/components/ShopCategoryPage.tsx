@@ -14,7 +14,7 @@ import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotServ
 import { themeService, DEFAULT_SHOP_THEME } from '../services/themeService';
 import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
-import { KOREAN_BRANDS } from '../data/brands';
+import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
 
 const CATEGORIES = [
   'All',
@@ -244,25 +244,13 @@ export const ShopCategoryPage: React.FC = () => {
     setTimeout(() => setLastAddedId(null), 2500);
   };
 
-  // Combined Brands list with counts
+  // Combined Brands list with counts (deduplicated across case variations)
   const availableBrands = useMemo(() => {
-    const brandSet = new Set<string>();
-    KOREAN_BRANDS.forEach(b => brandSet.add(b));
-    products.forEach(p => {
-      if (p.brand && p.brand.trim()) brandSet.add(p.brand.trim());
-    });
-    return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+    return getUniqueBrandList(products);
   }, [products]);
 
   const brandProductCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    products.forEach(p => {
-      if (p.brand) {
-        const key = p.brand.trim().toLowerCase();
-        counts[key] = (counts[key] || 0) + 1;
-      }
-    });
-    return counts;
+    return getBrandProductCounts(products);
   }, [products]);
 
   const categoryProductCounts = useMemo(() => {
@@ -311,7 +299,7 @@ export const ShopCategoryPage: React.FC = () => {
 
       // 5. Brand Filter
       const matchesBrand = selectedBrand === 'All' || 
-        (p.brand && p.brand.toLowerCase() === selectedBrand.toLowerCase());
+        (p.brand && isSameBrand(p.brand, selectedBrand));
 
       // 6. Price Range Filter
       const effectivePrice = p.discountPrice || p.price;
@@ -597,7 +585,7 @@ export const ShopCategoryPage: React.FC = () => {
                   </button>
 
                   {filteredBrands.map((bName) => {
-                    const isSelected = selectedBrand.toLowerCase() === bName.toLowerCase();
+                    const isSelected = isSameBrand(selectedBrand, bName);
                     const pCount = brandProductCounts[bName.toLowerCase()] || 0;
                     return (
                       <button

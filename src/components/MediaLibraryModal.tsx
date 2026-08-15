@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { cloudinaryService, CloudinaryImage } from '../services/cloudinaryService';
+import { cloudinaryService, CloudinaryImage, uploadFileToCloudinary } from '../services/cloudinaryService';
 import { X, Search, Upload, Check, Trash2, Image, Wand2, Film, Play, Info } from 'lucide-react';
 
 interface MediaLibraryModalProps {
@@ -174,15 +174,41 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
       let finalUrl = uploadPreview;
       let directUploadSuccess = false;
 
-      // If user provided Cloudinary Cloud Name & Upload Preset, upload directly to Cloudinary API!
-      if (cloudName.trim() && uploadPreset.trim()) {
+      // If user provided a raw file, upload directly using secure Cloudinary upload service
+      if (rawFile) {
+        try {
+          const res = await uploadFileToCloudinary(rawFile, {
+            resourceType: fileType,
+            folder: fileType === 'video' ? 'kbeauty_creators' : 'kbeauty_products',
+          });
+          if (res.secureUrl) {
+            finalUrl = res.secureUrl;
+            directUploadSuccess = true;
+          }
+        } catch (cErr: any) {
+          console.warn('[Cloudinary API] direct uploadFileToCloudinary failure:', cErr);
+          // Fallback to manual preset if provided
+          if (cloudName.trim() && uploadPreset.trim()) {
+            const formData = new FormData();
+            formData.append('file', rawFile);
+            formData.append('upload_preset', uploadPreset.trim());
+            const endpoint = fileType === 'video' 
+              ? `https://api.cloudinary.com/v1_1/${cloudName.trim()}/video/upload`
+              : `https://api.cloudinary.com/v1_1/${cloudName.trim()}/image/upload`;
+            const manualRes = await fetch(endpoint, { method: 'POST', body: formData });
+            if (manualRes.ok) {
+              const data = await manualRes.json();
+              if (data.secure_url) {
+                finalUrl = data.secure_url;
+                directUploadSuccess = true;
+              }
+            }
+          }
+        }
+      } else if (cloudName.trim() && uploadPreset.trim()) {
         try {
           const formData = new FormData();
-          if (rawFile) {
-            formData.append('file', rawFile);
-          } else {
-            formData.append('file', uploadPreview);
-          }
+          formData.append('file', uploadPreview);
           formData.append('upload_preset', uploadPreset.trim());
           
           const endpoint = fileType === 'video' 
@@ -202,17 +228,9 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
               localStorage.setItem('cloudinary_cloud_name', cloudName.trim());
               localStorage.setItem('cloudinary_upload_preset', uploadPreset.trim());
             }
-          } else {
-            const errRes = await res.json().catch(() => ({}));
-            const cErrMsg = errRes.error?.message || (await res.text().catch(() => 'Upload failed'));
-            console.warn('[Cloudinary API Direct Upload Error]:', cErrMsg);
-            throw new Error(`Cloudinary Direct Upload Error: ${cErrMsg}`);
           }
         } catch (cErr: any) {
           console.warn('[Cloudinary API] direct upload failure:', cErr);
-          if (cErr.message && cErr.message.includes('Cloudinary Direct Upload Error')) {
-            throw cErr;
-          }
         }
       }
 

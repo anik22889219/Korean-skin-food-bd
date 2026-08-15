@@ -15,6 +15,7 @@ import {
   ReelMetricAuditLog,
   CreatorProfile 
 } from '../types';
+import { syncPublicCreatorProfile } from './creatorService';
 
 export const SETTINGS_COLLECTION = 'settings';
 export const CREATOR_POINT_SETTINGS_DOC = 'creator_points';
@@ -29,17 +30,17 @@ export const DEFAULT_CREATOR_POINT_SETTINGS: CreatorPointSettings = {
   commentsPerPoint: 1,
   pointsPerComment: 3,
   levels: [
-    { level: 1, name: 'Beginner', minPoints: 0, maxPoints: 999 },
-    { level: 2, name: 'Rising Creator', minPoints: 1000, maxPoints: 4999 },
-    { level: 3, name: 'Active Creator', minPoints: 5000, maxPoints: 14999 },
-    { level: 4, name: 'Pro Creator', minPoints: 15000, maxPoints: 29999 },
-    { level: 5, name: 'Elite Creator', minPoints: 30000, maxPoints: 999999999 },
+    { level: 1, name: 'K-Beauty Novice', minPoints: 0, maxPoints: 999 },
+    { level: 2, name: 'Glow Influencer', minPoints: 1000, maxPoints: 4999 },
+    { level: 3, name: 'Skincare Guru', minPoints: 5000, maxPoints: 14999 },
+    { level: 4, name: 'Seoul Beauty Star', minPoints: 15000, maxPoints: 29999 },
+    { level: 5, name: 'K-Beauty Elite Icon', minPoints: 30000, maxPoints: 999999999 },
   ],
 };
 
 /**
  * Deterministically calculates points earned for a specific reel.
- * Returns 0 points if reel status is not approved or published.
+ * Returns 0 points if reel status is not approved or published (e.g., pending or rejected).
  */
 export function calculateReelPoints(
   performance: { views?: number; likes?: number; comments?: number },
@@ -51,14 +52,14 @@ export function calculateReelPoints(
   commentPoints: number;
   totalPoints: number;
 } {
-  // Rejected or pending reels MUST NOT generate points
+  // Pending or rejected reels strictly receive 0 points
   if (status !== 'approved' && status !== 'published') {
     return { viewPoints: 0, likePoints: 0, commentPoints: 0, totalPoints: 0 };
   }
 
-  const views = Math.max(0, performance?.views || 0);
-  const likes = Math.max(0, performance?.likes || 0);
-  const comments = Math.max(0, performance?.comments || 0);
+  const views = Math.max(0, Math.floor(Number(performance?.views) || 0));
+  const likes = Math.max(0, Math.floor(Number(performance?.likes) || 0));
+  const comments = Math.max(0, Math.floor(Number(performance?.comments) || 0));
 
   const viewsPerPoint = settings.viewsPerPoint > 0 ? settings.viewsPerPoint : 100;
   const likesPerPoint = settings.likesPerPoint > 0 ? settings.likesPerPoint : 10;
@@ -66,8 +67,11 @@ export function calculateReelPoints(
   const commentsPerPoint = settings.commentsPerPoint > 0 ? settings.commentsPerPoint : 1;
   const pointsPerComment = settings.pointsPerComment >= 0 ? settings.pointsPerComment : 3;
 
+  // 100 views = 1 point
   const viewPoints = Math.floor(views / viewsPerPoint);
+  // 10 likes = 2 points
   const likePoints = Math.floor(likes / likesPerPoint) * pointsPerLikeBlock;
+  // 1 comment = 3 points
   const commentPoints = Math.floor(comments / commentsPerPoint) * pointsPerComment;
 
   const totalPoints = viewPoints + likePoints + commentPoints;
@@ -77,6 +81,12 @@ export function calculateReelPoints(
 
 /**
  * Deterministically calculates creator level, level name, progress, and next level requirements.
+ * Thresholds:
+ * Level 1 = 0
+ * Level 2 = 1,000
+ * Level 3 = 5,000
+ * Level 4 = 15,000
+ * Level 5 = 30,000
  */
 export function calculateCreatorLevel(
   totalPoints: number,
@@ -89,10 +99,12 @@ export function calculateCreatorLevel(
   pointsRemaining: number;
   nextLevelName: string | null;
 } {
-  const points = Math.max(0, Math.floor(totalPoints));
-  const sortedLevels = [...(settings.levels || DEFAULT_CREATOR_POINT_SETTINGS.levels)].sort(
-    (a, b) => a.minPoints - b.minPoints
-  );
+  const points = Math.max(0, Math.floor(Number(totalPoints) || 0));
+  const rawLevels = (settings.levels && settings.levels.length > 0)
+    ? settings.levels
+    : DEFAULT_CREATOR_POINT_SETTINGS.levels;
+
+  const sortedLevels = [...rawLevels].sort((a, b) => a.minPoints - b.minPoints);
 
   let currentLevelIdx = 0;
   for (let i = 0; i < sortedLevels.length; i++) {
@@ -123,7 +135,7 @@ export function calculateCreatorLevel(
       nextLevelName: nextLevel.name,
     };
   } else {
-    // Max Tier Reached (e.g. Elite Creator)
+    // Max Tier Reached (Level 5 / K-Beauty Elite Icon)
     return {
       level: currentLevel.level,
       levelName: currentLevel.name,
@@ -320,6 +332,7 @@ export async function recalculateCreatorPointsAndLevel(
     const creatorSnap = await getDoc(creatorRef);
 
     if (creatorSnap.exists()) {
+      const creatorData = creatorSnap.data() as CreatorProfile;
       await updateDoc(creatorRef, {
         totalViews,
         totalLikes,
@@ -334,6 +347,23 @@ export async function recalculateCreatorPointsAndLevel(
         nextLevelName: levelInfo.nextLevelName,
         updatedAt: now,
       });
+
+      // Sync public_creators
+      syncPublicCreatorProfile({
+        creatorId: String(creatorUserId),
+        username: creatorData.username,
+        displayName: creatorData.displayName,
+        profileImage: creatorData.profileImage,
+        bio: creatorData.bio,
+        level: levelInfo.level,
+        levelName: levelInfo.levelName,
+        totalPoints,
+        totalViews,
+        totalLikes,
+        totalComments,
+        totalReels,
+        status: creatorData.status,
+      }).catch(err => console.warn('Could not sync public creator points:', err));
     }
 
     return {

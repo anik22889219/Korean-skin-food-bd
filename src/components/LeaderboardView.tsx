@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Trophy, Award, Crown, Sparkles, Eye, ThumbsUp, MessageSquare, 
-  Video, Filter, RefreshCw, Calendar, Search, ChevronRight, UserCheck
+  Video, Filter, RefreshCw, Calendar, Search, ChevronRight, UserCheck, Clock
 } from 'lucide-react';
 import { 
   getLeaderboard, 
@@ -132,7 +132,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ isAdminView = 
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <ClockIcon size={14} /> This Week
+              <Clock size={14} /> This Week
             </button>
           </div>
         </div>
@@ -362,12 +362,3 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ isAdminView = 
     </div>
   );
 };
-
-function ClockIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
