@@ -15,6 +15,7 @@ import { themeService, DEFAULT_SHOP_THEME } from '../services/themeService';
 import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
 import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
+import { ProductCard } from './ProductCard';
 
 const CATEGORIES = [
   'All',
@@ -817,144 +818,14 @@ export const ShopCategoryPage: React.FC = () => {
               <div className="space-y-8">
                 
                 {/* Product Grid Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                  {filteredProducts.slice(0, visibleCount).map((prod) => {
-                    const isWishlisted = wishlist.includes(prod.id);
-                    const effectivePrice = prod.discountPrice || prod.price;
-                    const hasDiscount = !!prod.discountPrice && prod.discountPrice < prod.price;
-                    const discountPercent = hasDiscount ? Math.round(((prod.price - prod.discountPrice!) / prod.price) * 100) : 0;
-
-                    return (
-                      <motion.div
-                        key={prod.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="bg-white rounded-2xl border border-[#ede3dc] overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-xl transition-all duration-300 group p-3 sm:p-4 space-y-3 relative"
-                      >
-                        {/* Top Discount / Stock Badges */}
-                        <div className="absolute top-5 left-5 z-10 flex flex-col gap-1 items-start pointer-events-none">
-                          {hasDiscount && (
-                            <span className="bg-[#e91e8c] text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-md shadow-xs tracking-wider">
-                              -{discountPercent}% OFF
-                            </span>
-                          )}
-                          {prod.stock === 0 && (
-                            <span className="bg-slate-900 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-md shadow-xs">
-                              Out of Stock
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Top Wishlist Heart Icon */}
-                        <button
-                          onClick={(e) => toggleWishlist(prod.id, e)}
-                          className={`absolute top-5 right-5 z-10 w-8 h-8 rounded-full flex items-center justify-center transition shadow-xs cursor-pointer ${
-                            isWishlisted
-                              ? 'bg-[#e91e8c] text-white'
-                              : 'bg-white/80 backdrop-blur-md text-gray-400 hover:text-[#e91e8c] hover:bg-white'
-                          }`}
-                          title={isWishlisted ? "Remove from Wishlist" : "Save to Wishlist"}
-                        >
-                          <Heart size={14} className={isWishlisted ? "fill-current" : ""} />
-                        </button>
-
-                        {/* Product Image Container */}
-                        <div
-                          className="aspect-square bg-[#fff8f5] rounded-xl overflow-hidden cursor-pointer relative group-hover:scale-[1.02] transition-transform duration-300"
-                          onClick={() => navigate(`/product/${prod.id}`)}
-                        >
-                          <img
-                            src={prod.image}
-                            alt={prod.name}
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-
-                          {/* Quick View Button Overlay */}
-                          <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setQuickViewProduct(prod);
-                              }}
-                              className="px-3 py-1.5 bg-white/95 backdrop-blur-md text-[#1e1b18] text-[11px] font-extrabold rounded-xl shadow-md hover:bg-[#e91e8c] hover:text-white transition flex items-center gap-1 cursor-pointer"
-                            >
-                              <Eye size={12} />
-                              <span>Quick View</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Product Details info */}
-                        <div className="space-y-1.5 flex-1 flex flex-col justify-between pt-1">
-                          <div>
-                            {/* Brand Name */}
-                            <span className="text-[9px] font-black uppercase tracking-widest text-[#8c7b70] block">
-                              {prod.brand || 'K-Beauty'}
-                            </span>
-
-                            {/* Title */}
-                            <h3
-                              onClick={() => navigate(`/product/${prod.id}`)}
-                              className="text-xs sm:text-sm font-bold text-[#1e1b18] line-clamp-2 cursor-pointer hover:text-[#e91e8c] leading-snug transition-colors mt-0.5"
-                            >
-                              {language === 'bn' ? (prod.nameBN || prod.name) : prod.name}
-                            </h3>
-                          </div>
-
-                          {/* Volume & Skin Type attribute badges */}
-                          <div className="flex flex-wrap items-center gap-1 pt-1">
-                            {prod.ml && (
-                              <span className="text-[9px] font-extrabold font-mono text-gray-500 bg-pink-50/60 px-1.5 py-0.5 rounded">
-                                {prod.ml}
-                              </span>
-                            )}
-                            {prod.skinTypes && prod.skinTypes.length > 0 && (
-                              <span className="text-[9px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded truncate max-w-[120px]">
-                                {prod.skinTypes[0]} Skin
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Rating & Reviews */}
-                          <div className="flex items-center gap-1 text-[11px] text-amber-500 pt-0.5">
-                            <div className="flex items-center">
-                              <Star size={11} className="fill-current" />
-                              <span className="font-extrabold ml-1 font-mono text-gray-800">{prod.rating || 5.0}</span>
-                            </div>
-                            <span className="text-gray-400 text-[10px]">({prod.reviewsCount || 12})</span>
-                          </div>
-
-                          {/* Pricing Display */}
-                          <div className="pt-1.5 flex items-baseline gap-2">
-                            <span className="text-sm sm:text-base font-black font-mono text-[#1e1b18]">
-                              ৳{effectivePrice.toLocaleString()} BDT
-                            </span>
-                            {hasDiscount && (
-                              <span className="text-xs font-mono line-through text-gray-400">
-                                ৳{prod.price.toLocaleString()}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Add to Bag CTA Button */}
-                        <button
-                          onClick={(e) => handleAddProductToCart(prod, e)}
-                          disabled={prod.stock === 0}
-                          className={`w-full py-2.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                            prod.stock > 0
-                              ? 'bg-[#e91e8c] hover:bg-[#ff4b91] text-white hover:shadow-md'
-                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                          }`}
-                        >
-                          <ShoppingBag size={13} />
-                          <span>{prod.stock > 0 ? 'Add to Bag' : 'Out of Stock'}</span>
-                        </button>
-                      </motion.div>
-                    );
-                  })}
+                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
+                  {filteredProducts.slice(0, visibleCount).map((prod) => (
+                    <ProductCard
+                      key={prod.id}
+                      product={prod}
+                      onQuickView={(p) => setQuickViewProduct(p)}
+                    />
+                  ))}
                 </div>
 
                 {/* LOAD MORE RITUALS BUTTON */}

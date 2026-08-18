@@ -18,6 +18,7 @@ import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
 import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
 import { TopCreatorsSection } from './TopCreatorsSection';
+import { ProductCard } from './ProductCard';
 
 const CATEGORIES = [
   'All', 
@@ -406,41 +407,14 @@ export const StoreCatalog: React.FC = () => {
           </Link>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {/* Botanical Essentials Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
           {filteredProducts.slice(0, 6).map((prod) => (
-            <div
+            <ProductCard
               key={prod.id}
-              className="bg-white rounded-2xl border border-pink-100 overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-md transition p-3 space-y-2 group"
-            >
-              <div
-                className="aspect-square bg-pink-50/20 rounded-xl overflow-hidden cursor-pointer"
-                onClick={() => navigate(`/product/${prod.id}`)}
-              >
-                <img
-                  src={prod.image}
-                  alt={prod.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-              <div>
-                <span className="text-[8px] font-extrabold text-[#E91E8C] uppercase">{prod.brand}</span>
-                <h4
-                  onClick={() => navigate(`/product/${prod.id}`)}
-                  className="text-xs font-bold text-slate-900 line-clamp-1 cursor-pointer hover:text-[#E91E8C]"
-                >
-                  {prod.name}
-                </h4>
-                <span className="text-xs font-black text-slate-900 font-mono mt-1 block">৳{prod.price}</span>
-              </div>
-              <button
-                onClick={() => addToCart(prod)}
-                className="w-full py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-              >
-                <ShoppingBag size={11} />
-                <span>{be.buttonText || 'Add to Bag'}</span>
-              </button>
-            </div>
+              product={prod}
+              onQuickView={(p) => navigate(`/product/${p.id}`)}
+            />
           ))}
         </div>
       </div>
@@ -882,46 +856,13 @@ export const StoreCatalog: React.FC = () => {
 
         {/* Products Grid or Empty State */}
         {filteredProducts.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
             {filteredProducts.map((prod) => (
-              <div
+              <ProductCard
                 key={prod.id}
-                className="bg-white rounded-2xl border border-pink-100 overflow-hidden flex flex-col justify-between hover:border-pink-300 hover:shadow-md transition p-3 space-y-2 group"
-              >
-                <div
-                  className="aspect-square bg-pink-50/20 rounded-xl overflow-hidden cursor-pointer relative"
-                  onClick={() => navigate(`/product/${prod.id}`)}
-                >
-                  <img
-                    src={prod.image}
-                    alt={prod.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition"
-                    referrerPolicy="no-referrer"
-                  />
-                  {prod.category && (
-                    <span className="absolute top-1.5 left-1.5 bg-slate-900/80 backdrop-blur-xs text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-md">
-                      {prod.category}
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <span className="text-[8px] font-black text-[#E91E8C] uppercase tracking-wider block">{prod.brand}</span>
-                  <h4
-                    onClick={() => navigate(`/product/${prod.id}`)}
-                    className="text-xs font-bold text-slate-900 line-clamp-1 cursor-pointer hover:text-[#E91E8C]"
-                  >
-                    {prod.name}
-                  </h4>
-                  <span className="text-xs font-black text-slate-900 font-mono mt-1 block">৳{prod.price}</span>
-                </div>
-                <button
-                  onClick={() => addToCart(prod)}
-                  className="w-full py-1.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <ShoppingBag size={11} />
-                  <span>{vf.buttonText || 'Shop Now'}</span>
-                </button>
-              </div>
+                product={prod}
+                onQuickView={(p) => navigate(`/product/${p.id}`)}
+              />
             ))}
           </div>
         ) : (

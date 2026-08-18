@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductDetailSkeleton } from './Skeletons';
+import { ProductCard } from './ProductCard';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -953,22 +954,13 @@ export const ProductDetail: React.FC = () => {
           <p className="text-xs text-gray-400 mt-0.5">Handpicked related skin nourishment formulations.</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
           {relatedProducts.map((p) => (
-            <div 
+            <ProductCard 
               key={p.id} 
-              onClick={() => navigate(`/product/${p.id}`)}
-              className="bg-white p-4 rounded-3xl border border-pink-100 hover:border-[#E91E8C]/40 cursor-pointer shadow-sm hover:shadow-md transition duration-300 space-y-3"
-            >
-              <div className="relative aspect-square rounded-2xl overflow-hidden bg-pink-50/5 border border-pink-100 p-2">
-                <img src={p.image} alt={p.name} className="w-full h-full object-cover rounded-xl" referrerPolicy="no-referrer" />
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-[#E91E8C] uppercase">{p.brand}</span>
-                <h4 className="font-extrabold text-xs text-slate-900 truncate">{language === 'en' ? p.name : p.nameBN}</h4>
-                <span className="text-xs font-extrabold text-[#E91E8C] font-mono">৳{p.discountPrice || p.price}</span>
-              </div>
-            </div>
+              product={p} 
+              onQuickView={(prod) => navigate(`/product/${prod.id}`)}
+            />
           ))}
         </div>
       </div>

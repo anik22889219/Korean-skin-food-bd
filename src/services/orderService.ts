@@ -28,5 +28,9 @@ export const orderService = {
 
   cancelOrder(orderId: string, reason?: string, staffName?: string) {
     return posService.cancelOrder(orderId, reason, staffName);
+  },
+
+  subscribe(callback: (orders: Order[]) => void): () => void {
+    return posService.subscribe(callback);
   }
 };

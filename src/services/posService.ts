@@ -76,6 +76,19 @@ let sessionsCache: PosSession[] = [
 // Firestore real-time subscriptions
 let draftOrdersCache: Order[] = [];
 
+// Subscribers for real-time order synchronization
+const orderSubscribers = new Set<(orders: Order[]) => void>();
+
+function notifyOrderSubscribers() {
+  orderSubscribers.forEach(cb => {
+    try {
+      cb(ordersCache);
+    } catch (e) {
+      console.error('[posService] Order subscriber error:', e);
+    }
+  });
+}
+
 onSnapshot(query(collection(db, 'draft_orders'), orderBy('createdAt', 'desc')), (snapshot) => {
   const drafts: Order[] = [];
   snapshot.forEach((doc) => {
@@ -103,6 +116,7 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snaps
   });
   if (ords.length > 0) {
     ordersCache = ords;
+    notifyOrderSubscribers();
   }
 }, (err) => {
   console.warn('[Firebase] orders onSnapshot warning:', err);
@@ -713,8 +727,17 @@ export const posService = {
       const updatedOrder = { ...ordersCache[index], courier: courierData };
       ordersCache[index] = updatedOrder;
       setDoc(doc(db, 'orders', orderId), updatedOrder).catch(console.error);
+      notifyOrderSubscribers();
       return updatedOrder;
     }
     return undefined;
+  },
+
+  subscribe(callback: (orders: Order[]) => void): () => void {
+    orderSubscribers.add(callback);
+    callback(ordersCache);
+    return () => {
+      orderSubscribers.delete(callback);
+    };
   }
 };

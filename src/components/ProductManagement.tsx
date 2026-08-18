@@ -22,7 +22,8 @@ import {
   Plus, Wand2, QrCode, Search, 
   Trash2, Edit, AlertCircle, CheckCircle, X, 
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
-  Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info
+  Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info,
+  LayoutGrid, List, Package, AlertTriangle, Layers, Copy, DollarSign, ArrowUpDown
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { KOREAN_BRANDS, getUniqueBrandList, isSameBrand, getCanonicalBrandName } from '../data/brands';
@@ -68,8 +69,56 @@ export const ProductManagement: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [brandFilter, setBrandFilter] = useState('All');
+  const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [copiedBarcode, setCopiedBarcode] = useState<string | null>(null);
   const [isAiGeneratingContent, setIsAiGeneratingContent] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+
+  const handleCopyBarcode = (e: React.MouseEvent, code: string) => {
+    e.stopPropagation();
+    if (!code) return;
+    try {
+      navigator.clipboard.writeText(code);
+      setCopiedBarcode(code);
+      setTimeout(() => setCopiedBarcode(null), 2000);
+    } catch (err) {
+      console.warn('Copy failed:', err);
+    }
+  };
+
+  // Inventory stats summary metrics
+  const inventoryMetrics = useMemo(() => {
+    let totalStockUnits = 0;
+    let totalValuationBDT = 0;
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+    let discountedCount = 0;
+
+    products.forEach((p) => {
+      const qty = Number(p.stock) || 0;
+      const pr = Number(p.discountPrice || p.price) || 0;
+      totalStockUnits += qty;
+      totalValuationBDT += qty * pr;
+      if (qty === 0) {
+        outOfStockCount++;
+      } else if (qty <= (p.lowStockThreshold ?? 5)) {
+        lowStockCount++;
+      }
+      if (p.discountPrice && p.discountPrice < p.price) {
+        discountedCount++;
+      }
+    });
+
+    return {
+      totalProducts: products.length,
+      totalStockUnits,
+      totalValuationBDT,
+      lowStockCount,
+      outOfStockCount,
+      discountedCount
+    };
+  }, [products]);
 
   // Memoized unique brands for filter (case-deduplicated)
   const availableBrandsForFilter = useMemo(() => {
@@ -932,45 +981,60 @@ export const ProductManagement: React.FC = () => {
   };
 
   // Filtered list
-  const filteredProducts = products.filter((p) => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch = !q || 
-                          (p.name && p.name.toLowerCase().includes(q)) || 
-                          (p.nameBN && p.nameBN.toLowerCase().includes(q)) || 
-                          (p.brand && p.brand.toLowerCase().includes(q)) ||
-                          (p.barcode && p.barcode.includes(q));
-    const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter;
-    const matchesBrand = brandFilter === 'All' || (p.brand && isSameBrand(p.brand, brandFilter));
-    return matchesSearch && matchesCategory && matchesBrand;
-  });
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch = !q || 
+                            (p.name && p.name.toLowerCase().includes(q)) || 
+                            (p.nameBN && p.nameBN.toLowerCase().includes(q)) || 
+                            (p.brand && p.brand.toLowerCase().includes(q)) ||
+                            (p.barcode && p.barcode.includes(q)) ||
+                            (p.sku && p.sku.toLowerCase().includes(q));
+      const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter;
+      const matchesBrand = brandFilter === 'All' || (p.brand && isSameBrand(p.brand, brandFilter));
+      
+      let matchesStock = true;
+      const stockQty = Number(p.stock) || 0;
+      const threshold = p.lowStockThreshold ?? 5;
+      if (stockStatusFilter === 'in_stock') matchesStock = stockQty > threshold;
+      if (stockStatusFilter === 'low_stock') matchesStock = stockQty > 0 && stockQty <= threshold;
+      if (stockStatusFilter === 'out_of_stock') matchesStock = stockQty === 0;
+
+      return matchesSearch && matchesCategory && matchesBrand && matchesStock;
+    });
+  }, [products, searchQuery, categoryFilter, brandFilter, stockStatusFilter]);
 
   return (
-    <div className="bg-white p-6 rounded-[24px] border border-pink-100 shadow-sm space-y-6">
+    <div className="bg-white p-4 sm:p-6 lg:p-7 rounded-[28px] border border-pink-100 shadow-sm space-y-6">
       
       {/* Header and CTA */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-50 pb-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-pink-50 pb-5">
         <div>
-          <h4 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider">Skincare Inventory Catalog</h4>
-          <p className="text-xs text-gray-500 mt-0.5">Edit prices, manage quantities, and trigger on-demand Gemini SEO copywriting</p>
+          <div className="flex items-center gap-2 mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#E91E8C]">
+            <Package size={13} />
+            <span>Skincare Catalog & Operations</span>
+          </div>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Product & Inventory Management</h2>
+          <p className="text-xs text-slate-500 mt-1">Live store catalog, physical barcode auditing, multi-warehouse stock levels, and Gemini AI copywriting.</p>
         </div>
 
-        <div className="flex gap-2.5 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
           <button 
             type="button"
             onClick={handleRunBarcodeAudit}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+            className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 rounded-2xl text-xs font-extrabold cursor-pointer transition flex items-center gap-2 shadow-sm"
             title="Audit missing, duplicate, and unnormalized barcodes"
           >
-            <Barcode size={13} className="text-amber-400" />
-            <span>Audit Barcodes & Fixes</span>
+            <Barcode size={14} className="text-amber-400" />
+            <span>Audit Barcodes</span>
           </button>
 
           <button 
             onClick={() => navigate('/admin/pos')}
-            className="px-4 py-2 bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+            className="px-3.5 py-2.5 bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200 rounded-2xl text-xs font-extrabold cursor-pointer transition flex items-center gap-2 shadow-sm"
           >
-            <QrCode size={13} className="text-[#E91E8C]" />
-            <span>Generate QR Tags</span>
+            <QrCode size={14} className="text-[#E91E8C]" />
+            <span>POS Register</span>
           </button>
 
           <button 
@@ -981,183 +1045,579 @@ export const ProductManagement: React.FC = () => {
               setUploadSelectorMode('select');
               setShowUploadSelector(true);
             }}
-            className="px-4 py-2 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+            className="px-4 py-2.5 bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] hover:opacity-95 text-white rounded-2xl text-xs font-black cursor-pointer transition flex items-center gap-2 shadow-md hover:shadow-pink-200"
           >
-            <Plus size={13} />
+            <Plus size={15} />
             <span>Add New Product</span>
           </button>
         </div>
       </div>
 
       {alertMsg && (
-        <div className={`p-3 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-          alertMsg.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-red-50 border-red-100 text-red-800'
+        <div className={`p-3.5 rounded-2xl border flex items-center gap-2.5 text-xs font-bold ${
+          alertMsg.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
         }`}>
-          {alertMsg.type === 'success' ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+          {alertMsg.type === 'success' ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
           <span>{alertMsg.text}</span>
         </div>
       )}
 
-      {/* Filters bar */}
-      <div className="flex flex-col md:flex-row gap-3 justify-between items-center bg-pink-50/10 p-4 rounded-2xl border border-pink-100/30">
-        <div className="relative w-full md:w-72">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-pink-300" />
+      {/* Inventory KPI Summary Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Total Products */}
+        <div 
+          onClick={() => setStockStatusFilter('all')}
+          className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
+            stockStatusFilter === 'all' 
+              ? 'bg-pink-50/70 border-[#E91E8C] shadow-xs' 
+              : 'bg-slate-50/60 border-slate-200 hover:bg-pink-50/30'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
+            <span>Total Catalog</span>
+            <Package size={14} className="text-[#E91E8C]" />
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black font-mono text-slate-900">{inventoryMetrics.totalProducts}</span>
+            <span className="text-[11px] font-bold text-slate-500">Items ({inventoryMetrics.totalStockUnits} units)</span>
+          </div>
+        </div>
+
+        {/* Low Stock Alerts */}
+        <div 
+          onClick={() => setStockStatusFilter(stockStatusFilter === 'low_stock' ? 'all' : 'low_stock')}
+          className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
+            stockStatusFilter === 'low_stock' 
+              ? 'bg-amber-50 border-amber-400 shadow-xs' 
+              : 'bg-white border-slate-200 hover:bg-amber-50/40'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-amber-700">
+            <span>Low Stock Alert</span>
+            <AlertTriangle size={14} className="text-amber-500" />
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black font-mono text-amber-700">{inventoryMetrics.lowStockCount}</span>
+            <span className="text-[11px] font-bold text-amber-600">&le; 5 units threshold</span>
+          </div>
+        </div>
+
+        {/* Out of Stock */}
+        <div 
+          onClick={() => setStockStatusFilter(stockStatusFilter === 'out_of_stock' ? 'all' : 'out_of_stock')}
+          className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
+            stockStatusFilter === 'out_of_stock' 
+              ? 'bg-rose-50 border-rose-400 shadow-xs' 
+              : 'bg-white border-slate-200 hover:bg-rose-50/40'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-rose-700">
+            <span>Out of Stock</span>
+            <AlertCircle size={14} className="text-rose-500" />
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black font-mono text-rose-700">{inventoryMetrics.outOfStockCount}</span>
+            <span className="text-[11px] font-bold text-rose-600">Requires restocking</span>
+          </div>
+        </div>
+
+        {/* Total Valuation */}
+        <div className="p-3.5 sm:p-4 rounded-2xl border border-pink-100 bg-gradient-to-br from-pink-50/40 via-white to-rose-50/20">
+          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
+            <span>Retail Valuation</span>
+            <DollarSign size={14} className="text-emerald-600" />
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black font-mono text-slate-900">৳{inventoryMetrics.totalValuationBDT.toLocaleString()}</span>
+            <span className="text-[11px] font-bold text-emerald-600">BDT value</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters & View Switcher Bar */}
+      <div className="flex flex-col lg:flex-row gap-3 justify-between items-stretch lg:items-center bg-pink-50/20 p-3.5 sm:p-4 rounded-2xl border border-pink-100/60">
+        
+        {/* Search Field */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3.5 top-3 h-4 w-4 text-pink-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search brand, name or barcode..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs border border-pink-100 bg-white rounded-lg outline-none focus:ring-2 focus:ring-[#E91E8C]/15"
+            placeholder="Search by brand, product title, barcode or SKU..."
+            className="w-full pl-10 pr-4 py-2 text-xs border border-pink-200 bg-white rounded-xl outline-none focus:ring-2 focus:ring-[#E91E8C]/20 focus:border-[#E91E8C] transition text-slate-900 placeholder:text-slate-400 font-medium"
           />
+          {searchQuery && (
+            <button 
+              type="button" 
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+        {/* Filter controls & View toggle */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          
           {/* Brand Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-gray-500 uppercase flex items-center gap-1">
-              <Tag size={12} className="text-[#E91E8C]" />
-              <span>Brand:</span>
-            </span>
+          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100">
+            <Tag size={13} className="text-[#E91E8C] shrink-0" />
             <select
               value={brandFilter}
               onChange={(e) => setBrandFilter(e.target.value)}
-              className="bg-white border border-pink-100 text-xs text-gray-800 font-semibold rounded-lg px-2.5 py-1.5 outline-none focus:border-[#E91E8C] max-w-[150px]"
+              className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[130px] truncate"
             >
               <option value="All">All Brands ({availableBrandsForFilter.length})</option>
-              {availableBrandsForFilter.map(b => (
+              {availableBrandsForFilter.map((b) => (
                 <option key={b} value={b}>{b}</option>
               ))}
             </select>
           </div>
 
           {/* Category Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-gray-500 uppercase">Category:</span>
+          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100">
+            <Layers size={13} className="text-[#E91E8C] shrink-0" />
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="bg-white border border-pink-100 text-xs text-gray-800 font-semibold rounded-lg px-2.5 py-1.5 outline-none focus:border-[#E91E8C]"
+              className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[140px] truncate"
             >
-              {CATEGORIES.map(c => (
+              {CATEGORIES.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
 
-          {(brandFilter !== 'All' || categoryFilter !== 'All' || searchQuery) && (
+          {/* Stock Filter */}
+          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100">
+            <select
+              value={stockStatusFilter}
+              onChange={(e) => setStockStatusFilter(e.target.value as any)}
+              className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer"
+            >
+              <option value="all">All Stocks</option>
+              <option value="in_stock">In Stock ({inventoryMetrics.totalProducts - inventoryMetrics.lowStockCount - inventoryMetrics.outOfStockCount})</option>
+              <option value="low_stock">Low Stock ({inventoryMetrics.lowStockCount})</option>
+              <option value="out_of_stock">Out of Stock ({inventoryMetrics.outOfStockCount})</option>
+            </select>
+          </div>
+
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-white p-1 rounded-xl border border-pink-100 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                viewMode === 'grid' 
+                  ? 'bg-[#E91E8C] text-white shadow-xs' 
+                  : 'text-slate-400 hover:text-slate-700'
+              }`}
+              title="Grid Card View"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-lg transition cursor-pointer ${
+                viewMode === 'table' 
+                  ? 'bg-[#E91E8C] text-white shadow-xs' 
+                  : 'text-slate-400 hover:text-slate-700'
+              }`}
+              title="Dense Table View"
+            >
+              <List size={15} />
+            </button>
+          </div>
+
+          {/* Reset Filters */}
+          {(brandFilter !== 'All' || categoryFilter !== 'All' || stockStatusFilter !== 'all' || searchQuery) && (
             <button
               type="button"
               onClick={() => {
                 setBrandFilter('All');
                 setCategoryFilter('All');
+                setStockStatusFilter('all');
                 setSearchQuery('');
               }}
-              className="text-[10px] font-bold text-[#E91E8C] hover:underline cursor-pointer bg-pink-50 px-2 py-1 rounded-md"
+              className="text-[11px] font-black text-[#E91E8C] hover:underline cursor-pointer bg-pink-100/60 hover:bg-pink-100 px-3 py-1.5 rounded-xl transition"
             >
-              Clear Filters
+              Reset Filters
             </button>
           )}
+
         </div>
       </div>
 
-      {/* Products Card System Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
-        {filteredProducts.length === 0 ? (
-          <div className="col-span-full text-center py-12 bg-white rounded-2xl border border-pink-100/50 text-gray-400 font-medium">
-            No items match the selected filters.
-          </div>
-        ) : (
-          filteredProducts.map(p => (
-            <div 
-              key={p.id} 
-              onClick={() => setSelectedProductForPopup(p)}
-              className="bg-white p-4 rounded-2xl border border-pink-100 shadow-xs space-y-3 cursor-pointer hover:border-[#E91E8C] hover:shadow-md transition-all flex flex-col justify-between"
-            >
-              <div className="space-y-2.5">
-                {/* Top row: Image & Quick Info */}
-                <div className="flex gap-3">
-                  <img src={p.image} className="w-16 h-16 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
-                  <div className="space-y-0.5 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[9px] uppercase font-bold text-[#E91E8C] block leading-none">{p.brand}</span>
-                      {p.ml && (
-                        <span className="text-[8px] px-1 bg-pink-50 text-pink-700 rounded font-mono font-bold leading-none">{p.ml}</span>
+      {/* Results Header Count */}
+      <div className="flex items-center justify-between px-1">
+        <span className="text-xs font-extrabold text-slate-600">
+          Showing <span className="text-[#E91E8C] font-mono font-black">{filteredProducts.length}</span> of {products.length} formulations
+        </span>
+      </div>
+
+      {/* PRODUCT CARDS: GRID VIEW */}
+      {viewMode === 'grid' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3.5 sm:gap-4 md:gap-5">
+          {filteredProducts.length === 0 ? (
+            <div className="col-span-full text-center py-16 bg-white rounded-3xl border border-pink-100 text-slate-400 font-bold space-y-2">
+              <Package size={32} className="mx-auto text-pink-300" />
+              <p className="text-sm">No formulations match the active search or filters.</p>
+              <button 
+                type="button"
+                onClick={() => {
+                  setBrandFilter('All');
+                  setCategoryFilter('All');
+                  setStockStatusFilter('all');
+                  setSearchQuery('');
+                }}
+                className="text-xs text-[#E91E8C] underline font-bold"
+              >
+                Clear all filters
+              </button>
+            </div>
+          ) : (
+            filteredProducts.map((p) => {
+              const effectivePrice = p.discountPrice || p.price;
+              const hasDiscount = !!p.discountPrice && p.discountPrice < p.price;
+              const discountPercent = hasDiscount ? Math.round(((p.price - p.discountPrice!) / p.price) * 100) : 0;
+              const isLowStock = p.stock > 0 && p.stock <= (p.lowStockThreshold ?? 5);
+              const isOutOfStock = p.stock === 0;
+
+              return (
+                <div 
+                  key={p.id}
+                  onClick={() => setSelectedProductForPopup(p)}
+                  className="bg-white rounded-2xl sm:rounded-3xl border border-pink-100 hover:border-pink-300 hover:shadow-xl transition-all duration-300 flex flex-col justify-between group p-3.5 sm:p-4 space-y-3 relative cursor-pointer"
+                >
+                  {/* Top Stack: Badges & Thumbnail */}
+                  <div className="space-y-3">
+                    
+                    {/* Thumbnail Container */}
+                    <div className="relative aspect-square rounded-2xl overflow-hidden bg-gradient-to-br from-pink-50/50 via-white to-pink-50/20 border border-pink-100/60 p-2">
+                      
+                      {/* Floating Stock & Promo Badges */}
+                      <div className="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1 items-start pointer-events-none">
+                        {hasDiscount && (
+                          <span className="bg-[#E91E8C] text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-lg shadow-sm tracking-wider">
+                            -{discountPercent}% OFF
+                          </span>
+                        )}
+                        {isOutOfStock ? (
+                          <span className="bg-slate-900 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-lg shadow-sm">
+                            Out of Stock
+                          </span>
+                        ) : isLowStock ? (
+                          <span className="bg-amber-500 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-lg shadow-sm animate-pulse">
+                            Only {p.stock} Left
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* Category Pill Tag */}
+                      <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none">
+                        <span className="bg-white/90 backdrop-blur text-slate-700 text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-lg border border-pink-100/80 shadow-xs">
+                          {p.category}
+                        </span>
+                      </div>
+
+                      <img 
+                        src={p.image} 
+                        alt={p.name} 
+                        className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-300"
+                        referrerPolicy="no-referrer"
+                      />
+
+                      {/* Quick Inspect Hover Overlay */}
+                      <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center p-3 rounded-2xl">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedProductForPopup(p);
+                          }}
+                          className="px-3 py-1.5 bg-white/95 backdrop-blur-md text-slate-900 text-[11px] font-black rounded-xl shadow-md hover:bg-[#E91E8C] hover:text-white transition flex items-center gap-1.5"
+                        >
+                          <Eye size={13} />
+                          <span>View Specs</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Branding & Bilingual Title */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[#E91E8C] block truncate">
+                          {p.brand || 'K-Beauty'}
+                        </span>
+                        {p.ml && (
+                          <span className="text-[9px] font-bold font-mono text-slate-600 bg-pink-50 px-1.5 py-0.5 rounded border border-pink-100">
+                            {p.ml}
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-xs sm:text-sm font-black text-slate-900 leading-snug line-clamp-2 group-hover:text-[#E91E8C] transition-colors">
+                        {p.name}
+                      </h3>
+
+                      {p.nameBN && (
+                        <p className="text-[11px] text-pink-700 font-semibold truncate leading-tight">
+                          {p.nameBN}
+                        </p>
                       )}
                     </div>
-                    <span className="font-extrabold text-gray-900 block text-sm leading-snug line-clamp-2 hover:text-[#E91E8C] transition-colors">{p.name}</span>
-                    <span className="text-[9px] text-gray-400 block font-mono">Barcode: {p.barcode || 'N/A'}</span>
+
+                    {/* Barcode & SKU Chip Row */}
+                    <div className="flex items-center justify-between gap-1 pt-0.5">
+                      {p.barcode ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleCopyBarcode(e, p.barcode!)}
+                          className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 hover:bg-pink-50 hover:text-[#E91E8C] px-2 py-0.5 rounded-lg border border-slate-200 transition flex items-center gap-1 cursor-pointer truncate max-w-full"
+                          title="Click to copy barcode"
+                        >
+                          <Barcode size={11} />
+                          <span>{p.barcode}</span>
+                          {copiedBarcode === p.barcode ? (
+                            <Check size={10} className="text-emerald-600 shrink-0" />
+                          ) : (
+                            <Copy size={9} className="opacity-40 shrink-0" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-[9px] text-amber-600 font-bold flex items-center gap-0.5">
+                          <AlertTriangle size={10} />
+                          <span>No Barcode</span>
+                        </span>
+                      )}
+
+                      {p.sku && (
+                        <span className="text-[9px] font-mono text-slate-400 truncate max-w-[90px]">
+                          SKU: {p.sku}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Pricing & Stock Card Widget */}
+                    <div className="p-2.5 bg-slate-50/80 rounded-2xl border border-slate-100 space-y-1.5">
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-[9px] font-black uppercase text-slate-400">Retail Price</span>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-sm sm:text-base font-black font-mono text-slate-900">
+                            ৳{effectivePrice.toLocaleString()}
+                          </span>
+                          {hasDiscount && (
+                            <span className="text-[11px] font-mono text-slate-400 line-through">
+                              ৳{p.price.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-200/60">
+                        <span className="text-slate-500 font-bold">Stock Available</span>
+                        <span className={`px-2 py-0.5 rounded-md font-mono font-extrabold text-[10px] ${
+                          isOutOfStock 
+                            ? 'bg-rose-100 text-rose-800' 
+                            : isLowStock 
+                            ? 'bg-amber-100 text-amber-800' 
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {p.stock} units
+                        </span>
+                      </div>
+                    </div>
+
                   </div>
+
+                  {/* Actions Row */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-pink-50" onClick={(e) => e.stopPropagation()}>
+                    
+                    {/* Edit Button */}
+                    <button 
+                      type="button"
+                      onClick={() => handleStartEditProduct(p)}
+                      className="flex-1 bg-pink-50 hover:bg-[#E91E8C] text-slate-800 hover:text-white border border-pink-200 py-1.5 px-3 rounded-xl text-xs font-extrabold cursor-pointer transition flex items-center justify-center gap-1.5 shadow-xs"
+                      title="Edit product formulation & inventory specs"
+                    >
+                      <Edit size={13} />
+                      <span>Edit</span>
+                    </button>
+
+                    {/* Delete Button */}
+                    <button 
+                      type="button"
+                      onClick={() => handleDeleteProduct(p)}
+                      className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl cursor-pointer transition shadow-xs"
+                      title="Delete formulation from catalog"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+
                 </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
-                {/* Stock level, Prices, Category */}
-                <div className="grid grid-cols-2 gap-2 text-[11px] p-2.5 bg-pink-50/15 rounded-xl border border-pink-50/50">
-                  <div>
-                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Category</span>
-                    <span className="font-bold text-gray-700 truncate block">{p.category}</span>
-                  </div>
-                  <div>
-                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Stock Level</span>
-                    <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${p.stock <= 5 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                      {p.stock} units
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Base Price</span>
-                    <span className="font-extrabold text-gray-950 font-mono">৳{p.price}</span>
-                  </div>
-                  <div>
-                    <span className="text-[8px] text-gray-400 block uppercase font-bold">Promo Price</span>
-                    <span className="font-bold text-[#E91E8C] font-mono">
-                      {p.discountPrice ? `৳${p.discountPrice}` : 'None'}
-                    </span>
-                  </div>
-                </div>
-              </div>
+      {/* PRODUCT CARDS: DENSE TABLE VIEW */}
+      {viewMode === 'table' && (
+        <div className="overflow-x-auto rounded-2xl border border-pink-100 shadow-xs bg-white">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-pink-100 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                <th className="py-3.5 px-4">Formulation</th>
+                <th className="py-3.5 px-4">Barcode & SKU</th>
+                <th className="py-3.5 px-4">Category</th>
+                <th className="py-3.5 px-4">Stock Level</th>
+                <th className="py-3.5 px-4">Retail Price (BDT)</th>
+                <th className="py-3.5 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-pink-50/60">
+              {filteredProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-12 text-slate-400 font-bold">
+                    No formulations match the active filters.
+                  </td>
+                </tr>
+              ) : (
+                filteredProducts.map((p) => {
+                  const effectivePrice = p.discountPrice || p.price;
+                  const hasDiscount = !!p.discountPrice && p.discountPrice < p.price;
+                  const isLowStock = p.stock > 0 && p.stock <= (p.lowStockThreshold ?? 5);
+                  const isOutOfStock = p.stock === 0;
 
-              {/* Actions Row */}
-              <div className="flex gap-1.5 justify-end pt-2 border-t border-pink-50/50" onClick={(e) => e.stopPropagation()}>
-                <button 
-                  onClick={() => handleGenerateOnDemandContent(p.id)}
-                  disabled={isAiGeneratingContent === p.id}
-                  className="mr-auto bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 px-2 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition flex items-center gap-1 disabled:opacity-40"
-                  title="Auto-generate AI SEO content"
-                >
-                  <Wand2 size={10} className={isAiGeneratingContent === p.id ? "animate-spin" : ""} />
-                  <span>{isAiGeneratingContent === p.id ? "..." : "SEO Write"}</span>
-                </button>
+                  return (
+                    <tr 
+                      key={p.id} 
+                      onClick={() => setSelectedProductForPopup(p)}
+                      className="hover:bg-pink-50/30 transition-colors cursor-pointer"
+                    >
+                      {/* Product Formulation */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <img 
+                            src={p.image} 
+                            alt="" 
+                            className="w-12 h-12 object-cover rounded-xl border border-pink-100 shrink-0 bg-pink-50/20"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="min-w-0 max-w-xs sm:max-w-sm">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] font-black text-[#E91E8C] uppercase">{p.brand}</span>
+                              {p.ml && (
+                                <span className="text-[8px] font-bold font-mono text-slate-500 bg-pink-50 px-1 rounded">
+                                  {p.ml}
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-extrabold text-slate-900 block truncate text-xs hover:text-[#E91E8C]">
+                              {p.name}
+                            </span>
+                            {p.nameBN && (
+                              <span className="text-[10px] text-pink-700 font-medium block truncate">
+                                {p.nameBN}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
 
-                <button 
-                  onClick={() => setSelectedProductForPopup(p)}
-                  className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-100 rounded-lg cursor-pointer transition text-[10px] font-bold flex items-center gap-1"
-                  title="View Specs & Details"
-                >
-                  <Eye size={12} />
-                  <span>Info</span>
-                </button>
+                      {/* Barcode & SKU */}
+                      <td className="py-3 px-4">
+                        {p.barcode ? (
+                          <div 
+                            onClick={(e) => handleCopyBarcode(e, p.barcode!)}
+                            className="font-mono text-slate-700 font-bold flex items-center gap-1 hover:text-[#E91E8C] cursor-pointer"
+                            title="Copy Barcode"
+                          >
+                            <Barcode size={12} />
+                            <span>{p.barcode}</span>
+                            {copiedBarcode === p.barcode && <Check size={11} className="text-emerald-600" />}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-amber-600 font-semibold">N/A</span>
+                        )}
+                        {p.sku && <span className="text-[10px] text-slate-400 font-mono block">SKU: {p.sku}</span>}
+                      </td>
 
-                <button 
-                  onClick={() => handleStartEditProduct(p)}
-                  className="p-1.5 bg-pink-50 hover:bg-pink-100 text-pink-750 border border-pink-100 rounded-lg cursor-pointer transition text-[10px]"
-                  title="Edit Product"
-                >
-                  <Edit size={12} />
-                </button>
+                      {/* Category */}
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-extrabold">
+                          {p.category}
+                        </span>
+                      </td>
 
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteProduct(p);
-                  }}
-                  className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded-lg cursor-pointer transition text-[10px]"
-                  title="Delete product"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+                      {/* Stock Level */}
+                      <td className="py-3 px-4">
+                        <span className={`px-2.5 py-1 rounded-lg font-mono font-black text-[11px] inline-block ${
+                          isOutOfStock 
+                            ? 'bg-rose-100 text-rose-800' 
+                            : isLowStock 
+                            ? 'bg-amber-100 text-amber-800' 
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {p.stock} units
+                        </span>
+                      </td>
+
+                      {/* Retail Price */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-baseline gap-1.5 font-mono">
+                          <span className="font-black text-slate-900 text-sm">
+                            ৳{effectivePrice.toLocaleString()}
+                          </span>
+                          {hasDiscount && (
+                            <span className="text-[10px] text-slate-400 line-through">
+                              ৳{p.price.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button 
+                            type="button"
+                            onClick={() => setSelectedProductForPopup(p)}
+                            className="p-1.5 bg-slate-50 hover:bg-pink-50 text-slate-700 hover:text-[#E91E8C] rounded-xl text-xs transition"
+                            title="Inspect formulation specs"
+                          >
+                            <Eye size={13} />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleStartEditProduct(p)}
+                            className="p-1.5 bg-slate-50 hover:bg-pink-50 text-slate-700 hover:text-[#E91E8C] rounded-xl text-xs transition"
+                            title="Edit"
+                          >
+                            <Edit size={13} />
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleDeleteProduct(p)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs transition"
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Product Details Specifications Popup Modal */}
       <AnimatePresence>
