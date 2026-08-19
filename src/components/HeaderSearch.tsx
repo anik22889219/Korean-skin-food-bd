@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Search, X, Camera, ShoppingBag, Eye, Sparkles, ChevronRight, Tag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
+import { analytics } from '../services/analyticsService';
 
 interface HeaderSearchProps {
   products: Product[];
@@ -51,6 +52,9 @@ export const HeaderSearch: React.FC<HeaderSearchProps> = ({
   }, [products, searchTerm]);
 
   const handleSelectProduct = (product: Product) => {
+    if (searchTerm.trim()) {
+      analytics.trackSearch(searchTerm.trim());
+    }
     setIsOpen(false);
     setSearchTerm('');
     navigate(`/product/${product.id}`);

@@ -3788,6 +3788,123 @@ app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
   });
 });
 
+// ==========================================
+// META CONVERSIONS API (CAPI) PROXY ENDPOINT
+// ==========================================
+app.post("/api/tracking/meta-capi", async (req, res) => {
+  const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = req.body;
+
+  const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID;
+  const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  const testEventCode = process.env.META_TEST_EVENT_CODE;
+
+  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || req.ip;
+  const clientUserAgent = customerData?.clientUserAgent || req.headers["user-agent"] || "";
+
+  console.log(`[Meta CAPI] Processing ${eventName} (Event ID: ${eventId}, Order ID: ${orderId})`);
+
+  if (!pixelId || !capiAccessToken) {
+    console.log(`[Meta CAPI] Access token or Pixel ID not configured in server environment. Simulated CAPI event logged.`, {
+      eventId,
+      orderId,
+      value,
+      hasPixelId: !!pixelId,
+      hasToken: !!capiAccessToken
+    });
+    return res.json({
+      success: true,
+      simulated: true,
+      message: "Meta CAPI simulated successfully (credentials not configured)",
+      eventId
+    });
+  }
+
+  try {
+    const eventTime = Math.floor(Date.now() / 1000);
+    const eventSourceUrl = (req.headers.referer as string) || "https://koreanskinfoodbd.com";
+
+    const userDataPayload: Record<string, any> = {
+      client_ip_address: clientIp,
+      client_user_agent: clientUserAgent
+    };
+
+    if (customerData?.em) {
+      userDataPayload.em = [customerData.em];
+    }
+    if (customerData?.ph) {
+      userDataPayload.ph = [customerData.ph];
+    }
+    if (customerData?.fbp) {
+      userDataPayload.fbp = customerData.fbp;
+    }
+    if (customerData?.fbc) {
+      userDataPayload.fbc = customerData.fbc;
+    }
+
+    const contents = (items || []).map((it: any) => ({
+      id: it.productId || it.id,
+      quantity: Number(it.quantity || 1),
+      item_price: Number(it.price || 0)
+    }));
+
+    const eventPayload: Record<string, any> = {
+      event_name: eventName,
+      event_time: eventTime,
+      event_id: eventId,
+      event_source_url: eventSourceUrl,
+      action_source: "website",
+      user_data: userDataPayload,
+      custom_data: {
+        currency: currency || "BDT",
+        value: Number(value || 0),
+        order_id: orderId,
+        contents
+      }
+    };
+
+    const capiBody: Record<string, any> = {
+      data: [eventPayload]
+    };
+
+    if (testEventCode) {
+      capiBody.test_event_code = testEventCode;
+    }
+
+    const fbGraphUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(pixelId)}/events?access_token=${encodeURIComponent(capiAccessToken)}`;
+    const fbResponse = await fetch(fbGraphUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(capiBody)
+    });
+
+    const fbResult: any = await fbResponse.json();
+
+    if (fbResponse.ok && !fbResult.error) {
+      console.log(`[Meta CAPI] Successfully dispatched ${eventName} event to Meta Graph API`, fbResult);
+      return res.json({
+        success: true,
+        eventId,
+        events_received: fbResult.events_received,
+        fbtrace_id: fbResult.fbtrace_id
+      });
+    } else {
+      console.warn(`[Meta CAPI] Graph API returned error for event ${eventId}:`, fbResult.error);
+      return res.status(200).json({
+        success: false,
+        eventId,
+        error: fbResult.error?.message || "Meta Graph API error"
+      });
+    }
+  } catch (err: any) {
+    console.error(`[Meta CAPI] Network or processing error for event ${eventId}:`, err);
+    return res.status(200).json({
+      success: false,
+      eventId,
+      error: err.message || "Failed to dispatch CAPI event"
+    });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

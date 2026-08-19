@@ -718,3 +718,100 @@ export const triggerMetaAdsSync = onCall({
   };
 });
 
+/**
+ * 7. trackMetaCapiEvent — onCall function for server-side Meta Conversions API
+ * dispatching from Firebase Functions.
+ */
+export const trackMetaCapiEvent = onCall({
+  secrets: ["META_CAPI_ACCESS_TOKEN", "META_ACCESS_TOKEN"]
+}, async (request) => {
+  const data = request.data || {};
+  const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = data;
+
+  const pixelId = process.env.META_PIXEL_ID || "123456789012345";
+  const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  const testEventCode = process.env.META_TEST_EVENT_CODE;
+
+  if (!capiAccessToken) {
+    return {
+      success: true,
+      simulated: true,
+      message: "Meta CAPI simulated successfully (token not configured in Functions)",
+      eventId
+    };
+  }
+
+  try {
+    const eventTime = Math.floor(Date.now() / 1000);
+    const userDataPayload: Record<string, any> = {
+      client_ip_address: request.rawRequest.ip || "",
+      client_user_agent: customerData?.clientUserAgent || request.rawRequest.headers["user-agent"] || ""
+    };
+
+    if (customerData?.em) userDataPayload.em = [customerData.em];
+    if (customerData?.ph) userDataPayload.ph = [customerData.ph];
+    if (customerData?.fbp) userDataPayload.fbp = customerData.fbp;
+    if (customerData?.fbc) userDataPayload.fbc = customerData.fbc;
+
+    const contents = (items || []).map((it: any) => ({
+      id: it.productId || it.id,
+      quantity: Number(it.quantity || 1),
+      item_price: Number(it.price || 0)
+    }));
+
+    const eventPayload: Record<string, any> = {
+      event_name: eventName,
+      event_time: eventTime,
+      event_id: eventId,
+      event_source_url: attribution?.landing_page || "https://koreanskinfoodbd.com",
+      action_source: "website",
+      user_data: userDataPayload,
+      custom_data: {
+        currency,
+        value: Number(value || 0),
+        order_id: orderId,
+        contents
+      }
+    };
+
+    const capiBody: Record<string, any> = {
+      data: [eventPayload]
+    };
+
+    if (testEventCode) {
+      capiBody.test_event_code = testEventCode;
+    }
+
+    const fbGraphUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(pixelId)}/events?access_token=${encodeURIComponent(capiAccessToken)}`;
+    const fbResponse = await fetch(fbGraphUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(capiBody)
+    });
+
+    const fbResult: any = await fbResponse.json();
+
+    if (fbResponse.ok && !fbResult.error) {
+      return {
+        success: true,
+        eventId,
+        events_received: fbResult.events_received,
+        fbtrace_id: fbResult.fbtrace_id
+      };
+    } else {
+      return {
+        success: false,
+        eventId,
+        error: fbResult.error?.message || "Meta Graph API error"
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      eventId,
+      error: err.message || "Failed to dispatch CAPI event"
+    };
+  }
+});
+
+

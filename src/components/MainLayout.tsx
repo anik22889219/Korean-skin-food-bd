@@ -20,6 +20,7 @@ import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { GlobalThemeSettings } from '../types/theme';
+import { analytics } from '../services/analyticsService';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -41,6 +42,18 @@ export const MainLayout: React.FC = () => {
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+
+  // Track SPA Page Views on Route Change
+  useEffect(() => {
+    analytics.trackPageView(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+
+  // Track View Cart when cart drawer opens with items
+  useEffect(() => {
+    if (isCartOpen && checkoutStep === 'cart' && cart.length > 0) {
+      analytics.trackViewCart(cart, calculateCartSubtotal());
+    }
+  }, [isCartOpen]);
 
   useEffect(() => {
     const unsubscribeTheme = themeService.subscribeGlobal((gt) => {
@@ -688,9 +701,12 @@ export const MainLayout: React.FC = () => {
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
-                            onClick={() => setCheckoutForm({ ...checkoutForm, city: 'Inside Dhaka' })}
+                            onClick={() => {
+                              setCheckoutForm({ ...checkoutForm, area: 'dhaka' });
+                              analytics.trackAddShippingInfo('dhaka', 80, cart, calculateGrandTotal());
+                            }}
                             className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                              checkoutForm.city === 'Inside Dhaka'
+                              checkoutForm.area === 'dhaka'
                                 ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
                                 : 'bg-white text-gray-700 border-pink-100 hover:bg-pink-50'
                             }`}
@@ -699,9 +715,12 @@ export const MainLayout: React.FC = () => {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setCheckoutForm({ ...checkoutForm, city: 'Outside Dhaka' })}
+                            onClick={() => {
+                              setCheckoutForm({ ...checkoutForm, area: 'outside' });
+                              analytics.trackAddShippingInfo('outside', 150, cart, calculateGrandTotal());
+                            }}
                             className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                              checkoutForm.city === 'Outside Dhaka'
+                              checkoutForm.area === 'outside'
                                 ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
                                 : 'bg-white text-gray-700 border-pink-100 hover:bg-pink-50'
                             }`}
@@ -807,7 +826,10 @@ export const MainLayout: React.FC = () => {
                     <span className="font-black text-gray-800 font-mono">৳{calculateCartSubtotal()} BDT</span>
                   </div>
                   <button 
-                    onClick={() => setCheckoutStep('details')}
+                    onClick={() => {
+                      analytics.trackBeginCheckout(cart, calculateCartSubtotal());
+                      setCheckoutStep('details');
+                    }}
                     className="w-full py-3 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-sm flex items-center justify-center gap-1.5"
                   >
                     <span>Proceed to Checkout</span>

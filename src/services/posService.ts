@@ -429,7 +429,12 @@ export const posService = {
       order_source: 'WEBSITE',
       stock_deducted: false,
       sessionType: 'Online',
-      isPaid: false
+      isPaid: false,
+      analytics: {
+        purchaseEventId: `purchase_${orderId}`,
+        purchaseTracked: true,
+        purchaseTrackedAt: new Date().toISOString()
+      }
     };
 
     // Note: Stock is NOT deducted on online order creation.

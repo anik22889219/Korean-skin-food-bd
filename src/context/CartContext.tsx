@@ -4,6 +4,8 @@ import { posService } from '../services/posService';
 import { useAuth } from './AuthContext';
 import { db } from '../services/firebase';
 import { doc, setDoc } from 'firebase/firestore';
+import { analytics } from '../services/analyticsService';
+import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
 
 interface CartItem {
   product: Product;
@@ -187,8 +189,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     area: 'dhaka' as 'dhaka' | 'outside'
   });
 
-  // Load cart from localStorage on mount
+  // Load cart from localStorage on mount and initialize attribution/analytics
   useEffect(() => {
+    captureAndPersistAttribution();
+    analytics.init();
+
     const cached = localStorage.getItem('ksf_online_cart_v1');
     if (cached) {
       try {
@@ -260,9 +265,15 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     setIsCartOpen(true);
     setCheckoutStep('cart');
+    // Track Add To Cart
+    analytics.trackAddToCart(product, 1);
   };
 
   const removeFromCart = (productId: string) => {
+    const targetItem = cart.find((item) => item.product.id === productId);
+    if (targetItem) {
+      analytics.trackRemoveFromCart(targetItem.product, targetItem.quantity);
+    }
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
   };
 
@@ -272,6 +283,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .map((item) => {
           if (item.product.id === productId) {
             const nextQty = item.quantity + delta;
+            if (delta > 0) {
+              analytics.trackAddToCart(item.product, delta);
+            } else if (delta < 0) {
+              analytics.trackRemoveFromCart(item.product, Math.abs(delta));
+            }
             return { ...item, quantity: Math.max(1, nextQty) };
           }
           return item;
@@ -307,6 +323,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const grandTotal = calculateGrandTotal();
       const earnedPts = calculatePointsEarned();
       const redeemedPts = pointsDiscount; // 1 point = ৳1
+      const attribution = getStoredAttribution();
       
       const orderData = {
         customerName: checkoutForm.name,
@@ -319,10 +336,26 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         pointsEarned: earnedPts,
         pointsRedeemed: redeemedPts,
         paymentMethod: 'COD' as const,
-        customer_uid: user?.uid || null
+        customer_uid: user?.uid || null,
+        attribution: {
+          utm_source: attribution.last_touch?.utm_source || attribution.first_touch?.utm_source,
+          utm_medium: attribution.last_touch?.utm_medium || attribution.first_touch?.utm_medium,
+          utm_campaign: attribution.last_touch?.utm_campaign || attribution.first_touch?.utm_campaign,
+          utm_content: attribution.last_touch?.utm_content || attribution.first_touch?.utm_content,
+          utm_term: attribution.last_touch?.utm_term || attribution.first_touch?.utm_term,
+          gclid: attribution.gclid,
+          fbclid: attribution.fbclid,
+          fbp: attribution.fbp,
+          fbc: attribution.fbc,
+          creator_id: attribution.creator?.creator_id,
+          ref: attribution.creator?.ref
+        }
       };
 
       const createdOrder = posService.createOnlineOrder(orderData as any);
+
+      // Track Authoritative Purchase immediately on order placement
+      analytics.trackPurchase(createdOrder).catch(console.warn);
 
       // Update user's loyalty points balance in Firestore
       if (user?.uid) {

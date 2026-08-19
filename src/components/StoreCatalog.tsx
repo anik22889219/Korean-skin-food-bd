@@ -19,6 +19,7 @@ import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
 import { TopCreatorsSection } from './TopCreatorsSection';
 import { ProductCard } from './ProductCard';
+import { analytics } from '../services/analyticsService';
 
 const CATEGORIES = [
   'All', 
@@ -132,6 +133,8 @@ export const StoreCatalog: React.FC = () => {
   const [sjAutoPlay, setSjAutoPlay] = useState(true);
   const [sjIsHovered, setSjIsHovered] = useState(false);
 
+  const hasTrackedItemListRef = useRef(false);
+
   useEffect(() => {
     // Subscribe to real-time theme updates
     const unsubscribeTheme = themeService.subscribe((data) => {
@@ -141,10 +144,18 @@ export const StoreCatalog: React.FC = () => {
     if (initialProds && initialProds.length > 0) {
       setProducts(initialProds);
       setIsLoading(false);
+      if (!hasTrackedItemListRef.current) {
+        hasTrackedItemListRef.current = true;
+        analytics.trackViewItemList(initialProds, 'Store Catalog Home');
+      }
     }
     const unsubscribeProducts = productService.subscribe((prods) => {
       setProducts([...prods]);
       setIsLoading(false);
+      if (!hasTrackedItemListRef.current && prods.length > 0) {
+        hasTrackedItemListRef.current = true;
+        analytics.trackViewItemList(prods, 'Store Catalog Home');
+      }
     });
     return () => {
       unsubscribeTheme();

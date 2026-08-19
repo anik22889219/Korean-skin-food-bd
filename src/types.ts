@@ -72,6 +72,24 @@ export interface Order {
   sessionType: 'Online' | 'POS';
   isPaid: boolean;
   courier?: CourierData;
+  attribution?: {
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    utm_term?: string;
+    gclid?: string;
+    fbclid?: string;
+    fbp?: string;
+    fbc?: string;
+    creator_id?: string;
+    ref?: string;
+  };
+  analytics?: {
+    purchaseEventId?: string;
+    purchaseTracked?: boolean;
+    purchaseTrackedAt?: string;
+  };
 }
 
 export interface StockMovement {

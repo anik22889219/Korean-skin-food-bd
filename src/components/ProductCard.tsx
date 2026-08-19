@@ -4,6 +4,7 @@ import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { ShoppingBag, Heart, Star, Eye, Sparkles, Check, Droplets } from 'lucide-react';
 import { motion } from 'motion/react';
+import { analytics } from '../services/analyticsService';
 
 interface ProductCardProps {
   product: Product;
@@ -73,7 +74,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   return (
     <div
       id={`product-card-${product.id}`}
-      onClick={() => navigate(`/product/${product.id}`)}
+      onClick={() => {
+        analytics.trackSelectItem(product);
+        navigate(`/product/${product.id}`);
+      }}
       className="group relative bg-white rounded-2xl sm:rounded-3xl border border-pink-100/90 hover:border-pink-300/80 p-2.5 sm:p-3.5 flex flex-col justify-between transition-all duration-300 hover:shadow-xl hover:shadow-pink-500/10 cursor-pointer overflow-hidden select-none"
     >
       {/* Top Media / Thumbnail Section */}

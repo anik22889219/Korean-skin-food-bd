@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { productService } from '../services/productService';
 import { reviewService } from '../services/reviewService';
@@ -9,6 +9,7 @@ import { useCart } from '../context/CartContext';
 import { db } from '../services/firebase';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
+import { analytics } from '../services/analyticsService';
 import { 
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
@@ -92,6 +93,9 @@ export const ProductDetail: React.FC = () => {
   // Photo Lightbox Modal
   const [activeLightboxImage, setActiveLightboxImage] = useState<string | null>(null);
 
+  // Tracked Product ID Ref Guard to prevent re-render double-firing
+  const trackedProductIdRef = useRef<string | null>(null);
+
   // Load Product Info
   useEffect(() => {
     if (!id) return;
@@ -100,6 +104,12 @@ export const ProductDetail: React.FC = () => {
       setProduct(prod);
       setSelectedMainImage(prod.image);
       
+      // Track ViewContent / view_item once per product load
+      if (trackedProductIdRef.current !== prod.id) {
+        trackedProductIdRef.current = prod.id;
+        analytics.trackViewItem(prod);
+      }
+
       // Load related products
       const allProds = productService.getProducts();
       const filtered = allProds
