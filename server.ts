@@ -3793,6 +3793,19 @@ app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
 // ==========================================
 app.post("/api/tracking/meta-capi", async (req, res) => {
   const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = req.body;
+  const orderSource = req.body.order_source || req.body.orderSource;
+
+  // Strict Allow-List: For Purchase events, ONLY website orders (order_source === 'WEBSITE') may generate CAPI conversion.
+  // POS, ADMIN, MANUAL, null, undefined, or any unknown sources are strictly rejected.
+  if (eventName === "Purchase" && orderSource !== "WEBSITE") {
+    console.log(`[Meta CAPI] Skipped: event ${eventName} (order ${orderId}) has non-website source '${orderSource}'.`);
+    return res.json({
+      success: true,
+      skipped: true,
+      reason: `Order source '${orderSource || "unknown"}' excluded from website CAPI (Allow-list enforced)`,
+      eventId
+    });
+  }
 
   const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID;
   const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;

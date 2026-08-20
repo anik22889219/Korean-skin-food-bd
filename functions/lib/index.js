@@ -634,6 +634,18 @@ exports.trackMetaCapiEvent = (0, https_1.onCall)({
 }, async (request) => {
     const data = request.data || {};
     const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = data;
+    const payloadOrderSource = data.order_source || data.orderSource;
+    // Strict Allow-List: For Purchase events, ONLY website orders (order_source === 'WEBSITE') may generate CAPI conversions.
+    // If payload explicitly has a non-website order_source, reject immediately.
+    if (eventName === "Purchase" && payloadOrderSource && payloadOrderSource !== "WEBSITE") {
+        console.log(`[Meta CAPI] Skipped: payload has non-website source '${payloadOrderSource}'.`);
+        return {
+            success: true,
+            skipped: true,
+            reason: `Order source '${payloadOrderSource}' excluded from website CAPI (Allow-list enforced)`,
+            eventId
+        };
+    }
     // 1. If orderId is provided, perform Firestore idempotency check and verify order_source
     if (orderId) {
         try {
@@ -663,10 +675,28 @@ exports.trackMetaCapiEvent = (0, https_1.onCall)({
                     };
                 }
             }
+            else if (eventName === "Purchase" && payloadOrderSource !== "WEBSITE") {
+                console.log(`[Meta CAPI] Skipped: order ${orderId} document not found and source is '${payloadOrderSource || "unknown"}'.`);
+                return {
+                    success: true,
+                    skipped: true,
+                    reason: `Order source '${payloadOrderSource || "unknown"}' excluded from website CAPI (Allow-list enforced)`,
+                    eventId
+                };
+            }
         }
         catch (dbErr) {
             console.warn(`[Meta CAPI] Firestore order check error:`, dbErr);
         }
+    }
+    else if (eventName === "Purchase" && payloadOrderSource !== "WEBSITE") {
+        console.log(`[Meta CAPI] Skipped: Purchase event without orderId has non-website source '${payloadOrderSource || "unknown"}'.`);
+        return {
+            success: true,
+            skipped: true,
+            reason: `Order source '${payloadOrderSource || "unknown"}' excluded from website CAPI (Allow-list enforced)`,
+            eventId
+        };
     }
     // 2. Check persistent event ID in meta_capi_events collection for idempotency
     if (eventId) {

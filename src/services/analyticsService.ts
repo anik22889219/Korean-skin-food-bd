@@ -534,6 +534,7 @@ class AnalyticsService {
         eventName: 'Purchase',
         eventId: eventId,
         orderId: order.id,
+        order_source: order.order_source,
         value: grandTotal,
         currency: 'BDT',
         items: (order.items || []).map(i => ({
