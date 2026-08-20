@@ -16,6 +16,7 @@ import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
 import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
 import { ProductCard } from './ProductCard';
+import { analytics } from '../services/analyticsService';
 
 const CATEGORIES = [
   'All',
@@ -340,6 +341,25 @@ export const ShopCategoryPage: React.FC = () => {
 
     return list;
   }, [products, searchQuery, selectedCategory, selectedSkinType, selectedConcern, selectedBrand, priceMin, priceMax, inStockOnly, sortBy]);
+
+  // Track view_item_list when category or filtered products load
+  const lastTrackedCategoryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (filteredProducts.length > 0) {
+      const listKey = `${selectedCategory}_${selectedBrand}_${selectedSkinType}`;
+      if (lastTrackedCategoryRef.current !== listKey) {
+        lastTrackedCategoryRef.current = listKey;
+        analytics.trackViewItemList(filteredProducts, `Shop - ${selectedCategory}`);
+      }
+    }
+  }, [filteredProducts, selectedCategory, selectedBrand, selectedSkinType]);
+
+  // Track view_item when opening Quick View modal
+  useEffect(() => {
+    if (quickViewProduct) {
+      analytics.trackViewItem(quickViewProduct);
+    }
+  }, [quickViewProduct]);
 
   const hasActiveFilters = useMemo(() => {
     return searchQuery.trim() !== '' || 

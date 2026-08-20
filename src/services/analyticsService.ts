@@ -5,6 +5,8 @@
 
 import { Product, Order, OrderItem } from '../types';
 import { getStoredAttribution } from './attributionService';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase';
 
 /// <reference types="vite/client" />
 
@@ -444,9 +446,13 @@ class AnalyticsService {
   public async trackPurchase(order: Order): Promise<void> {
     if (!order || !order.id) return;
 
-    // Strict Rule: POS orders must NEVER trigger website purchase pixel/CAPI
-    if (order.order_source === 'POS') {
-      logDebug('POS Order Skipped from Website Conversion Tracking', { orderId: order.id });
+    // Strict Allow-List: ONLY website orders (order_source === 'WEBSITE') may generate purchase tracking.
+    // POS, ADMIN, MANUAL, null, undefined, or any unknown sources are strictly rejected.
+    if (order.order_source !== 'WEBSITE') {
+      logDebug('Non-website Order Skipped from Website Conversion Tracking (Allow-list Enforced)', {
+        orderId: order.id,
+        orderSource: order.order_source
+      });
       return;
     }
 
@@ -518,7 +524,7 @@ class AnalyticsService {
       }
     }
 
-    // 3. Dispatch Server-Side Meta Conversions API (CAPI)
+    // 3. Dispatch Server-Side Meta Conversions API (CAPI) via Firebase Cloud Function
     try {
       const attribution = getStoredAttribution();
       const hashedEmail = order.customerEmail ? await sha256(order.customerEmail) : undefined;
@@ -549,19 +555,23 @@ class AnalyticsService {
         }
       };
 
-      // Call CAPI proxy endpoint
-      fetch('/api/tracking/meta-capi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(capiPayload)
-      })
-        .then(res => res.json())
-        .then(data => {
-          logDebug('Meta CAPI Response', data);
+      // Call Firebase Cloud Function trackMetaCapiEvent
+      const callMetaCapi = httpsCallable(functions, 'trackMetaCapiEvent');
+      callMetaCapi(capiPayload)
+        .then((res: any) => {
+          logDebug('Meta CAPI Cloud Function Response', res.data);
         })
-        .catch(err => {
-          // Never block user flow on CAPI errors
-          console.warn('[Analytics] Meta CAPI dispatch error:', err);
+        .catch((funcErr: any) => {
+          // Graceful fallback to server endpoint or log warning
+          logDebug('Meta CAPI Callable Notice (Attempting proxy fallback):', funcErr.message);
+          fetch('/api/tracking/meta-capi', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(capiPayload)
+          })
+            .then(res => res.json())
+            .then(data => logDebug('Meta CAPI Fallback Response', data))
+            .catch(err => console.warn('[Analytics] Meta CAPI dispatch error:', err));
         });
     } catch (capiErr) {
       console.warn('[Analytics] CAPI prep error:', capiErr);

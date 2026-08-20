@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.triggerMetaAdsSync = exports.syncMetaAds = exports.pricingSuggestion = exports.generateProductContent = exports.inventoryWatch = exports.placeOrder = void 0;
+exports.trackMetaCapiEvent = exports.triggerMetaAdsSync = exports.syncMetaAds = exports.pricingSuggestion = exports.generateProductContent = exports.inventoryWatch = exports.placeOrder = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const app_1 = require("firebase-admin/app");
@@ -624,5 +624,180 @@ exports.triggerMetaAdsSync = (0, https_1.onCall)({
         syncedCount: results.filter(r => r.status === "synced").length,
         details: results
     };
+});
+/**
+ * 7. trackMetaCapiEvent — onCall function for server-side Meta Conversions API
+ * dispatching from Firebase Functions with persistent Firestore idempotency.
+ */
+exports.trackMetaCapiEvent = (0, https_1.onCall)({
+    secrets: ["META_CAPI_ACCESS_TOKEN", "META_ACCESS_TOKEN"]
+}, async (request) => {
+    const data = request.data || {};
+    const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = data;
+    // 1. If orderId is provided, perform Firestore idempotency check and verify order_source
+    if (orderId) {
+        try {
+            const orderRef = db.collection("orders").doc(orderId);
+            const orderDoc = await orderRef.get();
+            if (orderDoc.exists) {
+                const orderData = orderDoc.data();
+                // Strict Allow-List: ONLY website orders (order_source === 'WEBSITE') may generate CAPI conversion.
+                // POS, ADMIN, MANUAL, null, undefined, or any unknown sources are strictly rejected.
+                if (orderData?.order_source !== "WEBSITE") {
+                    console.log(`[Meta CAPI] Skipped: order ${orderId} has non-website source '${orderData?.order_source}'.`);
+                    return {
+                        success: true,
+                        skipped: true,
+                        reason: `Order source '${orderData?.order_source || "unknown"}' excluded from website CAPI (Allow-list enforced)`,
+                        eventId
+                    };
+                }
+                if (orderData?.metaPurchaseTracked === true || orderData?.purchaseTracked === true) {
+                    console.log(`[Meta CAPI] Skipped duplicate: order ${orderId} already tracked.`);
+                    return {
+                        success: true,
+                        alreadyTracked: true,
+                        message: "Purchase event already tracked for this order (idempotent duplicate skipped).",
+                        eventId,
+                        orderId
+                    };
+                }
+            }
+        }
+        catch (dbErr) {
+            console.warn(`[Meta CAPI] Firestore order check error:`, dbErr);
+        }
+    }
+    // 2. Check persistent event ID in meta_capi_events collection for idempotency
+    if (eventId) {
+        try {
+            const eventDocRef = db.collection("meta_capi_events").doc(eventId);
+            const eventDoc = await eventDocRef.get();
+            if (eventDoc.exists && eventDoc.data()?.status === "dispatched") {
+                console.log(`[Meta CAPI] Skipped duplicate eventId ${eventId}`);
+                return {
+                    success: true,
+                    alreadyTracked: true,
+                    message: `Event ${eventId} already dispatched.`,
+                    eventId
+                };
+            }
+        }
+        catch (e) {
+            console.warn(`[Meta CAPI] Event idempotency check error:`, e);
+        }
+    }
+    const pixelId = process.env.META_PIXEL_ID || "123456789012345";
+    const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+    const testEventCode = process.env.META_TEST_EVENT_CODE;
+    // Helper to mark order and event as tracked in Firestore for persistent idempotency
+    const markAsTracked = async () => {
+        try {
+            if (orderId) {
+                const orderRef = db.collection("orders").doc(orderId);
+                const orderDoc = await orderRef.get();
+                if (orderDoc.exists) {
+                    await orderRef.set({
+                        metaPurchaseTracked: true,
+                        metaPurchaseTrackedAt: new Date().toISOString(),
+                        metaPurchaseEventId: eventId
+                    }, { merge: true });
+                }
+            }
+            if (eventId) {
+                await db.collection("meta_capi_events").doc(eventId).set({
+                    eventId,
+                    eventName,
+                    orderId: orderId || null,
+                    status: "dispatched",
+                    dispatchedAt: new Date().toISOString(),
+                    value: Number(value || 0),
+                    currency
+                }, { merge: true });
+            }
+        }
+        catch (err) {
+            console.warn(`[Meta CAPI] markAsTracked error:`, err);
+        }
+    };
+    if (!capiAccessToken) {
+        await markAsTracked();
+        return {
+            success: true,
+            simulated: true,
+            message: "Meta CAPI simulated successfully (token not configured in Functions)",
+            eventId
+        };
+    }
+    try {
+        const eventTime = Math.floor(Date.now() / 1000);
+        const userDataPayload = {
+            client_ip_address: request.rawRequest?.ip || "",
+            client_user_agent: customerData?.clientUserAgent || request.rawRequest?.headers?.["user-agent"] || ""
+        };
+        if (customerData?.em)
+            userDataPayload.em = [customerData.em];
+        if (customerData?.ph)
+            userDataPayload.ph = [customerData.ph];
+        if (customerData?.fbp)
+            userDataPayload.fbp = customerData.fbp;
+        if (customerData?.fbc)
+            userDataPayload.fbc = customerData.fbc;
+        const contents = (items || []).map((it) => ({
+            id: it.productId || it.id,
+            quantity: Number(it.quantity || 1),
+            item_price: Number(it.price || 0)
+        }));
+        const eventPayload = {
+            event_name: eventName,
+            event_time: eventTime,
+            event_id: eventId,
+            event_source_url: attribution?.landing_page || "https://koreanskinfoodbd.com",
+            action_source: "website",
+            user_data: userDataPayload,
+            custom_data: {
+                currency,
+                value: Number(value || 0),
+                order_id: orderId,
+                contents
+            }
+        };
+        const capiBody = {
+            data: [eventPayload]
+        };
+        if (testEventCode) {
+            capiBody.test_event_code = testEventCode;
+        }
+        const fbGraphUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(pixelId)}/events?access_token=${encodeURIComponent(capiAccessToken)}`;
+        const fbResponse = await fetch(fbGraphUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(capiBody)
+        });
+        const fbResult = await fbResponse.json();
+        await markAsTracked();
+        if (fbResponse.ok && !fbResult.error) {
+            return {
+                success: true,
+                eventId,
+                events_received: fbResult.events_received,
+                fbtrace_id: fbResult.fbtrace_id
+            };
+        }
+        else {
+            return {
+                success: false,
+                eventId,
+                error: fbResult.error?.message || "Meta Graph API error"
+            };
+        }
+    }
+    catch (err) {
+        return {
+            success: false,
+            eventId,
+            error: err.message || "Failed to dispatch CAPI event"
+        };
+    }
 });
 //# sourceMappingURL=index.js.map

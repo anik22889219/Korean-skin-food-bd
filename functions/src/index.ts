@@ -720,7 +720,7 @@ export const triggerMetaAdsSync = onCall({
 
 /**
  * 7. trackMetaCapiEvent — onCall function for server-side Meta Conversions API
- * dispatching from Firebase Functions.
+ * dispatching from Firebase Functions with persistent Firestore idempotency.
  */
 export const trackMetaCapiEvent = onCall({
   secrets: ["META_CAPI_ACCESS_TOKEN", "META_ACCESS_TOKEN"]
@@ -728,11 +728,95 @@ export const trackMetaCapiEvent = onCall({
   const data = request.data || {};
   const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = data;
 
+  // 1. If orderId is provided, perform Firestore idempotency check and verify order_source
+  if (orderId) {
+    try {
+      const orderRef = db.collection("orders").doc(orderId);
+      const orderDoc = await orderRef.get();
+      if (orderDoc.exists) {
+        const orderData = orderDoc.data();
+        // Strict Allow-List: ONLY website orders (order_source === 'WEBSITE') may generate CAPI conversion.
+        // POS, ADMIN, MANUAL, null, undefined, or any unknown sources are strictly rejected.
+        if (orderData?.order_source !== "WEBSITE") {
+          console.log(`[Meta CAPI] Skipped: order ${orderId} has non-website source '${orderData?.order_source}'.`);
+          return {
+            success: true,
+            skipped: true,
+            reason: `Order source '${orderData?.order_source || "unknown"}' excluded from website CAPI (Allow-list enforced)`,
+            eventId
+          };
+        }
+        if (orderData?.metaPurchaseTracked === true || orderData?.purchaseTracked === true) {
+          console.log(`[Meta CAPI] Skipped duplicate: order ${orderId} already tracked.`);
+          return {
+            success: true,
+            alreadyTracked: true,
+            message: "Purchase event already tracked for this order (idempotent duplicate skipped).",
+            eventId,
+            orderId
+          };
+        }
+      }
+    } catch (dbErr) {
+      console.warn(`[Meta CAPI] Firestore order check error:`, dbErr);
+    }
+  }
+
+  // 2. Check persistent event ID in meta_capi_events collection for idempotency
+  if (eventId) {
+    try {
+      const eventDocRef = db.collection("meta_capi_events").doc(eventId);
+      const eventDoc = await eventDocRef.get();
+      if (eventDoc.exists && eventDoc.data()?.status === "dispatched") {
+        console.log(`[Meta CAPI] Skipped duplicate eventId ${eventId}`);
+        return {
+          success: true,
+          alreadyTracked: true,
+          message: `Event ${eventId} already dispatched.`,
+          eventId
+        };
+      }
+    } catch (e) {
+      console.warn(`[Meta CAPI] Event idempotency check error:`, e);
+    }
+  }
+
   const pixelId = process.env.META_PIXEL_ID || "123456789012345";
   const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
   const testEventCode = process.env.META_TEST_EVENT_CODE;
 
+  // Helper to mark order and event as tracked in Firestore for persistent idempotency
+  const markAsTracked = async () => {
+    try {
+      if (orderId) {
+        const orderRef = db.collection("orders").doc(orderId);
+        const orderDoc = await orderRef.get();
+        if (orderDoc.exists) {
+          await orderRef.set({
+            metaPurchaseTracked: true,
+            metaPurchaseTrackedAt: new Date().toISOString(),
+            metaPurchaseEventId: eventId
+          }, { merge: true });
+        }
+      }
+      if (eventId) {
+        await db.collection("meta_capi_events").doc(eventId).set({
+          eventId,
+          eventName,
+          orderId: orderId || null,
+          status: "dispatched",
+          dispatchedAt: new Date().toISOString(),
+          value: Number(value || 0),
+          currency
+        }, { merge: true });
+      }
+    } catch (err) {
+      console.warn(`[Meta CAPI] markAsTracked error:`, err);
+    }
+  };
+
   if (!capiAccessToken) {
+    await markAsTracked();
     return {
       success: true,
       simulated: true,
@@ -744,8 +828,8 @@ export const trackMetaCapiEvent = onCall({
   try {
     const eventTime = Math.floor(Date.now() / 1000);
     const userDataPayload: Record<string, any> = {
-      client_ip_address: request.rawRequest.ip || "",
-      client_user_agent: customerData?.clientUserAgent || request.rawRequest.headers["user-agent"] || ""
+      client_ip_address: request.rawRequest?.ip || "",
+      client_user_agent: customerData?.clientUserAgent || request.rawRequest?.headers?.["user-agent"] || ""
     };
 
     if (customerData?.em) userDataPayload.em = [customerData.em];
@@ -790,6 +874,7 @@ export const trackMetaCapiEvent = onCall({
     });
 
     const fbResult: any = await fbResponse.json();
+    await markAsTracked();
 
     if (fbResponse.ok && !fbResult.error) {
       return {
