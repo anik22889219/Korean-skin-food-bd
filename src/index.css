@@ -1,6 +1,17 @@
 @import "tailwindcss";
 
 @layer utilities {
+  .font-serif-luxury {
+    font-family: 'Bodoni Moda', Georgia, serif;
+  }
+  .font-sans-editorial {
+    font-family: 'Montserrat', sans-serif;
+  }
+  .glass-card {
+    background: rgba(255, 248, 245, 0.75);
+    backdrop-filter: blur(20px);
+    border: 0.5px solid rgba(197, 199, 193, 0.4);
+  }
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom, 1rem);
   }

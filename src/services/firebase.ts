@@ -1,12 +1,12 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { initializeFirestore, getFirestore, connectFirestoreEmulator, doc, getDocFromServer, setLogLevel } from 'firebase/firestore';
-import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
+import { initializeFirestore, getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
 // Silence benign internal gRPC idle stream disconnection notifications
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {
   // ignore
 }
@@ -36,16 +36,16 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // Get custom database ID if available
 const databaseId = getEnvVar('VITE_FIREBASE_FIRESTORE_DATABASE_ID') || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
 
-// Initialize Services using official Firestore initializer with force long polling to prevent gRPC Listen stream RST_STREAM errors in proxies & container sandboxes
+// Initialize Services using official Firestore initializer with auto-detect long polling
 let db: ReturnType<typeof getFirestore>;
 try {
   db = initializeFirestore(app, {
-    experimentalForceLongPolling: true,
+    experimentalAutoDetectLongPolling: true,
   }, databaseId);
 } catch (e) {
   try {
     db = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
     });
   } catch (err) {
     db = getFirestore(app, databaseId);
@@ -54,18 +54,6 @@ try {
 
 const auth = getAuth(app);
 const functions = getFunctions(app);
-
-// Test initial server connection as recommended by Firebase skill
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('[Firebase] Operating in offline mode with cached local state.');
-    }
-  }
-}
-testConnection();
 
 // Connect to Emulators ONLY if explicitly configured to use them
 if (getEnvVar('VITE_USE_FIREBASE_EMULATOR') === 'true') {

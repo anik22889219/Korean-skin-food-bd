@@ -146,7 +146,7 @@ export const MainLayout: React.FC = () => {
             </Link>
           )}
 
-          {/* Menus: Home, Shop, Become a Creator, About Us, Contact Us */}
+          {/* Menus: Home, Shop, About Us, Contact Us */}
           <nav className="hidden lg:flex items-center gap-5 text-xs font-bold text-gray-650">
             <Link 
               to="/" 
@@ -159,13 +159,6 @@ export const MainLayout: React.FC = () => {
               className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/shop') ? 'text-[#E91E8C] font-extrabold' : ''}`}
             >
               {activeTranslations.shop || "Shop"}
-            </Link>
-            <Link 
-              to="/become-a-creator" 
-              className="hover:text-[#E91E8C] hover:scale-105 transition-all py-1 flex items-center gap-1 text-[#E91E8C] font-extrabold"
-            >
-              <Sparkles size={13} />
-              <span>{language === 'bn' ? 'ক্রিয়েটর হোন' : 'Become a Creator'}</span>
             </Link>
             <Link 
               to="/about-us" 
