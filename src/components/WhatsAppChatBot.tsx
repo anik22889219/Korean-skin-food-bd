@@ -177,7 +177,7 @@ export function WhatsAppChatBot() {
           className="bg-[#25D366] hover:bg-[#20ba59] text-white p-3.5 sm:p-4 rounded-full shadow-2xl flex items-center justify-center cursor-pointer border-2 border-white/25 transition duration-200 relative group"
         >
           <MessageCircle size={26} className="fill-white" />
-          <span className="absolute right-16 bg-white text-gray-800 text-xs font-bold px-3 py-1.5 rounded-lg shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none border border-pink-100">
+          <span className="absolute right-16 bg-white text-gray-800 text-xs font-bold px-3 py-1.5 rounded-lg shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none border border-pink-100 hidden sm:inline-block">
             K Beauty Assistant 🌸
           </span>
           <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-white flex items-center justify-center animate-bounce">
@@ -195,7 +195,7 @@ export function WhatsAppChatBot() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.95 }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="bg-[#efeae2] w-[calc(100vw-32px)] sm:w-[360px] md:w-[390px] h-[500px] sm:h-[550px] max-h-[calc(100vh-110px)] rounded-3xl overflow-hidden shadow-2xl border border-emerald-950/20 flex flex-col justify-between"
+            className="bg-[#efeae2] w-[calc(100vw-32px)] max-w-[calc(100vw-32px)] sm:w-[360px] md:w-[390px] h-[500px] sm:h-[550px] max-h-[calc(100vh-110px)] rounded-3xl overflow-hidden shadow-2xl border border-emerald-950/20 flex flex-col justify-between"
           >
             {/* Header: Dark Green WhatsApp Bar */}
             <div id="whatsapp-chat-header" className="bg-[#075E54] px-4 py-3.5 flex items-center justify-between text-white shadow-md relative">

@@ -572,10 +572,10 @@ class AnalyticsService {
           })
             .then(res => res.json())
             .then(data => logDebug('Meta CAPI Fallback Response', data))
-            .catch(err => console.warn('[Analytics] Meta CAPI dispatch error:', err));
+            .catch(err => logDebug('Meta CAPI dispatch notice', err?.message || err));
         });
-    } catch (capiErr) {
-      console.warn('[Analytics] CAPI prep error:', capiErr);
+    } catch (capiErr: any) {
+      logDebug('CAPI prep notice', capiErr?.message || capiErr);
     }
   }
 

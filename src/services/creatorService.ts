@@ -10,7 +10,7 @@ import {
   runTransaction,
   onSnapshot 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { CreatorProfile, CreatorStatus } from '../types';
 
 export const CREATORS_COLLECTION = 'creators';
@@ -38,7 +38,7 @@ export async function syncPublicCreatorProfile(creator: Partial<CreatorProfile> 
       status: creator.status || 'pending',
       updatedAt: new Date().toISOString(),
     };
-    await setDoc(publicRef, publicPayload, { merge: true });
+    await setDoc(publicRef, sanitizeForFirestore(publicPayload), { merge: true });
   } catch (err) {
     console.warn('Could not sync to public_creators collection:', err);
   }
@@ -191,19 +191,19 @@ export async function applyForCreatorProfile(params: {
       }
 
       // Atomic write to creators collection
-      transaction.set(creatorRef, newProfile);
+      transaction.set(creatorRef, sanitizeForFirestore(newProfile));
 
       // Atomic write to users collection to assign role
       const userRef = doc(db, 'users', params.userId);
-      transaction.set(userRef, {
+      transaction.set(userRef, sanitizeForFirestore({
         role: 'creator',
         creatorId,
         updatedAt: now,
-      }, { merge: true });
+      }), { merge: true });
 
       // Atomic write to public_creators
       const publicRef = doc(db, PUBLIC_CREATORS_COLLECTION, creatorId);
-      transaction.set(publicRef, publicPayload, { merge: true });
+      transaction.set(publicRef, sanitizeForFirestore(publicPayload), { merge: true });
     });
 
     return newProfile;

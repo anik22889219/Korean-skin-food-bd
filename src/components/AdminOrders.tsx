@@ -784,35 +784,64 @@ export const AdminOrders: React.FC = () => {
                 const prod = productService.getProductById(item.productId);
                 const isVerified = (item.scannedQuantity || 0) >= item.quantity;
                 const displayBarcode = item.barcode || (prod ? prod.barcode : 'N/A');
+                const productImage = item.image || prod?.image || (prod?.images && prod.images[0]) || '';
 
                 return (
                   <div key={idx} className={`p-4 rounded-xl border transition-all space-y-3 ${
                     isVerified ? 'bg-emerald-50/60 border-emerald-200' : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs'
                   }`}>
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <div className="font-bold text-slate-900 text-sm">{item.name}</div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          Catalog Stock: <span className="font-semibold">{prod ? prod.stock : 'Unknown'}</span> units
+                    <div className="flex items-start gap-3">
+                      {/* Product Image Thumbnail */}
+                      <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center relative shadow-2xs">
+                        {productImage ? (
+                          <img
+                            src={productImage}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+                        <Package className="w-6 h-6 text-slate-300 absolute -z-10" />
+                      </div>
+
+                      {/* Title, Stock & Verified Badge */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 text-sm leading-snug line-clamp-2" title={item.name}>
+                              {item.name}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span>Catalog Stock: <strong className={prod && prod.stock <= 5 ? 'text-rose-600 font-bold' : 'text-slate-800'}>{prod ? prod.stock : 'Unknown'}</strong> units</span>
+                              {item.price > 0 && (
+                                <span className="text-[#C81E78] font-bold font-mono">৳{item.price.toLocaleString()}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {isVerified ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold border border-emerald-200 shrink-0 shadow-2xs">
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                              VERIFIED
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold border border-amber-200 shrink-0 shadow-2xs">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                              PENDING
+                            </span>
+                          )}
                         </div>
                       </div>
-                      {isVerified ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold border border-emerald-200 shrink-0">
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                          VERIFIED
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold border border-amber-200 shrink-0">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                          PENDING
-                        </span>
-                      )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                       <div>
                         <span className="text-slate-400 block font-semibold text-[10px] uppercase">Barcode</span>
-                        <span className="font-mono text-slate-700 font-bold">{displayBarcode}</span>
+                        <span className="font-mono text-slate-700 font-bold truncate block">{displayBarcode}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 block font-semibold text-[10px] uppercase">Scanned / Ordered</span>
@@ -930,8 +959,37 @@ export const AdminOrders: React.FC = () => {
                       Delivery: {order.address}
                     </div>
 
-                    <div className="text-xs text-slate-600 font-semibold pt-1">
-                      Items: {order.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
+                    <div className="pt-2 border-t border-slate-100 space-y-2">
+                      <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">
+                        Order Items ({order.items.reduce((s, i) => s + i.quantity, 0)} units):
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {order.items.map((i, iIdx) => {
+                          const prod = productService.getProductById(i.productId);
+                          const img = i.image || prod?.image || (prod?.images && prod.images[0]) || '';
+                          return (
+                            <div key={iIdx} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1.5 pr-3 shadow-2xs">
+                              {img ? (
+                                <img
+                                  src={img}
+                                  alt={i.name}
+                                  className="w-8 h-8 rounded-lg object-cover border border-slate-200 bg-white shrink-0"
+                                  referrerPolicy="no-referrer"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-500 shrink-0">
+                                  <Package className="w-4 h-4" />
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-800 truncate max-w-[180px]">{i.name}</div>
+                                <div className="text-[10px] text-slate-500 font-semibold">Qty: <strong className="text-rose-600">x{i.quantity}</strong> • ৳{i.price.toLocaleString()}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
@@ -1265,16 +1323,39 @@ export const AdminOrders: React.FC = () => {
             )}
 
             <div className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50">
-              <div className="font-bold text-xs text-slate-500 uppercase">Items</div>
-              {selectedOrderDetails.items.map((item, i) => (
-                <div key={i} className="flex justify-between text-sm font-semibold text-slate-800">
-                  <span>{item.name} (x{item.quantity})</span>
-                  <span>৳{(item.price * item.quantity).toLocaleString()}</span>
-                </div>
-              ))}
+              <div className="font-bold text-xs text-slate-500 uppercase">Items Breakdown</div>
+              <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {selectedOrderDetails.items.map((item, i) => {
+                  const prod = productService.getProductById(item.productId);
+                  const img = item.image || prod?.image || (prod?.images && prod.images[0]) || '';
+                  return (
+                    <div key={i} className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-800 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={item.name}
+                            className="w-10 h-10 rounded-lg object-cover border border-slate-200 bg-slate-50 shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-500 shrink-0">
+                            <Package className="w-5 h-5" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 text-xs truncate max-w-[200px]" title={item.name}>{item.name}</div>
+                          <div className="text-[11px] text-slate-500 font-medium">Qty: <strong className="text-slate-800 font-bold">{item.quantity}</strong> × ৳{item.price.toLocaleString()}</div>
+                        </div>
+                      </div>
+                      <span className="font-black text-slate-900 font-mono text-sm shrink-0">৳{(item.price * item.quantity).toLocaleString()}</span>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="border-t border-slate-200 pt-2 flex justify-between font-black text-slate-900 text-base">
                 <span>Total Amount:</span>
-                <span>৳{selectedOrderDetails.totalAmount.toLocaleString()}</span>
+                <span className="text-[#C81E78] font-mono">৳{selectedOrderDetails.totalAmount.toLocaleString()}</span>
               </div>
             </div>
 

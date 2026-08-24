@@ -1521,7 +1521,7 @@ export const StoreCatalog: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.3 }}
-      className="w-full bg-[#fff8f5] space-y-10 md:space-y-12 pb-12 overflow-x-hidden"
+      className="w-full bg-[#fff8f5] space-y-10 md:space-y-12 pb-12"
     >
       {/* Dynamic Sections ordered according to theme settings */}
       {theme.sectionOrder.map((secKey) => {

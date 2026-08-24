@@ -184,7 +184,7 @@ export const AdminLayout: React.FC = () => {
         </div>
 
         {/* MIDDLE: Scrollable Navigation List (Internal scroll so sidebar never leaves viewport) */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden py-3 space-y-1.5 min-h-0 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
+        <div className="flex-1 overflow-y-auto py-3 space-y-1.5 min-h-0 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
           <div className={`px-2 pb-1.5 flex items-center justify-between ${isCollapsed ? 'lg:hidden' : ''}`}>
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
               Navigation

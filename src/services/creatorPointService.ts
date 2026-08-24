@@ -8,7 +8,7 @@ import {
   query, 
   where 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { 
   CreatorPointSettings, 
   CreatorReel, 
@@ -189,7 +189,7 @@ export async function saveCreatorPointSettings(
 
   try {
     const docRef = doc(db, SETTINGS_COLLECTION, CREATOR_POINT_SETTINGS_DOC);
-    await setDoc(docRef, settingsToSave, { merge: true });
+    await setDoc(docRef, sanitizeForFirestore(settingsToSave), { merge: true });
   } catch (err) {
     console.error('Error saving CreatorPointSettings to Firestore:', err);
     handleFirestoreError(err, OperationType.WRITE, `${SETTINGS_COLLECTION}/${CREATOR_POINT_SETTINGS_DOC}`);
@@ -224,7 +224,7 @@ export async function recordMetricAuditLog(audit: {
 
   try {
     const docRef = doc(db, REEL_METRIC_AUDITS_COLLECTION, id);
-    await setDoc(docRef, auditEntry);
+    await setDoc(docRef, sanitizeForFirestore(auditEntry));
   } catch (err) {
     console.warn('Failed to record metric audit log:', err);
   }

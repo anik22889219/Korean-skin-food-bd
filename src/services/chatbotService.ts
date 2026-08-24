@@ -1,4 +1,4 @@
-import { db } from './firebase';
+import { db, sanitizeForFirestore } from './firebase';
 import { collection, doc, setDoc, getDoc } from 'firebase/firestore';
 
 export interface ChatMessage {
@@ -112,7 +112,7 @@ export async function saveLeadToFirestore(orderState: OrderState, messages: Chat
       paymentMethod: "Cash on Delivery",
       isPaid: false
     };
-    await setDoc(draftRef, draftPayload);
+    await setDoc(draftRef, sanitizeForFirestore(draftPayload));
 
     // 2. Save to chat_leads with the requested schema
     const leadRef = doc(collection(db, "chat_leads"), leadId);
@@ -133,7 +133,7 @@ export async function saveLeadToFirestore(orderState: OrderState, messages: Chat
       created_at: new Date(),
       last_updated_at: new Date()
     };
-    await setDoc(leadRef, leadPayload);
+    await setDoc(leadRef, sanitizeForFirestore(leadPayload));
 
     console.log("Successfully saved draft lead to both draft_orders and chat_leads collections:", leadId);
     return leadPayload;

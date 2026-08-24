@@ -191,6 +191,27 @@ service cloud.firestore {
       allow read, write: if isStaff();
     }
 
+    match /product_imports/{importId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
+    match /audit_logs/{logId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
+    match /support_tickets/{ticketId} {
+      allow create: if true;
+      allow read: if isStaff() || (request.auth != null && resource.data.customerEmail == request.auth.token.email);
+      allow update, delete: if isStaff();
+    }
+
+    match /slack_error_logs/{logId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
     match /pos_sessions/{sessionId} {
       allow read, write: if isStaff();
 

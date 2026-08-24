@@ -1,5 +1,5 @@
 import { Product, InventoryLog, StockMovement } from '../types';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
@@ -103,7 +103,7 @@ export const productService = {
       const chunk = products.slice(i, i + BATCH_SIZE);
       const batch = writeBatch(db);
       chunk.forEach(p => {
-        batch.set(doc(db, 'products', p.id), p, { merge: true });
+        batch.set(doc(db, 'products', p.id), sanitizeForFirestore(p), { merge: true });
       });
       await batch.commit().catch(console.error);
     }
@@ -129,7 +129,7 @@ export const productService = {
     notifySubscribers();
 
     // Save to Firestore asynchronously
-    setDoc(doc(db, 'products', product.id), newProduct).catch(console.error);
+    setDoc(doc(db, 'products', product.id), sanitizeForFirestore(newProduct)).catch(console.error);
     
     // log inventory creation
     this.logInventory(product.id, 'stock_in', product.stock, 0, product.stock, 'Initial creation');
@@ -159,7 +159,7 @@ export const productService = {
     notifySubscribers();
 
     // Save to Firestore asynchronously
-    setDoc(doc(db, 'products', product.id), updatedProduct).catch(console.error);
+    setDoc(doc(db, 'products', product.id), sanitizeForFirestore(updatedProduct)).catch(console.error);
 
     if (oldProduct && oldProduct.stock !== product.stock) {
       const diff = product.stock - oldProduct.stock;
@@ -228,7 +228,7 @@ export const productService = {
       createdAt: new Date().toISOString()
     };
     stockMovementsCache = [newMovement, ...stockMovementsCache];
-    setDoc(doc(db, 'stock_movements', id), newMovement).catch(console.error);
+    setDoc(doc(db, 'stock_movements', id), sanitizeForFirestore(newMovement)).catch(console.error);
     return newMovement;
   },
 
@@ -289,6 +289,6 @@ export const productService = {
     inventoryLogsCache = [newLog, ...inventoryLogsCache];
 
     // Save to Firestore asynchronously
-    setDoc(doc(db, 'inventory_logs', logId), newLog).catch(console.error);
+    setDoc(doc(db, 'inventory_logs', logId), sanitizeForFirestore(newLog)).catch(console.error);
   }
 };

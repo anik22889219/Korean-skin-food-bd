@@ -1,5 +1,5 @@
 import { UserProfile } from '../types';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 
 let usersCache: UserProfile[] = [];
@@ -29,11 +29,11 @@ export const userService = {
 
   async createUser(user: UserProfile): Promise<void> {
     usersCache = [...usersCache.filter(u => u.uid !== user.uid), user];
-    await setDoc(doc(db, 'users', user.uid), user);
+    await setDoc(doc(db, 'users', user.uid), sanitizeForFirestore(user));
   },
 
   async updateUser(user: UserProfile): Promise<void> {
     usersCache = usersCache.map(u => u.uid === user.uid ? user : u);
-    await setDoc(doc(db, 'users', user.uid), user);
+    await setDoc(doc(db, 'users', user.uid), sanitizeForFirestore(user));
   }
 };

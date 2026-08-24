@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Wand2, Mail, Phone, MapPin, MessageSquare, 
-  ShieldCheck, Truck, HeartHandshake,
-  Sparkles
+  ShieldCheck, Truck, HeartHandshake
 } from 'lucide-react';
 import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
 import { GlobalThemeSettings } from '../types/theme';
@@ -156,20 +155,6 @@ export const Footer: React.FC = () => {
               <li>
                 <Link to="/shop" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
                   <span className="text-[#E91E8C]">›</span> Shop All Skincare
-                </Link>
-              </li>
-              <li>
-                <Link 
-                  to="/become-a-creator" 
-                  id="footer_become_creator_link"
-                  className="text-[#E91E8C] hover:text-pink-700 font-bold transition-colors flex items-center justify-between gap-1.5 py-0.5"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <Sparkles size={13} className="text-[#E91E8C]" /> Become a Creator
-                  </span>
-                  <span className="px-1.5 py-0.5 bg-pink-100 text-[#E91E8C] text-[9px] font-black uppercase rounded-md tracking-wider">
-                    Join
-                  </span>
                 </Link>
               </li>
               <li>

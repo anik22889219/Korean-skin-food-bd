@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings } from '../types/theme';
 
 export const DEFAULT_SHOP_THEME: ShopThemeSettings = {
@@ -508,7 +508,7 @@ class ThemeService {
 
     try {
       const docRef = doc(db, 'site_settings', 'theme_home');
-      await setDoc(docRef, updated, { merge: true });
+      await setDoc(docRef, sanitizeForFirestore(updated), { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'site_settings/theme_home', false);
     }
@@ -526,7 +526,7 @@ class ThemeService {
 
     try {
       const docRef = doc(db, 'site_settings', 'theme_global');
-      await setDoc(docRef, updated, { merge: true });
+      await setDoc(docRef, sanitizeForFirestore(updated), { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'site_settings/theme_global', false);
     }
@@ -543,7 +543,7 @@ class ThemeService {
 
     try {
       const docRef = doc(db, 'site_settings', 'theme_shop');
-      await setDoc(docRef, updated, { merge: true });
+      await setDoc(docRef, sanitizeForFirestore(updated), { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'site_settings/theme_shop', false);
     }

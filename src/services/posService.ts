@@ -1,6 +1,6 @@
 import { PosSession, Order, Product } from '../types';
 import { productService } from './productService';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { collection, onSnapshot, doc, setDoc, query, orderBy, addDoc, getDocs } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
 
@@ -223,7 +223,7 @@ export const posService = {
   saveSessions(sessions: PosSession[]) {
     sessionsCache = sessions;
     sessions.forEach(s => {
-      setDoc(doc(db, 'pos_sessions', s.id), s).catch(console.error);
+      setDoc(doc(db, 'pos_sessions', s.id), sanitizeForFirestore(s)).catch(console.error);
     });
   },
 
@@ -390,7 +390,7 @@ export const posService = {
 
     // Update cache and Firestore
     ordersCache = [newOrder, ...ordersCache];
-    setDoc(doc(db, 'orders', orderId), newOrder).catch(console.error);
+    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(newOrder)).catch(console.error);
 
     // Clear session cart
     const updatedSession = { ...session, items: [] };
@@ -442,7 +442,7 @@ export const posService = {
 
     // Update cache and Firestore
     ordersCache = [newOrder, ...ordersCache];
-    setDoc(doc(db, 'orders', orderId), newOrder).catch(console.error);
+    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(newOrder)).catch(console.error);
 
     // Trigger real-time Slack Notification
     import('./slackNotificationService').then(({ slackNotificationService }) => {
@@ -470,7 +470,7 @@ export const posService = {
     }));
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
 
     return { success: true, message: 'Fulfillment started! Order status updated to PACKING.', order };
   },
@@ -538,7 +538,7 @@ export const posService = {
     const isComplete = order.items.every(it => (it.scannedQuantity || 0) === it.quantity);
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
 
     return {
       success: true,
@@ -622,7 +622,7 @@ export const posService = {
     order.isPaid = true;
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
 
     return {
       success: true,
@@ -689,7 +689,7 @@ export const posService = {
 
     order.status = 'cancelled';
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), order).catch(console.error);
+    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
 
     import('./slackNotificationService').then(({ slackNotificationService }) => {
       slackNotificationService.notifyOrderStatusChange(order, 'packing').catch(console.warn);
@@ -713,7 +713,7 @@ export const posService = {
         updatedOrder.isPaid = true;
       }
       ordersCache[index] = updatedOrder;
-      setDoc(doc(db, 'orders', orderId), updatedOrder).catch(console.error);
+      setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(updatedOrder)).catch(console.error);
 
       if (previousStatus !== status) {
         import('./slackNotificationService').then(({ slackNotificationService }) => {
@@ -731,7 +731,7 @@ export const posService = {
     if (index !== -1) {
       const updatedOrder = { ...ordersCache[index], courier: courierData };
       ordersCache[index] = updatedOrder;
-      setDoc(doc(db, 'orders', orderId), updatedOrder).catch(console.error);
+      setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(updatedOrder)).catch(console.error);
       notifyOrderSubscribers();
       return updatedOrder;
     }

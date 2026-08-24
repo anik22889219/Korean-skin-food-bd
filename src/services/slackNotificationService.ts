@@ -63,6 +63,185 @@ let isProcessingQueue = false;
 let lastProcessedTime = 0;
 const RATE_LIMIT_DELAY_MS = 500; // Rate limit window: max 2 requests per second
 
+// In-memory cache for channel name -> channel ID mapping
+let channelMapCache: { map: Map<string, string>; defaultChannelId?: string; lastFetched: number; scopeDisabled?: boolean } = {
+  map: new Map(),
+  lastFetched: 0,
+  scopeDisabled: false
+};
+
+/**
+ * Resolves a channel name (#orders, product-imports) or channel ID (C123...) to a valid Slack channel ID
+ */
+export async function getOrResolveSlackChannel(slackApp: any, targetChannel: string): Promise<string | null> {
+  if (!slackApp || !slackApp.client) return null;
+
+  const rawTarget = (targetChannel || '').trim();
+  if (!rawTarget) return null;
+  const cleanTarget = rawTarget.replace(/^#/, '').toLowerCase();
+
+  // If already looks like a direct Slack Channel ID (e.g., C123456789, D123456789, G123456789)
+  if (/^[CDG][A-Z0-9]{8,}$/.test(rawTarget)) {
+    return rawTarget;
+  }
+
+  const now = Date.now();
+  // Refresh cache every 15 minutes or if empty (unless conversations.list scope is not available on token)
+  if (!channelMapCache.scopeDisabled && (channelMapCache.map.size === 0 || now - channelMapCache.lastFetched > 15 * 60 * 1000)) {
+    try {
+      let resp: any = null;
+      try {
+        resp = await slackApp.client.conversations.list({
+          types: 'public_channel',
+          limit: 200,
+          exclude_archived: true
+        });
+      } catch (innerErr: any) {
+        if (innerErr?.message?.includes('missing_scope') || innerErr?.data?.error === 'missing_scope') {
+          channelMapCache.scopeDisabled = true;
+          console.log('ℹ️ [Slack] Notice: Token lacks channels:read scope for conversations.list. Direct channel targeting active.');
+        } else {
+          throw innerErr;
+        }
+      }
+
+      if (resp?.ok && Array.isArray(resp.channels)) {
+        const newMap = new Map<string, string>();
+        let defaultId: string | undefined;
+        for (const ch of resp.channels) {
+          if (ch.id && ch.name) {
+            const lowerName = ch.name.toLowerCase();
+            newMap.set(lowerName, ch.id);
+            if (lowerName === 'general' || ch.is_general) {
+              defaultId = ch.id;
+            } else if (!defaultId && ch.is_member) {
+              defaultId = ch.id;
+            }
+          }
+        }
+        if (!defaultId && resp.channels.length > 0) {
+          defaultId = resp.channels[0].id;
+        }
+        channelMapCache = {
+          map: newMap,
+          defaultChannelId: defaultId,
+          lastFetched: now,
+          scopeDisabled: false
+        };
+      }
+    } catch (err: any) {
+      channelMapCache.lastFetched = now;
+      console.log('ℹ️ [Slack] Channel list lookup note:', err?.message || err);
+    }
+  }
+
+  // 1. Direct name match from workspace channels
+  if (channelMapCache.map.has(cleanTarget)) {
+    const channelId = channelMapCache.map.get(cleanTarget)!;
+    try {
+      await slackApp.client.conversations.join({ channel: channelId });
+    } catch {
+      // ignore if already member or cannot join
+    }
+    return channelId;
+  }
+
+  // 2. Fallback to default workspace channel if specific channel doesn't exist
+  if (channelMapCache.defaultChannelId) {
+    return channelMapCache.defaultChannelId;
+  }
+
+  // 3. Fallback to cleaned name
+  return cleanTarget;
+}
+
+/**
+ * Safely post a message to Slack with auto-channel resolution and graceful fallback
+ */
+export async function postSlackMessageSafely(
+  channelTarget: string,
+  text: string,
+  blocks?: any[]
+): Promise<boolean> {
+  const slackApp = slackService.getSlackApp();
+  if (!slackApp || !process.env.SLACK_BOT_TOKEN) return false;
+
+  try {
+    const resolvedChannel = await getOrResolveSlackChannel(slackApp, channelTarget);
+    if (!resolvedChannel) return false;
+
+    try {
+      await slackApp.client.chat.postMessage({
+        channel: resolvedChannel,
+        text,
+        ...(blocks && blocks.length > 0 ? { blocks } : {})
+      });
+      return true;
+    } catch (postErr: any) {
+      const errCode = postErr?.data?.error || '';
+      const errMsg = postErr?.message || String(postErr);
+
+      // Handle not_in_channel: try to join if public, or post to default channel, or log informative notice
+      if (errCode === 'not_in_channel' || errMsg.includes('not_in_channel')) {
+        try {
+          const joinResp = await slackApp.client.conversations.join({ channel: resolvedChannel });
+          if (joinResp?.ok) {
+            await slackApp.client.chat.postMessage({
+              channel: resolvedChannel,
+              text,
+              ...(blocks && blocks.length > 0 ? { blocks } : {})
+            });
+            return true;
+          }
+        } catch {
+          // auto-join not permitted without channels:join or for private channels
+        }
+
+        // Try posting to default channel if available and different
+        if (channelMapCache.defaultChannelId && channelMapCache.defaultChannelId !== resolvedChannel) {
+          try {
+            await slackApp.client.chat.postMessage({
+              channel: channelMapCache.defaultChannelId,
+              text: `[#${channelTarget.replace(/^#/, '')} Notice] ${text}`,
+              ...(blocks && blocks.length > 0 ? { blocks } : {})
+            });
+            return true;
+          } catch {
+            // default fallback silent
+          }
+        }
+
+        console.log(`ℹ️ [Slack] Notice: Bot is not currently in #${channelTarget.replace(/^#/, '')}. (To receive live alerts in this channel, invite the bot with '/invite @bot').`);
+        return true; // Mark as handled so queues don't fail or infinitely retry
+      }
+
+      // If channel_not_found, try fallback to default channel if available
+      if (errCode === 'channel_not_found' || errMsg.includes('channel_not_found')) {
+        if (channelMapCache.defaultChannelId && channelMapCache.defaultChannelId !== resolvedChannel) {
+          try {
+            await slackApp.client.chat.postMessage({
+              channel: channelMapCache.defaultChannelId,
+              text: `[Notice: #${channelTarget.replace(/^#/, '')} not found] ${text}`,
+              ...(blocks && blocks.length > 0 ? { blocks } : {})
+            });
+            return true;
+          } catch {
+            // silently acknowledge fallback attempt
+          }
+        }
+        console.log(`ℹ️ [Slack] Notice: Channel ${channelTarget} was not found in Slack workspace. Notification logged locally.`);
+        return true; // Mark handled so queue is not stuck in infinite retry loops
+      }
+
+      console.log(`ℹ️ [Slack] Post note for ${channelTarget}:`, errMsg);
+      return false;
+    }
+  } catch (err: any) {
+    console.log(`ℹ️ [Slack] Notification dispatch note for ${channelTarget}:`, err?.message || err);
+    return false;
+  }
+}
+
 /**
  * Enqueue notification and process queue with rate limiting & error handling
  */
@@ -116,17 +295,13 @@ async function processQueue() {
 
       const slackApp = slackService.getSlackApp();
       if (slackApp && process.env.SLACK_BOT_TOKEN) {
-        try {
-          await slackApp.client.chat.postMessage({
-            channel: item.channel.startsWith('#') ? item.channel : `#${item.channel}`,
-            text: item.text,
-            blocks: item.blocks
-          });
+        const sent = await postSlackMessageSafely(item.channel, item.text, item.blocks);
+        if (sent) {
           item.status = 'sent';
           item.processedAt = new Date().toISOString();
-        } catch (err: any) {
+        } else {
           item.retries++;
-          item.lastError = err.message || String(err);
+          item.lastError = 'Delivery could not be confirmed';
           if (item.retries >= item.maxRetries) {
             item.status = 'failed';
           } else {
@@ -139,8 +314,7 @@ async function processQueue() {
             timestamp: new Date().toISOString(),
             channel: item.channel,
             type: item.type,
-            errorMessage: err.message || 'Slack API Post Error',
-            stack: err.stack
+            errorMessage: item.lastError || 'Slack API Post Error'
           };
           slackErrorLogs.unshift(errLog);
           if (slackErrorLogs.length > 50) slackErrorLogs.pop();
@@ -785,18 +959,11 @@ export const slackNotificationService = {
       details: `Support ticket ${ticket.ticketNumber} created for order #${ticket.orderId || 'N/A'}`
     });
 
-    const slackApp = slackService.getSlackApp();
-    if (slackApp && process.env.SLACK_BOT_TOKEN) {
-      try {
-        await slackApp.client.chat.postMessage({
-          channel: '#customer-support',
-          text: `🎧 Support Ticket ${ticket.ticketNumber}: ${ticket.subject} (Customer: ${ticket.customerName})`,
-          blocks
-        });
-      } catch (err) {
-        console.warn(`Slack postMessage warning for ticket ${ticket.ticketNumber}:`, err);
-      }
-    }
+    await postSlackMessageSafely(
+      '#customer-support',
+      `🎧 Support Ticket ${ticket.ticketNumber}: ${ticket.subject} (Customer: ${ticket.customerName})`,
+      blocks
+    );
 
     return log;
   },
@@ -1206,18 +1373,11 @@ export const slackNotificationService = {
       details: `Product import requested via ${payload.source || 'barcode_scan'} with match score ${payload.imageMatchScore}`
     });
 
-    const slackApp = slackService.getSlackApp();
-    if (slackApp && process.env.SLACK_BOT_TOKEN) {
-      try {
-        await slackApp.client.chat.postMessage({
-          channel: '#product-imports',
-          text: `📦 Product Import Request: ${payload.productName} (${payload.brand}) - Barcode: ${payload.barcode}`,
-          blocks
-        });
-      } catch (err) {
-        console.warn(`Slack postMessage warning for product import ${payload.importId}:`, err);
-      }
-    }
+    await postSlackMessageSafely(
+      '#product-imports',
+      `📦 Product Import Request: ${payload.productName} (${payload.brand}) - Barcode: ${payload.barcode}`,
+      blocks
+    );
 
     return log;
   },
@@ -1240,20 +1400,11 @@ export const slackNotificationService = {
     notificationLogs.unshift(log);
     if (notificationLogs.length > 50) notificationLogs.pop();
 
-    // Post to actual Slack channel if SDK configured
-    const slackApp = slackService.getSlackApp();
-    if (slackApp && process.env.SLACK_BOT_TOKEN) {
-      try {
-        await slackApp.client.chat.postMessage({
-          channel: '#orders',
-          text: `🛍️ New Order Received #${order.id} - ৳${order.totalAmount}`,
-          blocks
-        });
-        console.log(`⚡ Slack notification sent for New Order #${order.id}`);
-      } catch (err) {
-        console.warn(`Slack postMessage warning for Order #${order.id}:`, err);
-      }
-    }
+    await postSlackMessageSafely(
+      '#orders',
+      `🛍️ New Order Received #${order.id} - ৳${order.totalAmount}`,
+      blocks
+    );
 
     return log;
   },
@@ -1276,18 +1427,11 @@ export const slackNotificationService = {
     notificationLogs.unshift(log);
     if (notificationLogs.length > 50) notificationLogs.pop();
 
-    const slackApp = slackService.getSlackApp();
-    if (slackApp && process.env.SLACK_BOT_TOKEN) {
-      try {
-        await slackApp.client.chat.postMessage({
-          channel: '#orders',
-          text: `🔄 Order #${order.id} Status Updated: ${order.status}`,
-          blocks
-        });
-      } catch (err) {
-        console.warn(`Slack postMessage warning for status update #${order.id}:`, err);
-      }
-    }
+    await postSlackMessageSafely(
+      '#orders',
+      `🔄 Order #${order.id} Status Updated: ${order.status}`,
+      blocks
+    );
 
     return log;
   },
@@ -1314,18 +1458,11 @@ export const slackNotificationService = {
     notificationLogs.unshift(log);
     if (notificationLogs.length > 50) notificationLogs.pop();
 
-    const slackApp = slackService.getSlackApp();
-    if (slackApp && process.env.SLACK_BOT_TOKEN) {
-      try {
-        await slackApp.client.chat.postMessage({
-          channel: '#inventory-alerts',
-          text: `📦 Inventory Alert for ${product.name}: ${product.stock} units left`,
-          blocks
-        });
-      } catch (err) {
-        console.warn(`Slack postMessage warning for stock alert ${product.id}:`, err);
-      }
-    }
+    await postSlackMessageSafely(
+      '#inventory-alerts',
+      `📦 Inventory Alert for ${product.name}: ${product.stock} units left`,
+      blocks
+    );
 
     return log;
   },
@@ -1351,18 +1488,11 @@ export const slackNotificationService = {
     notificationLogs.unshift(log);
     if (notificationLogs.length > 50) notificationLogs.pop();
 
-    const slackApp = slackService.getSlackApp();
-    if (slackApp && process.env.SLACK_BOT_TOKEN) {
-      try {
-        await slackApp.client.chat.postMessage({
-          channel: '#courier-dispatches',
-          text: `🚚 Steadfast Booking ${result.success ? 'Success' : 'Failure'} - Order #${order.id}`,
-          blocks
-        });
-      } catch (err) {
-        console.warn(`Slack postMessage warning for courier notification #${order.id}:`, err);
-      }
-    }
+    await postSlackMessageSafely(
+      '#courier-dispatches',
+      `🚚 Steadfast Booking ${result.success ? 'Success' : 'Failure'} - Order #${order.id}`,
+      blocks
+    );
 
     return log;
   },

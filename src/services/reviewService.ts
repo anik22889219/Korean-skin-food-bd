@@ -1,5 +1,5 @@
 import { collection, doc, setDoc, onSnapshot, query, where, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { ProductReview } from '../types';
 import { productService } from './productService';
 import { cloudinaryService } from './cloudinaryService';
@@ -193,7 +193,7 @@ export const reviewService = {
     reviewsCache = [newReview, ...reviewsCache];
 
     try {
-      await setDoc(doc(db, 'product_reviews', reviewId), newReview);
+      await setDoc(doc(db, 'product_reviews', reviewId), sanitizeForFirestore(newReview));
     } catch (err) {
       console.warn('[ReviewService] Firestore save error (cache updated):', err);
       handleFirestoreError(err, OperationType.WRITE, 'product_reviews', false);

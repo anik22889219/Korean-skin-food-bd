@@ -12,7 +12,7 @@ import {
   runTransaction,
   onSnapshot 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { CreatorReel, CreatorReelStatus } from '../types';
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from '../utils/facebookUrl';
 import { recalculateCreatorPointsAndLevel } from './creatorPointService';
@@ -158,7 +158,7 @@ export async function createCreatorReel(params: {
 
   try {
     const docRef = doc(db, CREATOR_REELS_COLLECTION, creatorReelId);
-    await setDoc(docRef, newReel);
+    await setDoc(docRef, sanitizeForFirestore(newReel));
     return newReel;
   } catch (error) {
     console.error('Error creating creator reel:', error);

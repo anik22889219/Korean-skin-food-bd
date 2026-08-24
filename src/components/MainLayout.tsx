@@ -101,7 +101,7 @@ export const MainLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#FFF5F8]/40 text-gray-800 font-sans selection:bg-[#E91E8C] selection:text-white flex flex-col pb-20 lg:pb-0 overflow-x-hidden">
+    <div className="min-h-screen bg-[#FFF5F8]/40 text-gray-800 font-sans selection:bg-[#E91E8C] selection:text-white flex flex-col pb-20 lg:pb-0">
       
       {/* 1. Dynamic Auto-Sliding Announcement Bar */}
       {globalTheme.enableAnnouncement !== false && (
@@ -122,7 +122,7 @@ export const MainLayout: React.FC = () => {
       )}
 
       {/* 2. Responsive Adaptive Header */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-3 sm:px-6 lg:px-8 py-3 flex items-center justify-between shadow-xs">
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-2.5 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between shadow-xs">
         
         {/* Left Section: Mobile Menu Trigger + Desktop Menus & Admin Shortcut */}
         <div className="flex items-center gap-3 lg:gap-6">
@@ -197,7 +197,7 @@ export const MainLayout: React.FC = () => {
         </Link>
 
         {/* Right Section: Header Live Text + Image Search, Language Switcher, Cart Trigger, Login */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5">
+        <div className="flex items-center gap-1 sm:gap-2.5">
           {/* Desktop Search Bar */}
           <div className="hidden md:block w-56 lg:w-72">
             <HeaderSearch
@@ -213,19 +213,11 @@ export const MainLayout: React.FC = () => {
           {/* Mobile Search Toggle Button */}
           <button
             onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
-            className="md:hidden p-2 text-gray-700 hover:text-[#E91E8C] hover:bg-pink-50 rounded-xl transition cursor-pointer"
+            className="md:hidden p-1.5 sm:p-2 text-gray-700 hover:text-[#E91E8C] hover:bg-pink-50 rounded-xl transition cursor-pointer"
             title="Search Store"
+            aria-label="Search Store"
           >
             <Search size={18} />
-          </button>
-
-          {/* Mobile Image Search Icon Button */}
-          <button
-            onClick={() => setIsImageSearchOpen(true)}
-            className="md:hidden flex items-center gap-1 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white p-2 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
-            title="Search Products by Photo"
-          >
-            <Camera size={16} />
           </button>
 
           {/* Language Switcher Badge Button */}
@@ -233,7 +225,7 @@ export const MainLayout: React.FC = () => {
             onClick={() => setLanguage(language === 'en' ? 'bn' : 'en')}
             aria-label="Toggle Language English / Bengali"
             title={language === 'en' ? 'বাংলা ভাষায় পরিবর্তন করুন' : 'Switch to English'}
-            className="flex items-center gap-1 bg-pink-50/90 hover:bg-pink-100 text-gray-800 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer border border-pink-200/80 transition-all shadow-xs active:scale-95 group"
+            className="flex items-center gap-0.5 sm:gap-1 bg-pink-50/90 hover:bg-pink-100 text-gray-800 px-1.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer border border-pink-200/80 transition-all shadow-xs active:scale-95 group"
           >
             <Languages size={14} className="text-[#E91E8C] shrink-0" />
             <span className="text-[10px] font-black uppercase tracking-wider text-[#E91E8C]">
@@ -430,15 +422,6 @@ export const MainLayout: React.FC = () => {
                   >
                     <Compass size={16} />
                     <span>{activeTranslations.shop || "Shop"}</span>
-                  </Link>
-
-                  <Link
-                    to="/become-a-creator"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-3 px-3.5 py-3 rounded-2xl text-[#E91E8C] bg-pink-50/70 hover:bg-pink-100 transition font-extrabold border border-pink-200/60"
-                  >
-                    <Sparkles size={16} />
-                    <span>{language === 'bn' ? 'ক্রিয়েটর হোন' : 'Become a Creator'}</span>
                   </Link>
 
                   <Link

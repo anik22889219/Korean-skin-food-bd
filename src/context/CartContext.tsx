@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Product, Order, OrderItem } from '../types';
 import { posService } from '../services/posService';
 import { useAuth } from './AuthContext';
-import { db } from '../services/firebase';
+import { db, sanitizeForFirestore } from '../services/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { analytics } from '../services/analyticsService';
 import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
@@ -325,6 +325,25 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const redeemedPts = pointsDiscount; // 1 point = ৳1
       const attribution = getStoredAttribution();
       
+      const attributionPayload: Record<string, any> = {};
+      const utm_source = attribution.last_touch?.utm_source || attribution.first_touch?.utm_source;
+      const utm_medium = attribution.last_touch?.utm_medium || attribution.first_touch?.utm_medium;
+      const utm_campaign = attribution.last_touch?.utm_campaign || attribution.first_touch?.utm_campaign;
+      const utm_content = attribution.last_touch?.utm_content || attribution.first_touch?.utm_content;
+      const utm_term = attribution.last_touch?.utm_term || attribution.first_touch?.utm_term;
+      
+      if (utm_source) attributionPayload.utm_source = utm_source;
+      if (utm_medium) attributionPayload.utm_medium = utm_medium;
+      if (utm_campaign) attributionPayload.utm_campaign = utm_campaign;
+      if (utm_content) attributionPayload.utm_content = utm_content;
+      if (utm_term) attributionPayload.utm_term = utm_term;
+      if (attribution.gclid) attributionPayload.gclid = attribution.gclid;
+      if (attribution.fbclid) attributionPayload.fbclid = attribution.fbclid;
+      if (attribution.fbp) attributionPayload.fbp = attribution.fbp;
+      if (attribution.fbc) attributionPayload.fbc = attribution.fbc;
+      if (attribution.creator?.creator_id) attributionPayload.creator_id = attribution.creator.creator_id;
+      if (attribution.creator?.ref) attributionPayload.ref = attribution.creator.ref;
+
       const orderData = {
         customerName: checkoutForm.name,
         customerPhone: checkoutForm.phone,
@@ -337,22 +356,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         pointsRedeemed: redeemedPts,
         paymentMethod: 'COD' as const,
         customer_uid: user?.uid || null,
-        attribution: {
-          utm_source: attribution.last_touch?.utm_source || attribution.first_touch?.utm_source,
-          utm_medium: attribution.last_touch?.utm_medium || attribution.first_touch?.utm_medium,
-          utm_campaign: attribution.last_touch?.utm_campaign || attribution.first_touch?.utm_campaign,
-          utm_content: attribution.last_touch?.utm_content || attribution.first_touch?.utm_content,
-          utm_term: attribution.last_touch?.utm_term || attribution.first_touch?.utm_term,
-          gclid: attribution.gclid,
-          fbclid: attribution.fbclid,
-          fbp: attribution.fbp,
-          fbc: attribution.fbc,
-          creator_id: attribution.creator?.creator_id,
-          ref: attribution.creator?.ref
-        }
+        attribution: attributionPayload
       };
 
-      const createdOrder = posService.createOnlineOrder(orderData as any);
+      const createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
 
       // Track Authoritative Purchase immediately on order placement
       analytics.trackPurchase(createdOrder).catch(console.warn);
@@ -362,9 +369,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const currentBalance = profile?.loyaltyPoints ?? 0;
         const newBalance = Math.max(0, currentBalance - redeemedPts + earnedPts);
         try {
-          await setDoc(doc(db, 'users', user.uid), {
+          await setDoc(doc(db, 'users', user.uid), sanitizeForFirestore({
             loyaltyPoints: newBalance
-          }, { merge: true });
+          }), { merge: true });
         } catch (ptsErr) {
           console.warn('[CartContext] Failed to update user loyalty points balance:', ptsErr);
         }

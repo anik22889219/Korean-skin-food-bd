@@ -1,5 +1,5 @@
 import { SlackUser, SlackPermission, SlackRole } from '../types';
-import { db } from './firebase';
+import { db, sanitizeForFirestore } from './firebase';
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 
 type SlackApp = any;
@@ -266,7 +266,7 @@ export const slackService = {
     // Save to Firestore
     if (db) {
       try {
-        await setDoc(doc(db, 'slack_users', slackUser.slackUserId), slackUser);
+        await setDoc(doc(db, 'slack_users', slackUser.slackUserId), sanitizeForFirestore(slackUser));
         console.log(`Successfully saved Slack user ${slackUser.slackUserId} to Firestore.`);
       } catch (err) {
         console.warn('Failed to save Slack user to Firestore:', err);

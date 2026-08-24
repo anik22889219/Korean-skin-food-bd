@@ -1,5 +1,5 @@
 import { Order, CourierData } from '../types';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { doc, updateDoc, setDoc } from 'firebase/firestore';
 
 export interface CreateConsignmentResult {
@@ -62,15 +62,15 @@ export async function createSteadfastConsignment(
     // Persist courier details to Firestore order document
     try {
       const orderRef = doc(db, 'orders', order.id);
-      await updateDoc(orderRef, {
+      await updateDoc(orderRef, sanitizeForFirestore({
         courier: courierData,
         status: order.status === 'pending' ? 'processing' : order.status
-      });
+      }));
     } catch (firestoreErr) {
       console.warn('[SteadfastService] Firestore updateDoc warning, attempting setDoc merge:', firestoreErr);
       try {
         const orderRef = doc(db, 'orders', order.id);
-        await setDoc(orderRef, { courier: courierData }, { merge: true });
+        await setDoc(orderRef, sanitizeForFirestore({ courier: courierData }), { merge: true });
       } catch (mergeErr) {
         handleFirestoreError(mergeErr, OperationType.UPDATE, `orders/${order.id}`, false);
       }

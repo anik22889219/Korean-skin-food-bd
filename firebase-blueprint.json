@@ -259,6 +259,89 @@
         "publishedAt": { "type": "string" }
       },
       "required": ["creatorReelId", "creatorId", "creatorUserId", "videoUrl", "caption", "facebookPostUrl", "status"]
+    },
+    "ProductImport": {
+      "title": "ProductImport",
+      "description": "Product import request from barcode scans or AI cataloging",
+      "type": "object",
+      "properties": {
+        "importId": { "type": "string" },
+        "productName": { "type": "string" },
+        "brand": { "type": "string" },
+        "barcode": { "type": "string" },
+        "variant": { "type": "string" },
+        "volume": { "type": "string" },
+        "imageMatchScore": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending_approval", "approved", "rejected", "re_searching"] },
+        "source": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "performedBy": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "approvedAt": { "type": "string" }
+      },
+      "required": ["importId", "productName", "brand", "barcode", "status", "timestamp"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Audit trail log records for system and operational events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entityType": { "type": "string" },
+        "action": { "type": "string" },
+        "importId": { "type": "string" },
+        "productName": { "type": "string" },
+        "barcode": { "type": "string" },
+        "orderId": { "type": "string" },
+        "ticketId": { "type": "string" },
+        "performedBy": { "type": "string" },
+        "slackUserId": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "entityType", "action", "performedBy", "timestamp"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Customer care support tickets and resolution threads",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ticketNumber": { "type": "string" },
+        "orderId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "refundAmount": { "type": "number" },
+        "refundStatus": { "type": "string" }
+      },
+      "required": ["id", "ticketNumber", "customerName", "customerPhone", "subject", "status", "priority", "createdAt"]
+    },
+    "SlackErrorLog": {
+      "title": "SlackErrorLog",
+      "description": "Slack integration webhook and delivery error records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "channel": { "type": "string" },
+        "type": { "type": "string" },
+        "errorMessage": { "type": "string" },
+        "stack": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "type", "errorMessage"]
     }
   },
   "firestore": {
@@ -277,6 +360,22 @@
     "/slack_users/{slackUserId}": {
       "schema": "SlackUser",
       "description": "Slack user ID authorization mappings to Firestore admin profiles"
+    },
+    "/product_imports/{importId}": {
+      "schema": "ProductImport",
+      "description": "Pending and approved product import requests"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Operational audit log records"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Customer support and inquiry tickets"
+    },
+    "/slack_error_logs/{logId}": {
+      "schema": "SlackErrorLog",
+      "description": "Slack delivery error logs"
     },
     "/product_reviews/{reviewId}": {
       "schema": "ProductReview",
