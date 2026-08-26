@@ -4,8 +4,11 @@ service cloud.firestore {
     
     // Helper to check if user has a staff role
     function isStaff() {
-      return request.auth != null && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'inventory_manager', 'customer_support', 'super_admin', 'hr'];
+      return request.auth != null && (
+        (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email in ['koreanskinfood.bd@gmail.com', 'admin@koreanskinfood.bd', 'inventory@koreanskinfood.bd']) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'inventory_manager', 'customer_support', 'super_admin', 'hr'])
+      );
     }
 
     // users
@@ -188,7 +191,8 @@ service cloud.firestore {
     }
 
     match /slack_users/{slackUserId} {
-      allow read, write: if isStaff();
+      allow read: if true;
+      allow write: if isStaff();
     }
 
     match /product_imports/{importId} {
@@ -213,10 +217,10 @@ service cloud.firestore {
     }
 
     match /pos_sessions/{sessionId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
 
       match /scans/{scanId} {
-        allow read, write: if isStaff();
+        allow read, write: if true;
       }
     }
   }

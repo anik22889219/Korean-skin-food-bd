@@ -34,7 +34,9 @@ import {
   Download,
   ExternalLink,
   Send,
-  Loader2
+  Loader2,
+  Ban,
+  X
 } from 'lucide-react';
 import { Order, OrderItem, Product, StockMovement } from '../types';
 import { posService } from '../services/posService';
@@ -106,6 +108,13 @@ export const AdminOrders: React.FC = () => {
   const [invoiceModalOrder, setInvoiceModalOrder] = useState<Order | null>(null);
   const [isSteadfastLoading, setIsSteadfastLoading] = useState<boolean>(false);
   const [steadfastNotice, setSteadfastNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Cancel Order Modal State
+  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>('Customer requested cancellation');
+  const [customCancelReason, setCustomCancelReason] = useState<string>('');
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -365,22 +374,63 @@ export const AdminOrders: React.FC = () => {
     }
   };
 
-  // Cancel Order with Stock Restoration handling
+  // Open Cancel Order modal
   const handleCancelOrder = (order: Order) => {
-    const willRestore = order.stock_deducted;
-    const confirmText = willRestore
-      ? `Cancel Order #${order.id}?\n\nThis order previously had stock deducted. Stock will be RESTORED (+quantity) back to inventory.`
-      : `Cancel Order #${order.id}?\n\nThis order has NOT had stock deducted yet. No stock will be altered.`;
+    setOrderToCancel(order);
+    setCancelReason('Customer requested cancellation');
+    setCustomCancelReason('');
+    setActionFeedback(null);
+  };
 
-    if (window.confirm(confirmText)) {
-      const res = posService.cancelOrder(order.id, 'Cancelled by Admin', 'Admin Manager');
-      alert(res.message);
-      if (activeFulfillmentOrder?.id === order.id) {
-        setActiveFulfillmentOrder(null);
+  // Confirm cancel order action
+  const handleConfirmCancelOrder = () => {
+    if (!orderToCancel || isCancelling) return;
+    setIsCancelling(true);
+    setActionFeedback(null);
+
+    try {
+      const finalReason = cancelReason === 'Other'
+        ? (customCancelReason.trim() || 'Cancelled by Admin')
+        : cancelReason;
+
+      const res = posService.cancelOrder(orderToCancel.id, finalReason, 'Admin Manager');
+
+      if (res.success) {
+        setActionFeedback({
+          type: 'success',
+          text: res.message || `Order #${orderToCancel.id} cancelled successfully.`
+        });
+
+        // Sync active fulfillment if matching
+        if (activeFulfillmentOrder?.id === orderToCancel.id) {
+          setActiveFulfillmentOrder(null);
+        }
+        // Sync open modals
+        if (selectedOrderDetails?.id === orderToCancel.id) {
+          setSelectedOrderDetails(res.order || { ...orderToCancel, status: 'cancelled' });
+        }
+        if (invoiceModalOrder?.id === orderToCancel.id) {
+          setInvoiceModalOrder(res.order || { ...orderToCancel, status: 'cancelled' });
+        }
+
+        setOrders([...posService.getOrders()]);
+        setProducts([...productService.getProducts()]);
+        setMovements([...productService.getStockMovements()]);
+        setOrderToCancel(null);
+      } else {
+        setActionFeedback({
+          type: 'error',
+          text: res.message || 'Failed to cancel order.'
+        });
       }
-      setOrders([...posService.getOrders()]);
-      setProducts([...productService.getProducts()]);
-      setMovements([...productService.getStockMovements()]);
+    } catch (err: any) {
+      console.error('Cancel order error:', err);
+      setActionFeedback({
+        type: 'error',
+        text: err?.message || 'Error occurred while cancelling order.'
+      });
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -473,6 +523,30 @@ export const AdminOrders: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Action Feedback Banner */}
+      {actionFeedback && (
+        <div className={`p-4 rounded-2xl text-sm font-bold flex items-center justify-between gap-3 shadow-xs transition-all ${
+          actionFeedback.type === 'success'
+            ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+            : 'bg-rose-50 text-rose-900 border border-rose-200'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {actionFeedback.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            )}
+            <span>{actionFeedback.text}</span>
+          </div>
+          <button
+            onClick={() => setActionFeedback(null)}
+            className="text-slate-400 hover:text-slate-600 p-1 font-bold text-sm"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* ACTIVE BARCODE FULFILLMENT VERIFICATION SCREEN */}
@@ -993,19 +1067,30 @@ export const AdminOrders: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 justify-between md:justify-end">
+                  <div className="flex items-center gap-3 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 justify-between md:justify-end">
                     <div className="text-right">
                       <div className="text-xs text-slate-400 font-semibold">Total Amount</div>
                       <div className="text-lg font-extrabold text-slate-900">৳{order.totalAmount.toLocaleString()}</div>
                     </div>
 
-                    <button
-                      onClick={() => handleStartFulfillment(order)}
-                      className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-sm rounded-xl transition-all shadow-sm flex items-center gap-2 shrink-0"
-                    >
-                      <Barcode className="w-4 h-4" />
-                      Start Fulfillment & Scan
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleStartFulfillment(order)}
+                        className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center gap-2 shrink-0"
+                      >
+                        <Barcode className="w-4 h-4" />
+                        Start Fulfillment & Scan
+                      </button>
+
+                      <button
+                        onClick={() => handleCancelOrder(order)}
+                        className="px-3 py-2.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 hover:border-rose-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1 shrink-0"
+                        title="Cancel Order"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1359,7 +1444,7 @@ export const AdminOrders: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex flex-wrap items-center gap-2 pt-2">
               <button
                 onClick={() => {
                   setInvoiceModalOrder(selectedOrderDetails);
@@ -1389,6 +1474,20 @@ export const AdminOrders: React.FC = () => {
                   Steadfast
                 </button>
               )}
+
+              {selectedOrderDetails.status !== 'cancelled' && (
+                <button
+                  onClick={() => {
+                    const ord = selectedOrderDetails;
+                    setSelectedOrderDetails(null);
+                    handleCancelOrder(ord);
+                  }}
+                  className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Ban className="w-4 h-4" />
+                  Cancel Order
+                </button>
+              )}
             </div>
 
             <button
@@ -1397,6 +1496,137 @@ export const AdminOrders: React.FC = () => {
             >
               Close
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Order Confirmation Modal */}
+      {orderToCancel && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-lg">
+                    Cancel Order #{orderToCancel.id}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Customer: {orderToCancel.customerName} ({orderToCancel.customerPhone})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOrderToCancel(null)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Stock Restoration Notice Badge */}
+            {orderToCancel.stock_deducted ? (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                  Automatic Stock Restoration
+                </div>
+                <p className="text-slate-600 leading-relaxed">
+                  This order had stock deducted earlier. Cancelling will automatically restore <strong>+{orderToCancel.items.reduce((s, i) => s + i.quantity, 0)} items</strong> back to catalog inventory and record an audit log.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-blue-800">
+                  <CheckCircle className="w-3.5 h-3.5 text-blue-600" />
+                  No Inventory Impact
+                </div>
+                <p className="text-slate-600 leading-relaxed">
+                  Stock was pending fulfillment verification. Cancelling will not alter your physical inventory counts.
+                </p>
+              </div>
+            )}
+
+            {/* Cancellation Reason Selection */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Select Cancellation Reason:
+              </label>
+              <div className="space-y-1.5">
+                {[
+                  'Customer requested cancellation',
+                  'Customer unreachable / Invalid phone number',
+                  'Out of stock / Damaged product',
+                  'Duplicate test order',
+                  'Other'
+                ].map((reason) => (
+                  <label
+                    key={reason}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
+                      cancelReason === reason
+                        ? 'bg-rose-50 border-rose-300 text-rose-900'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="cancel_reason"
+                      value={reason}
+                      checked={cancelReason === reason}
+                      onChange={() => setCancelReason(reason)}
+                      className="text-rose-600 focus:ring-rose-500"
+                    />
+                    <span>{reason}</span>
+                  </label>
+                ))}
+              </div>
+
+              {cancelReason === 'Other' && (
+                <div className="pt-2">
+                  <input
+                    type="text"
+                    placeholder="Enter specific cancellation reason..."
+                    value={customCancelReason}
+                    onChange={(e) => setCustomCancelReason(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-hidden focus:border-rose-500"
+                    autoFocus
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setOrderToCancel(null)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all"
+              >
+                Keep Order
+              </button>
+
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={handleConfirmCancelOrder}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl transition-all shadow-md shadow-rose-200 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isCancelling ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Cancelling...</span>
+                  </>
+                ) : (
+                  <>
+                    <Ban className="w-4 h-4" />
+                    <span>Confirm Cancel</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -200,8 +200,8 @@ export const ProductManagement: React.FC = () => {
 
       if (res.ok) {
         const data = await res.json();
-        if (data && data.name) {
-          const foundProductName = data.name;
+        if (data && (data.name || data.brand)) {
+          const foundProductName = data.name || `${data.brand || 'K-Beauty'} Skincare Item`;
           setPendingScannedBarcode(cleanBc);
 
           // Notify Slack of scanned barcode product import request
@@ -209,7 +209,7 @@ export const ProductManagement: React.FC = () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              productName: data.name,
+              productName: foundProductName,
               brand: data.brand || 'Korean Skincare',
               barcode: cleanBc,
               variant: data.variant || data.ml || 'Full Size',
@@ -223,17 +223,37 @@ export const ProductManagement: React.FC = () => {
             })
           }).catch(err => console.warn('Slack notify error:', err));
 
-          // Open & switch to "Upload by Product Name" mode
-          setShowUploadSelector(true);
-          setUploadSelectorMode('name');
-          setNameSearchQuery(foundProductName);
+          // Open instant Product Registration Confirmation Modal with AI-identified data
+          const fullProdObj: Product = {
+            id: 'p' + Math.floor(100 + Math.random() * 900),
+            name: foundProductName,
+            nameBN: data.nameBN || '',
+            brand: data.brand || 'Korean Skincare',
+            category: data.category || 'Serum & Essence',
+            skinTypes: ['All'],
+            price: Number(data.price) || 1500,
+            stock: 20,
+            ml: data.ml || '100ml',
+            image: data.imageUrl || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60',
+            images: [],
+            description: data.description || `Authentic Korean skincare product with barcode ${cleanBc}. Formulated to hydrate and restore natural radiance.`,
+            descriptionBN: data.descriptionBN || 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।',
+            rating: 4.8,
+            reviewsCount: 1,
+            barcode: cleanBc,
+            barcodeNormalized: cleanBc,
+            sku: '',
+            lowStockThreshold: 5,
+            generatedSeoContent: `SEO Title: ${foundProductName} | Korean Skin Food BD\nKeywords: ${data.brand || 'K-Beauty'}, skincare, Bangladesh\nMeta Description: Buy authentic ${foundProductName} in Bangladesh at Korean Skin Food BD.`
+          };
 
-          // Trigger live search by product name to load suggestions
-          await handleSearchProductsByName(foundProductName);
+          setShowUploadSelector(false);
+          setConfirmationProductData(fullProdObj);
+          setIsConfirmationModalOpen(true);
 
           setAlertMsg({
             type: 'success',
-            text: `✨ Barcode Google Search result: "${foundProductName}". Suggestions loaded in "Upload by Product Name"! Select a product to confirm.`
+            text: `✨ Barcode identified: "${foundProductName}" (${data.brand || 'K-Beauty'})! Please review and confirm to save to inventory.`
           });
           setTimeout(() => setAlertMsg(null), 7000);
           return data;
@@ -606,10 +626,10 @@ export const ProductManagement: React.FC = () => {
     }
   };
 
-  // Automatically process product image with Gemini, upload to Cloudinary, and save directly to database
+  // Automatically process product image with Gemini, upload to Cloudinary, and present for confirmation/save
   const handleProcessImageWithGemini = async (base64Img: string) => {
     setIsAnalyzingCapturedImage(true);
-    setAlertMsg({ type: 'success', text: 'Step 1 of 3: Gemini is analyzing the skincare bottle design & labels...' });
+    setAlertMsg({ type: 'info', text: 'Step 1 of 3: Gemini Vision is analyzing the skincare bottle design & labels...' });
     
     try {
       // 1. Fetch analysis details from Gemini
@@ -622,12 +642,11 @@ export const ProductManagement: React.FC = () => {
       const data = await res.json();
       
       const newId = 'p' + Math.floor(100 + Math.random() * 900);
-      // AI Product Import Rule: Do NOT invent fake barcodes. Set to empty if not detected.
       const barcode = data.barcode ? normalizeBarcode(data.barcode) : '';
-      const generatedName = data.brand && data.ml ? `${data.brand} Skincare ${data.ml}` : 'Analyzed Skincare Bottle';
-      const productName = data.seoTitle || generatedName;
+      const fallbackName = data.brand && data.ml ? `${data.brand} Skincare (${data.ml})` : 'Authentic K-Beauty Skincare';
+      const productName = data.name || data.seoTitle || fallbackName;
 
-      setAlertMsg({ type: 'success', text: 'Step 2 of 3: Uploading your high-resolution captured snapshot to Cloudinary...' });
+      setAlertMsg({ type: 'info', text: 'Step 2 of 3: Uploading high-resolution captured snapshot to Cloudinary...' });
 
       // 2. Upload captured photo to Cloudinary
       let finalImageUrl = base64Img;
@@ -640,62 +659,63 @@ export const ProductManagement: React.FC = () => {
         console.warn("Cloudinary photo upload failed, using local base64:", cloudErr);
       }
 
-      setAlertMsg({ type: 'success', text: 'Step 3 of 3: Phonetically translating brand to Bangla and saving product...' });
+      setAlertMsg({ type: 'info', text: 'Step 3 of 3: Finalizing bilingual translation and product details...' });
 
-      // 3. Fetch phonetic translation
-      let nameBN = '';
-      try {
-        const transRes = await fetch('/api/gemini/translate-name', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: productName })
-        });
-        if (transRes.ok) {
-          const transData = await transRes.json();
-          nameBN = transData.translatedName || '';
+      // 3. Fetch phonetic translation if not provided by Gemini
+      let nameBN = data.nameBN || '';
+      if (!nameBN) {
+        try {
+          const transRes = await fetch('/api/gemini/translate-name', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: productName })
+          });
+          if (transRes.ok) {
+            const transData = await transRes.json();
+            nameBN = transData.translatedName || '';
+          }
+        } catch (transErr) {
+          console.warn("Phonetic translation fallback:", transErr);
         }
-      } catch (transErr) {
-        console.warn("Phonetic translation failed:", transErr);
       }
 
       // 4. Assemble full Product object
-      const completeProduct = {
+      const completeProduct: Product = {
         id: newId,
         name: productName,
         nameBN: nameBN,
         brand: data.brand || 'Authentic K-Beauty',
         category: data.category || 'Serum & Essence',
         skinTypes: ['All'],
-        price: 1500, // Reasonable standard retail price
-        stock: 20, // Default opening stock
+        price: Number(data.price) || 1850,
+        stock: 20,
         ml: data.ml || '100ml',
-        image: finalImageUrl, // Saved Cloudinary image URL!
+        image: finalImageUrl,
         images: [],
         description: data.description || 'Premium Korean skincare imported directly from Seoul.',
-        descriptionBN: 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের যত্নে অত্যন্ত কার্যকরী।',
+        descriptionBN: data.descriptionBN || 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।',
         rating: 4.8,
         reviewsCount: 1,
-        barcode,
-        generatedSeoContent: `SEO Title: ${data.seoTitle || ''}\nKeywords: ${data.keywords || ''}\nMeta Description: ${data.metaDescription || ''}`
+        barcode: barcode || undefined,
+        barcodeNormalized: barcode || undefined,
+        sku: '',
+        lowStockThreshold: 5,
+        generatedSeoContent: `SEO Title: ${data.seoTitle || productName}\nKeywords: ${data.keywords || (data.brand + ', K-Beauty, Bangladesh')}\nMeta Description: ${data.metaDescription || ('Buy authentic ' + productName + ' in Bangladesh.')}`
       };
 
-      // 5. Save product to Firestore database directly
-      await productService.createProduct(completeProduct);
-
-      // 6. Try generating copywriting right away
-      try {
-        await agentService.generateProductMarketingContent(newId);
-      } catch (e) {
-        console.warn("Marketing content generation failed:", e);
-      }
-
+      // 5. Present in confirmation modal for admin review & confirmation
       setShowUploadSelector(false);
-      refreshProducts();
-      setAlertMsg({ type: 'success', text: '✨ Gemini successfully processed the image! Photo stored on Cloudinary and product registered in Firestore.' });
-      setTimeout(() => setAlertMsg(null), 5000);
+      setConfirmationProductData(completeProduct);
+      setIsConfirmationModalOpen(true);
+
+      setAlertMsg({ 
+        type: 'success', 
+        text: `✨ Gemini successfully analyzed "${productName}" (${data.brand || 'K-Beauty'})! Please review details and confirm to save to inventory.` 
+      });
+      setTimeout(() => setAlertMsg(null), 7000);
     } catch (err: any) {
-      console.error("Gemini image analysis and registration failed:", err);
-      setAlertMsg({ type: 'error', text: 'Image registration failed. ' + err.message });
+      console.error("Gemini image analysis failed:", err);
+      setAlertMsg({ type: 'error', text: 'Image analysis failed: ' + (err.message || 'Please try again') });
       setTimeout(() => setAlertMsg(null), 5000);
     } finally {
       setIsAnalyzingCapturedImage(false);
@@ -2346,6 +2366,26 @@ export const ProductManagement: React.FC = () => {
                     <div>
                       <span className="font-bold text-gray-800 text-xs block group-hover:text-[#E91E8C] transition">Upload by Product Name</span>
                       <span className="text-[10px] text-gray-400 block mt-0.5 leading-relaxed">Type any cosmetics product. Shows a real-time skin care search database network to let you pick & auto-fill.</span>
+                    </div>
+                  </button>
+
+                  {/* Option 3: By Photo / Camera */}
+                  <button
+                    onClick={() => {
+                      setCapturedImageBase64(null);
+                      setUploadSelectorMode('image');
+                    }}
+                    className="group p-4 bg-white hover:bg-pink-50/15 border border-gray-150 hover:border-pink-200 rounded-2xl transition text-left flex items-start gap-3.5 cursor-pointer shadow-sm hover:shadow"
+                  >
+                    <div className="p-3 bg-pink-50 group-hover:bg-[#E91E8C] rounded-xl text-[#E91E8C] group-hover:text-white transition flex-shrink-0">
+                      <Camera size={16} />
+                    </div>
+                    <div>
+                      <span className="font-bold text-gray-800 text-xs block group-hover:text-[#E91E8C] transition flex items-center gap-1.5">
+                        <span>Upload by Product Photo / Camera</span>
+                        <span className="px-1.5 py-0.5 bg-pink-100 text-[#E91E8C] text-[9px] font-black rounded uppercase">Gemini Vision AI</span>
+                      </span>
+                      <span className="text-[10px] text-gray-400 block mt-0.5 leading-relaxed">Take a photo or upload product packaging images. Gemini extracts brand, ingredients, bottle size (ml), BDT price, and description.</span>
                     </div>
                   </button>
 

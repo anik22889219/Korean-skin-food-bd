@@ -409,6 +409,37 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
     console.warn("ZXing canvas enhancement decode error:", err);
   }
 
+  // 4. Gemini Vision AI Barcode Reader Fallback (Optical Character & Barcode Reading from complex/angled photos)
+  try {
+    const readerBase64 = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+
+    if (readerBase64) {
+      const res = await fetch('/api/gemini/read-barcode-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: readerBase64,
+          mimeType: file.type || 'image/jpeg'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.found && data.barcode) {
+          const norm = normalizeBarcode(data.barcode);
+          if (norm) return norm;
+        }
+      }
+    }
+  } catch (aiErr) {
+    console.warn("Gemini vision barcode reading error:", aiErr);
+  }
+
   return null;
 }
 

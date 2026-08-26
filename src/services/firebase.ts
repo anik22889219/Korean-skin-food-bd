@@ -2,6 +2,7 @@ import { initializeApp, getApp, getApps } from 'firebase/app';
 import { initializeFirestore, getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
 // Silence benign internal gRPC idle stream disconnection notifications
@@ -21,17 +22,32 @@ const getEnvVar = (key: string): string | undefined => {
   return undefined;
 };
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: getEnvVar('VITE_FIREBASE_API_KEY') || firebaseConfigJson.apiKey,
   authDomain: getEnvVar('VITE_FIREBASE_AUTH_DOMAIN') || firebaseConfigJson.authDomain,
   projectId: getEnvVar('VITE_FIREBASE_PROJECT_ID') || firebaseConfigJson.projectId,
   storageBucket: getEnvVar('VITE_FIREBASE_STORAGE_BUCKET') || firebaseConfigJson.storageBucket,
   messagingSenderId: getEnvVar('VITE_FIREBASE_SENDER_ID') || firebaseConfigJson.messagingSenderId,
-  appId: getEnvVar('VITE_FIREBASE_APP_ID') || firebaseConfigJson.appId
+  appId: getEnvVar('VITE_FIREBASE_APP_ID') || firebaseConfigJson.appId,
+  measurementId: getEnvVar('VITE_FIREBASE_MEASUREMENT_ID') || firebaseConfigJson.measurementId || "G-CGPWW8JK6V"
 };
 
 // Initialize Firebase
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+// Initialize Analytics safely
+let analytics: Analytics | null = null;
+if (typeof window !== 'undefined') {
+  isSupported().then((supported) => {
+    if (supported) {
+      try {
+        analytics = getAnalytics(app);
+      } catch (err) {
+        console.warn('[Firebase Analytics] initialization skipped:', err);
+      }
+    }
+  }).catch(() => {});
+}
 
 // Get custom database ID if available
 const databaseId = getEnvVar('VITE_FIREBASE_FIRESTORE_DATABASE_ID') || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
@@ -152,4 +168,4 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
   return cleanObj as T;
 }
 
-export { app, db, auth, functions };
+export { app, db, auth, functions, analytics };

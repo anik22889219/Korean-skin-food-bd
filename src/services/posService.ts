@@ -443,6 +443,7 @@ export const posService = {
     // Update cache and Firestore
     ordersCache = [newOrder, ...ordersCache];
     setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(newOrder)).catch(console.error);
+    notifyOrderSubscribers();
 
     // Trigger real-time Slack Notification
     import('./slackNotificationService').then(({ slackNotificationService }) => {
@@ -453,7 +454,8 @@ export const posService = {
   },
 
   startFulfillment(orderId: string): { success: boolean; message: string; order?: Order } {
-    const idx = ordersCache.findIndex(o => o.id === orderId);
+    const cleanId = orderId?.trim();
+    const idx = ordersCache.findIndex(o => o.id === cleanId || o.id.toLowerCase() === cleanId?.toLowerCase());
     if (idx === -1) {
       return { success: false, message: 'Order not found' };
     }
@@ -470,7 +472,8 @@ export const posService = {
     }));
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
+    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    notifyOrderSubscribers();
 
     return { success: true, message: 'Fulfillment started! Order status updated to PACKING.', order };
   },
@@ -482,7 +485,8 @@ export const posService = {
     matchedProduct?: Product;
     isComplete?: boolean;
   } {
-    const idx = ordersCache.findIndex(o => o.id === orderId);
+    const cleanId = orderId?.trim();
+    const idx = ordersCache.findIndex(o => o.id === cleanId || o.id.toLowerCase() === cleanId?.toLowerCase());
     if (idx === -1) {
       return { success: false, message: 'Order not found' };
     }
@@ -538,7 +542,8 @@ export const posService = {
     const isComplete = order.items.every(it => (it.scannedQuantity || 0) === it.quantity);
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
+    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    notifyOrderSubscribers();
 
     return {
       success: true,
@@ -550,7 +555,8 @@ export const posService = {
   },
 
   confirmOrderFulfillment(orderId: string, staffName: string = 'Admin Staff'): { success: boolean; message: string; order?: Order } {
-    const idx = ordersCache.findIndex(o => o.id === orderId);
+    const cleanId = orderId?.trim();
+    const idx = ordersCache.findIndex(o => o.id === cleanId || o.id.toLowerCase() === cleanId?.toLowerCase());
     if (idx === -1) {
       return { success: false, message: 'Order not found' };
     }
@@ -622,7 +628,8 @@ export const posService = {
     order.isPaid = true;
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
+    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    notifyOrderSubscribers();
 
     return {
       success: true,
@@ -632,22 +639,23 @@ export const posService = {
   },
 
   cancelOrder(orderId: string, reason: string = 'Cancelled by Staff', staffName: string = 'Admin Staff'): { success: boolean; message: string; order?: Order } {
-    const idx = ordersCache.findIndex(o => o.id === orderId);
+    const cleanId = orderId?.trim();
+    const idx = ordersCache.findIndex(o => o.id === cleanId || o.id.toLowerCase() === cleanId?.toLowerCase());
     if (idx === -1) {
-      return { success: false, message: 'Order not found' };
+      return { success: false, message: `Order "${orderId}" not found.` };
     }
 
     const order = { ...ordersCache[idx] };
 
     if (order.status === 'cancelled') {
-      return { success: false, message: 'Order is already cancelled.' };
+      return { success: false, message: `Order #${order.id} is already cancelled.` };
     }
 
     // Check if stock was previously deducted
     if (order.stock_deducted) {
       // Prevent duplicate stock restoration
       if (order.stock_restored) {
-        return { success: false, message: 'Stock for this order was already restored previously. Duplicate restoration prevented.' };
+        return { success: false, message: `Stock for order #${order.id} was already restored previously. Duplicate restoration prevented.` };
       }
 
       // Restore stock for all items
@@ -688,8 +696,10 @@ export const posService = {
     }
 
     order.status = 'cancelled';
+    order.cancelReason = reason;
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(order)).catch(console.error);
+    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    notifyOrderSubscribers();
 
     import('./slackNotificationService').then(({ slackNotificationService }) => {
       slackNotificationService.notifyOrderStatusChange(order, 'packing').catch(console.warn);
@@ -698,14 +708,15 @@ export const posService = {
     return {
       success: true,
       message: order.stock_restored
-        ? `Order #${order.id} cancelled. Stock restored to inventory.`
+        ? `Order #${order.id} cancelled. Stock of ${order.items.reduce((s, i) => s + i.quantity, 0)} items restored to inventory.`
         : `Order #${order.id} cancelled. Stock was not deducted previously.`,
       order
     };
   },
 
   updateOrderStatus(orderId: string, status: Order['status']): Order | undefined {
-    const index = ordersCache.findIndex(o => o.id === orderId);
+    const cleanId = orderId?.trim();
+    const index = ordersCache.findIndex(o => o.id === cleanId || o.id.toLowerCase() === cleanId?.toLowerCase());
     if (index !== -1) {
       const previousStatus = ordersCache[index].status;
       const updatedOrder = { ...ordersCache[index], status };
@@ -713,7 +724,8 @@ export const posService = {
         updatedOrder.isPaid = true;
       }
       ordersCache[index] = updatedOrder;
-      setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(updatedOrder)).catch(console.error);
+      setDoc(doc(db, 'orders', updatedOrder.id), sanitizeForFirestore(updatedOrder)).catch(console.error);
+      notifyOrderSubscribers();
 
       if (previousStatus !== status) {
         import('./slackNotificationService').then(({ slackNotificationService }) => {

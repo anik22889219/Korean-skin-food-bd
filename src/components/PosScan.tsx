@@ -29,6 +29,7 @@ import {
   RefreshCw,
   ShoppingBag,
   Volume2,
+  VolumeX,
   Bug,
   Info
 } from 'lucide-react';
@@ -40,21 +41,92 @@ interface PosScanProps {
   onLoginStaff: (email: string, role: any) => void;
 }
 
-// Play instant audio beep on successful camera scan
-function playScanBeep() {
+// Shared resilient Web Audio API synthesizer for retail barcode scanning
+let globalAudioCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
   try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz beep
-    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.15);
+    if (!globalAudioCtx) {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        globalAudioCtx = new AudioContextClass();
+      }
+    }
+    if (globalAudioCtx && globalAudioCtx.state === 'suspended') {
+      globalAudioCtx.resume().catch(() => {});
+    }
+    return globalAudioCtx;
   } catch (e) {
-    // Audio Context restricted before first user interaction
+    return null;
+  }
+}
+
+/**
+ * Play a high-precision dual-tone retail scanner chime upon successful barcode read
+ */
+export function playSuccessBeep(volume: number = 0.25) {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    // Harmonic dual-tone register chime (1400Hz -> 2300Hz quick bell curve)
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(1400, now);
+    osc1.frequency.exponentialRampToValueAtTime(2350, now + 0.07);
+
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(2800, now);
+    osc2.frequency.exponentialRampToValueAtTime(3520, now + 0.07);
+
+    gainNode.gain.setValueAtTime(0.001, now);
+    gainNode.gain.linearRampToValueAtTime(volume, now + 0.015);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.18);
+    osc2.stop(now + 0.18);
+  } catch (e) {
+    // Autoplay or audio context restriction fallback
+  }
+}
+
+/**
+ * Play a short low-pitch alert tone when barcode is unrecognized or invalid
+ */
+export function playErrorBeep(volume: number = 0.2) {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.setValueAtTime(220, now + 0.08);
+
+    gainNode.gain.setValueAtTime(0.001, now);
+    gainNode.gain.linearRampToValueAtTime(volume, now + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.22);
+  } catch (e) {
+    // Audio Context restricted
   }
 }
 
@@ -62,6 +134,47 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   const [scannedItemsCount, setScannedItemsCount] = useState(0);
   const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [scanStatusMsg, setScanStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Audio Feedback Toggle State (persisted in localStorage)
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('pos_scan_sound_enabled');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    try {
+      localStorage.setItem('pos_scan_sound_enabled', String(next));
+    } catch {}
+    if (next) {
+      playSuccessBeep(0.22);
+    }
+  };
+
+  const handleTestSound = () => {
+    playSuccessBeep(0.28);
+    if (navigator.vibrate) {
+      navigator.vibrate(80);
+    }
+  };
+
+  // Warm up audio context on component mount or first touch
+  useEffect(() => {
+    const unlockAudio = () => {
+      getAudioContext();
+    };
+    window.addEventListener('click', unlockAudio, { once: true });
+    window.addEventListener('touchstart', unlockAudio, { once: true });
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+  }, []);
   
   // Barcode Debug Mode State
   const [showDebugMode, setShowDebugMode] = useState<boolean>(true);
@@ -239,12 +352,22 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   const handleScanSuccess = async (rawText: string) => {
     if (!rawText) return;
 
+    // Ensure audio context is ready on user/scanner trigger
+    getAudioContext();
+
     // Use unified lookup function
     const allProducts = productService.getProducts();
     const { product, debugInfo: scanDebug } = findProductByScannedCode(allProducts, rawText);
     setDebugInfo(scanDebug);
 
     if (!product) {
+      // Audio alert for unrecognized barcode
+      if (soundEnabled) {
+        playErrorBeep();
+      }
+      if (navigator.vibrate) {
+        navigator.vibrate([120, 60, 120]);
+      }
       setScanStatusMsg({
         type: 'error',
         text: `Unrecognized product code: Raw "${scanDebug.rawValue}" -> Normalized "${scanDebug.normalizedValue}"`
@@ -262,10 +385,12 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
 
     lastScanRef.current = { productId, time: now };
 
-    // Play instant audio beep & haptic feedback
-    playScanBeep();
+    // Play instant pleasant audio confirmation chime & haptic feedback
+    if (soundEnabled) {
+      playSuccessBeep();
+    }
     if (navigator.vibrate) {
-      navigator.vibrate(120);
+      navigator.vibrate(90);
     }
 
     // Call shared addProductToSession helper
@@ -277,6 +402,9 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         text: `Added "${result.product.name}"!`
       });
     } else {
+      if (soundEnabled) {
+        playErrorBeep();
+      }
       setScanStatusMsg({
         type: 'error',
         text: result.message || `Failed to add product.`
@@ -452,13 +580,30 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
           <span className="text-[9px] text-pink-600 font-bold font-mono">Session: {sessionId}</span>
         </div>
 
-        <button
-          onClick={() => setActiveTab(activeTab === 'cart' ? 'camera' : 'cart')}
-          className="flex items-center gap-1.5 bg-pink-50 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1 rounded-full font-mono shadow-inner cursor-pointer"
-        >
-          <ShoppingBag size={12} />
-          <span>{scannedItemsCount} Scanned</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Audio Beep Feedback Toggle */}
+          <button
+            type="button"
+            onClick={toggleSound}
+            className={`p-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 shadow-xs ${
+              soundEnabled 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
+                : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'
+            }`}
+            title={soundEnabled ? 'Audio Feedback ON (Tap to mute)' : 'Audio Feedback MUTED (Tap to enable)'}
+          >
+            {soundEnabled ? <Volume2 size={13} className="text-emerald-600 animate-pulse" /> : <VolumeX size={13} />}
+            <span className="text-[9px] font-black uppercase font-mono">{soundEnabled ? 'BEEP' : 'MUTE'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab(activeTab === 'cart' ? 'camera' : 'cart')}
+            className="flex items-center gap-1.5 bg-pink-50 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1.5 rounded-xl font-mono shadow-inner cursor-pointer"
+          >
+            <ShoppingBag size={12} />
+            <span>{scannedItemsCount}</span>
+          </button>
+        </div>
       </div>
 
       {/* MODE TABS (Camera Scan / Manual Entry / Live Cart) */}
@@ -671,13 +816,24 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                   <Bug size={12} />
                   <span>Barcode Debug Inspector</span>
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setShowDebugMode(!showDebugMode)}
-                  className="text-slate-400 hover:text-white underline cursor-pointer text-[9px]"
-                >
-                  {showDebugMode ? 'Hide' : 'Show'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestSound}
+                    className="bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-bold border border-slate-700 transition cursor-pointer flex items-center gap-1"
+                    title="Play retail scanner test beep"
+                  >
+                    <Volume2 size={10} />
+                    <span>Test Beep</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDebugMode(!showDebugMode)}
+                    className="text-slate-400 hover:text-white underline cursor-pointer text-[9px]"
+                  >
+                    {showDebugMode ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
 
               {showDebugMode && (

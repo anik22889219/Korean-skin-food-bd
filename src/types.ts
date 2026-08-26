@@ -20,7 +20,7 @@ export interface Product {
   barcodeNormalized?: string;
   sku?: string;
   lowStockThreshold?: number;
-  qrCodeUrl: string;
+  qrCodeUrl?: string;
   generatedSeoContent?: string;
   generatedSocialPost?: string;
   autoDiscountReason?: string;
@@ -67,6 +67,7 @@ export interface Order {
   order_source: OrderSource;
   stock_deducted: boolean;
   stock_restored?: boolean;
+  cancelReason?: string;
   createdAt: string;
   paymentMethod: 'COD' | 'POS_In_Person';
   sessionType: 'Online' | 'POS';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, doc, setDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 import { QRCodeSVG } from 'qrcode.react';
 import { db } from '../services/firebase';
@@ -7,6 +7,7 @@ import { addProductToSession } from '../services/posService';
 import { Product, Order } from '../types';
 import InvoiceDocument from './InvoiceDocument';
 import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
+import { playSuccessBeep } from './PosScan';
 import { 
   Tv, 
   Smartphone, 
@@ -109,6 +110,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   }, []);
 
   // 2. Real-time subscription to scans subcollection
+  const prevScanCountRef = useRef<number>(0);
   useEffect(() => {
     if (!sessionId) return;
     const q = query(collection(db, 'pos_sessions', sessionId, 'scans'));
@@ -117,6 +119,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       snapshot.forEach((doc) => {
         list.push({ id: doc.id, ...doc.data() });
       });
+      if (list.length > prevScanCountRef.current && prevScanCountRef.current > 0) {
+        playSuccessBeep(0.2);
+      }
+      prevScanCountRef.current = list.length;
       setScans(list);
     }, (err) => {
       console.error('Error listening to session scans:', err);
