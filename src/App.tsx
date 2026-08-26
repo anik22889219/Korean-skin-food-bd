@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { MainLayout } from './components/MainLayout';
@@ -35,6 +35,18 @@ import { ContactUs } from './components/ContactUs';
 import PosRegister from './components/PosRegister';
 import PosScan from './components/PosScan';
 import { productService } from './services/productService';
+import { analytics } from './services/analyticsService';
+
+// Centralized SPA Route Tracker for Meta Pixel PageView and GA4 page_view
+const RouteTracker: React.FC = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    analytics.trackPageView(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+
+  return null;
+};
 
 // Wrapper for in-store QR scanning to consume useParams and AuthContext cleanly
 const PosScanRouteWrapper: React.FC = () => {
@@ -69,6 +81,7 @@ export default function App() {
     <AuthProvider>
       <CartProvider>
         <BrowserRouter>
+          <RouteTracker />
           <Routes>
             {/* PUBLIC SHOP PAGES */}
             <Route path="/" element={<MainLayout />}>

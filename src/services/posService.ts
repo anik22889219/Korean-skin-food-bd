@@ -701,6 +701,13 @@ export const posService = {
     setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
     notifyOrderSubscribers();
 
+    // Trigger Refund analytics only if website order and actually cancelled
+    if (order.order_source === 'WEBSITE') {
+      import('./analyticsService').then(({ analytics }) => {
+        analytics.trackRefund(order);
+      }).catch(console.warn);
+    }
+
     import('./slackNotificationService').then(({ slackNotificationService }) => {
       slackNotificationService.notifyOrderStatusChange(order, 'packing').catch(console.warn);
     });

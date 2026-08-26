@@ -19,6 +19,7 @@ import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
 import { TopCreatorsSection } from './TopCreatorsSection';
 import { ProductCard } from './ProductCard';
+import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { analytics } from '../services/analyticsService';
 
 const CATEGORIES = [
@@ -42,11 +43,12 @@ const SKIN_TYPES = ['All', 'Oily', 'Dry', 'Sensitive', 'Combination', 'Acne-Pron
 
 export const StoreCatalog: React.FC = () => {
   const navigate = useNavigate();
-  const { addToCart, language, activeTranslations } = useCart();
+  const { addToCart, setIsCartOpen, language, activeTranslations } = useCart();
   
   // Theme & Products state
   const [theme, setTheme] = useState<HomeThemeSettings>(themeService.getHomeTheme());
   const [products, setProducts] = useState<Product[]>([]);
+  const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -872,7 +874,7 @@ export const StoreCatalog: React.FC = () => {
               <ProductCard
                 key={prod.id}
                 product={prod}
-                onQuickView={(p) => navigate(`/product/${p.id}`)}
+                onQuickView={(p) => setQuickViewProduct(p)}
               />
             ))}
           </div>
@@ -1545,6 +1547,17 @@ export const StoreCatalog: React.FC = () => {
         onClose={() => setIsImageSearchOpen(false)}
         catalog={products}
         onAddToCart={(product) => addToCart(product)}
+      />
+
+      {/* Quick View Modal (GA4: view_item & Meta: ViewContent) */}
+      <ProductQuickViewModal
+        isOpen={Boolean(quickViewProduct)}
+        product={quickViewProduct}
+        onClose={() => setQuickViewProduct(null)}
+        onAddToCart={(product) => {
+          addToCart(product);
+          setIsCartOpen(true);
+        }}
       />
     </motion.div>
   );

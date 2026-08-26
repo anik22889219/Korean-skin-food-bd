@@ -16,6 +16,7 @@ import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
 import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
 import { ProductCard } from './ProductCard';
+import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { analytics } from '../services/analyticsService';
 
 const CATEGORIES = [
@@ -1014,100 +1015,18 @@ export const ShopCategoryPage: React.FC = () => {
       </AnimatePresence>
 
       {/* ==========================================
-          QUICK VIEW MODAL OVERLAY
+          QUICK VIEW MODAL OVERLAY (GA4: view_item & Meta: ViewContent)
          ========================================== */}
-      <AnimatePresence>
-        {quickViewProduct && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl max-w-2xl w-full p-6 md:p-8 relative shadow-2xl border border-pink-100 max-h-[90vh] overflow-y-auto space-y-6"
-            >
-              {/* Close Button */}
-              <button
-                onClick={() => setQuickViewProduct(null)}
-                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-pink-600 rounded-full hover:bg-pink-50 transition cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                {/* Image */}
-                <div className="aspect-square bg-[#fff8f5] rounded-2xl overflow-hidden border border-pink-100">
-                  <img
-                    src={quickViewProduct.image}
-                    alt={quickViewProduct.name}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-
-                {/* Meta details */}
-                <div className="space-y-3">
-                  <div>
-                    <span className="text-[10px] font-black uppercase text-[#e91e8c] tracking-widest block">
-                      {quickViewProduct.brand || 'Korean Skin Food'}
-                    </span>
-                    <h3 className="text-base sm:text-lg font-serif font-black text-[#1e1b18] leading-snug">
-                      {quickViewProduct.name}
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs font-mono font-bold">
-                    <span className="text-xl text-[#1e1b18] font-black">
-                      ৳{(quickViewProduct.discountPrice || quickViewProduct.price).toLocaleString()} BDT
-                    </span>
-                    {quickViewProduct.discountPrice && quickViewProduct.discountPrice < quickViewProduct.price && (
-                      <span className="line-through text-gray-400">
-                        ৳{quickViewProduct.price.toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-xs text-gray-600 leading-relaxed line-clamp-3">
-                    {quickViewProduct.description}
-                  </p>
-
-                  <div className="pt-2 space-y-2">
-                    <button
-                      onClick={() => {
-                        addToCart(quickViewProduct);
-                        setQuickViewProduct(null);
-                        setIsCartOpen(true);
-                      }}
-                      className="w-full py-3 bg-[#e91e8c] hover:bg-[#ff4b91] text-white rounded-xl text-xs font-extrabold cursor-pointer transition shadow-md flex items-center justify-center gap-2"
-                    >
-                      <ShoppingBag size={15} />
-                      <span>Add to Bag & View Cart</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleQuickViewWhatsApp(quickViewProduct)}
-                      type="button"
-                      className="w-full py-2.5 bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white rounded-xl text-xs font-extrabold cursor-pointer transition shadow-sm flex items-center justify-center gap-2"
-                    >
-                      <MessageCircle size={16} className="fill-white" />
-                      <span>Order via WhatsApp</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        navigate(`/product/${quickViewProduct.id}`);
-                        setQuickViewProduct(null);
-                      }}
-                      className="w-full py-2 bg-pink-50 hover:bg-pink-100 text-[#e91e8c] rounded-xl text-xs font-extrabold cursor-pointer transition text-center block border border-pink-200"
-                    >
-                      View Full Details Page →
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ProductQuickViewModal
+        isOpen={Boolean(quickViewProduct)}
+        product={quickViewProduct}
+        onClose={() => setQuickViewProduct(null)}
+        onAddToCart={(p) => {
+          addToCart(p);
+          setIsCartOpen(true);
+        }}
+        whatsappNumber={whatsappNumber}
+      />
 
     </div>
   );

@@ -43,11 +43,6 @@ export const MainLayout: React.FC = () => {
   const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
 
-  // Track SPA Page Views on Route Change
-  useEffect(() => {
-    analytics.trackPageView(location.pathname + location.search);
-  }, [location.pathname, location.search]);
-
   // Track View Cart when cart drawer opens with items
   useEffect(() => {
     if (isCartOpen && checkoutStep === 'cart' && cart.length > 0) {

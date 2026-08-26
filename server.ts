@@ -4008,6 +4008,8 @@ app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
 // ==========================================
 // META CONVERSIONS API (CAPI) PROXY ENDPOINT
 // ==========================================
+const serverDispatchedCapiEvents = new Set<string>();
+
 app.post("/api/tracking/meta-capi", async (req, res) => {
   const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = req.body;
   const orderSource = req.body.order_source || req.body.orderSource;
@@ -4024,7 +4026,18 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
     });
   }
 
-  const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID;
+  // Persistent Server Idempotency Check
+  if (eventId && serverDispatchedCapiEvents.has(eventId)) {
+    console.log(`[Meta CAPI] Idempotency: Event ${eventId} was already dispatched by server. Skipping duplicate.`);
+    return res.json({
+      success: true,
+      alreadyDispatched: true,
+      message: `Event ${eventId} already dispatched.`,
+      eventId
+    });
+  }
+
+  const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID || "1181966473667367";
   const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
   const testEventCode = process.env.META_TEST_EVENT_CODE;
 
@@ -4034,6 +4047,7 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
   console.log(`[Meta CAPI] Processing ${eventName} (Event ID: ${eventId}, Order ID: ${orderId})`);
 
   if (!pixelId || !capiAccessToken) {
+    if (eventId) serverDispatchedCapiEvents.add(eventId);
     console.log(`[Meta CAPI] Access token or Pixel ID not configured in server environment. Simulated CAPI event logged.`, {
       eventId,
       orderId,
@@ -4072,10 +4086,12 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
     }
 
     const contents = (items || []).map((it: any) => ({
-      id: it.productId || it.id,
+      id: it.productId || it.id || it.item_id,
       quantity: Number(it.quantity || 1),
       item_price: Number(it.price || 0)
     }));
+
+    const contentIds = (items || []).map((it: any) => it.productId || it.id || it.item_id).filter(Boolean);
 
     const eventPayload: Record<string, any> = {
       event_name: eventName,
@@ -4088,7 +4104,10 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
         currency: currency || "BDT",
         value: Number(value || 0),
         order_id: orderId,
-        contents
+        content_type: "product",
+        content_ids: contentIds,
+        contents: contents,
+        num_items: (items || []).reduce((sum: number, it: any) => sum + Number(it.quantity || 1), 0)
       }
     };
 
@@ -4108,6 +4127,10 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
     });
 
     const fbResult: any = await fbResponse.json();
+
+    if (eventId) {
+      serverDispatchedCapiEvents.add(eventId);
+    }
 
     if (fbResponse.ok && !fbResult.error) {
       console.log(`[Meta CAPI] Successfully dispatched ${eventName} event to Meta Graph API`, fbResult);
@@ -4145,6 +4168,9 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
       });
     }
   } catch (err: any) {
+    if (eventId) {
+      serverDispatchedCapiEvents.add(eventId);
+    }
     console.log(`[Meta CAPI] Notice: Event dispatch network fallback for ${eventId}: ${err.message || err}`);
     return res.json({
       success: true,

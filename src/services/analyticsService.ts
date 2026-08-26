@@ -4,6 +4,7 @@
  */
 
 import { Product, Order, OrderItem } from '../types';
+import { productService } from './productService';
 import { getStoredAttribution } from './attributionService';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from './firebase';
@@ -17,17 +18,54 @@ declare global {
     fbq?: (...args: any[]) => void;
     _fbq?: any;
     __KSF_ANALYTICS_INITIALIZED__?: boolean;
+    __KSF_META_PIXEL_INITIALIZED__?: boolean;
   }
 }
 
 // Configurable Environment Variables
 const metaEnv = (import.meta as any).env || {};
 const GA4_MEASUREMENT_ID = (metaEnv.VITE_GA4_MEASUREMENT_ID as string) || '';
-const META_PIXEL_ID = (metaEnv.VITE_META_PIXEL_ID as string) || '';
+const META_PIXEL_ID = (metaEnv.VITE_META_PIXEL_ID as string) || '1181966473667367';
 const IS_DEV = Boolean(metaEnv.DEV);
 
-// Deduplication cache for browser events to prevent re-render duplicate triggers
-const dispatchedEventIds = new Set<string>();
+const DISPATCHED_STORAGE_KEY = 'ksf_dispatched_analytics_events_v1';
+
+// Deduplication cache for browser events loaded from persistent storage to survive page refreshes and browser reopens
+function getPersistedDispatchedEvents(): Set<string> {
+  const set = new Set<string>();
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const raw = localStorage.getItem(DISPATCHED_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id: string) => set.add(id));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return set;
+}
+
+const dispatchedEventIds: Set<string> = getPersistedDispatchedEvents();
+
+function recordDispatchedEvent(eventId: string) {
+  if (!eventId) return;
+  dispatchedEventIds.add(eventId);
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const arr = Array.from(dispatchedEventIds);
+      if (arr.length > 500) {
+        arr.splice(0, arr.length - 500);
+      }
+      localStorage.setItem(DISPATCHED_STORAGE_KEY, JSON.stringify(arr));
+    } catch (e) {
+      // ignore
+    }
+  }
+}
 
 /**
  * SHA-256 hashing for client-side privacy-safe customer matching
@@ -109,7 +147,7 @@ class AnalyticsService {
       }
     }
 
-    // 2. Initialize Meta Pixel
+    // 2. Initialize Meta Pixel (fbevents.js)
     if (META_PIXEL_ID) {
       try {
         if (!window.fbq) {
@@ -130,11 +168,19 @@ class AnalyticsService {
           const script = document.createElement('script');
           script.async = true;
           script.src = 'https://connect.facebook.net/en_US/fbevents.js';
-          document.head.appendChild(script);
+          const firstScript = document.getElementsByTagName('script')[0];
+          if (firstScript && firstScript.parentNode) {
+            firstScript.parentNode.insertBefore(script, firstScript);
+          } else {
+            document.head.appendChild(script);
+          }
         }
 
-        window.fbq('init', META_PIXEL_ID);
-        logDebug('Meta Pixel Initialized', { pixelId: META_PIXEL_ID });
+        if (!window.__KSF_META_PIXEL_INITIALIZED__) {
+          window.fbq('init', META_PIXEL_ID);
+          window.__KSF_META_PIXEL_INITIALIZED__ = true;
+          logDebug('Meta Pixel Initialized', { pixelId: META_PIXEL_ID });
+        }
       } catch (err) {
         console.warn('[Analytics] Meta Pixel init failed:', err);
       }
@@ -165,29 +211,34 @@ class AnalyticsService {
   }
 
   /**
-   * Track Search Event
+   * Track Search Event (GA4: search & Meta: Search)
    */
   public trackSearch(searchTerm: string) {
-    if (!searchTerm.trim()) return;
-    logDebug('search', { search_term: searchTerm });
+    if (!searchTerm?.trim()) return;
+    const term = searchTerm.trim();
+    logDebug('search / Search', { search_term: term });
 
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'search', {
-        search_term: searchTerm.trim()
+        search_term: term
       });
     }
 
+    // Meta Pixel
     if (typeof window.fbq === 'function') {
       window.fbq('track', 'Search', {
-        search_string: searchTerm.trim()
+        search_string: term
       });
     }
   }
+  public search = this.trackSearch.bind(this);
 
   /**
-   * Track View Item List (Catalog / Category)
+   * Track View Item List (Catalog / Category page)
+   * GA4: view_item_list & Meta: ViewItemList custom event
    */
-  public trackViewItemList(items: Product[], listName: string = 'Store Catalog') {
+  public trackViewItemList(items: Product[], listName: string = 'Store Catalog', listId?: string) {
     if (!items || items.length === 0) return;
     const formattedItems = items.slice(0, 20).map((prod, index) => ({
       item_id: prod.id,
@@ -196,44 +247,75 @@ class AnalyticsService {
       item_category: prod.category,
       price: prod.discountPrice || prod.price,
       index: index + 1,
-      item_list_name: listName
+      item_list_name: listName,
+      item_list_id: listId || listName.toLowerCase().replace(/\s+/g, '_')
     }));
 
     logDebug('view_item_list', { listName, count: items.length });
 
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'view_item_list', {
+        item_list_id: listId || listName.toLowerCase().replace(/\s+/g, '_'),
         item_list_name: listName,
         items: formattedItems
       });
     }
+
+    // Meta Pixel
+    if (typeof window.fbq === 'function') {
+      window.fbq('trackCustom', 'ViewItemList', {
+        content_category: listName,
+        content_ids: items.slice(0, 20).map(p => p.id),
+        num_items: items.length
+      });
+    }
   }
+  public view_item_list = this.trackViewItemList.bind(this);
 
   /**
-   * Track Select Item (Product clicked in list)
+   * Track Select Item (Product clicked in category/search/catalog list)
+   * GA4: select_item & Meta: SelectItem custom event
    */
-  public trackSelectItem(product: Product, listName: string = 'Store Catalog') {
+  public trackSelectItem(product: Product, listName: string = 'Store Catalog', listId?: string) {
+    if (!product?.id) return;
     const item = {
       item_id: product.id,
       item_name: product.name,
       item_brand: product.brand,
       item_category: product.category,
       price: product.discountPrice || product.price,
-      item_list_name: listName
+      item_list_name: listName,
+      item_list_id: listId || listName.toLowerCase().replace(/\s+/g, '_')
     };
 
     logDebug('select_item', item);
 
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'select_item', {
+        item_list_id: listId || listName.toLowerCase().replace(/\s+/g, '_'),
         item_list_name: listName,
         items: [item]
       });
     }
+
+    // Meta Pixel
+    if (typeof window.fbq === 'function') {
+      window.fbq('trackCustom', 'SelectItem', {
+        content_name: product.name,
+        content_category: product.category,
+        content_ids: [product.id],
+        content_type: 'product',
+        value: product.discountPrice || product.price,
+        currency: 'BDT'
+      });
+    }
   }
+  public select_item = this.trackSelectItem.bind(this);
 
   /**
-   * Track Product Detail View (view_item / ViewContent)
+   * Track Product Detail View (GA4: view_item & Meta: ViewContent)
    */
   public trackViewItem(product: Product) {
     if (!product?.id) return;
@@ -269,9 +351,10 @@ class AnalyticsService {
       });
     }
   }
+  public view_item = this.trackViewItem.bind(this);
 
   /**
-   * Track Add To Cart (add_to_cart / AddToCart)
+   * Track Add To Cart (GA4: add_to_cart & Meta: AddToCart)
    */
   public trackAddToCart(product: Product, quantity: number = 1) {
     if (!product?.id) return;
@@ -308,20 +391,23 @@ class AnalyticsService {
       });
     }
   }
+  public add_to_cart = this.trackAddToCart.bind(this);
 
   /**
-   * Track Remove From Cart
+   * Track Remove From Cart (GA4: remove_from_cart & Meta: RemoveFromCart)
    */
   public trackRemoveFromCart(product: Product, quantity: number = 1) {
     if (!product?.id) return;
     const price = product.discountPrice || product.price;
+    const totalValue = price * quantity;
 
-    logDebug('remove_from_cart', { id: product.id, quantity });
+    logDebug('remove_from_cart', { id: product.id, quantity, totalValue });
 
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'remove_from_cart', {
         currency: 'BDT',
-        value: price * quantity,
+        value: totalValue,
         items: [{
           item_id: product.id,
           item_name: product.name,
@@ -332,16 +418,30 @@ class AnalyticsService {
         }]
       });
     }
+
+    // Meta Pixel
+    if (typeof window.fbq === 'function') {
+      window.fbq('trackCustom', 'RemoveFromCart', {
+        content_name: product.name,
+        content_category: product.category,
+        content_ids: [product.id],
+        content_type: 'product',
+        value: totalValue,
+        currency: 'BDT'
+      });
+    }
   }
+  public remove_from_cart = this.trackRemoveFromCart.bind(this);
 
   /**
-   * Track View Cart (Drawer open)
+   * Track View Cart (GA4: view_cart & Meta: ViewCart)
    */
   public trackViewCart(items: { product: Product; quantity: number }[], subtotal: number) {
     if (!items || items.length === 0) return;
 
     logDebug('view_cart', { itemCount: items.length, subtotal });
 
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'view_cart', {
         currency: 'BDT',
@@ -356,10 +456,21 @@ class AnalyticsService {
         }))
       });
     }
+
+    // Meta Pixel
+    if (typeof window.fbq === 'function') {
+      window.fbq('trackCustom', 'ViewCart', {
+        content_ids: items.map(i => i.product.id),
+        num_items: items.reduce((sum, i) => sum + i.quantity, 0),
+        value: subtotal,
+        currency: 'BDT'
+      });
+    }
   }
+  public view_cart = this.trackViewCart.bind(this);
 
   /**
-   * Track Begin Checkout (begin_checkout / InitiateCheckout)
+   * Track Begin Checkout (GA4: begin_checkout & Meta: InitiateCheckout)
    */
   public trackBeginCheckout(items: { product: Product; quantity: number }[], totalValue: number) {
     if (!items || items.length === 0) return;
@@ -396,34 +507,54 @@ class AnalyticsService {
       });
     }
   }
+  public begin_checkout = this.trackBeginCheckout.bind(this);
 
   /**
-   * Track Add Shipping Info
+   * Track Add Shipping Info (GA4: add_shipping_info & Meta: AddShippingInfo)
    */
   public trackAddShippingInfo(shippingTier: 'dhaka' | 'outside', shippingFee: number, items: { product: Product; quantity: number }[], totalValue: number) {
     logDebug('add_shipping_info', { shippingTier, shippingFee, totalValue });
 
+    const shippingTierLabel = shippingTier === 'dhaka' ? 'Inside Dhaka (৳80)' : 'Outside Dhaka (৳150)';
+
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'add_shipping_info', {
         currency: 'BDT',
         value: totalValue,
-        shipping_tier: shippingTier === 'dhaka' ? 'Inside Dhaka (৳80)' : 'Outside Dhaka (৳150)',
+        shipping_tier: shippingTierLabel,
         items: items.map(i => ({
           item_id: i.product.id,
           item_name: i.product.name,
+          item_brand: i.product.brand,
+          item_category: i.product.category,
           price: i.product.discountPrice || i.product.price,
           quantity: i.quantity
         }))
       });
     }
+
+    // Meta Pixel
+    if (typeof window.fbq === 'function') {
+      window.fbq('trackCustom', 'AddShippingInfo', {
+        shipping_tier: shippingTierLabel,
+        shipping_fee: shippingFee,
+        value: totalValue,
+        currency: 'BDT'
+      });
+    }
   }
+  public add_shipping_info = this.trackAddShippingInfo.bind(this);
 
   /**
-   * Track Add Payment Info
+   * Track Add Payment Info (GA4: add_payment_info & Meta: AddPaymentInfo)
    */
   public trackAddPaymentInfo(paymentType: string, items: { product: Product; quantity: number }[], totalValue: number) {
-    logDebug('add_payment_info', { paymentType, totalValue });
+    logDebug('add_payment_info / AddPaymentInfo', { paymentType, totalValue });
 
+    const contentIds = items.map(i => i.product.id);
+
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'add_payment_info', {
         currency: 'BDT',
@@ -432,12 +563,26 @@ class AnalyticsService {
         items: items.map(i => ({
           item_id: i.product.id,
           item_name: i.product.name,
+          item_brand: i.product.brand,
+          item_category: i.product.category,
           price: i.product.discountPrice || i.product.price,
           quantity: i.quantity
         }))
       });
     }
+
+    // Meta Pixel (Standard event)
+    if (typeof window.fbq === 'function') {
+      window.fbq('track', 'AddPaymentInfo', {
+        content_category: paymentType,
+        content_ids: contentIds,
+        content_type: 'product',
+        value: totalValue,
+        currency: 'BDT'
+      });
+    }
   }
+  public add_payment_info = this.trackAddPaymentInfo.bind(this);
 
   /**
    * Authoritative Purchase Tracking with Deduplication and CAPI Dispatch
@@ -459,24 +604,29 @@ class AnalyticsService {
     // Deterministic unique event_id for Meta browser & server deduplication
     const eventId = `purchase_${order.id}`;
 
-    // Idempotency check: Don't fire if already sent in this browser session
-    if (dispatchedEventIds.has(eventId)) {
-      logDebug('Purchase Event Already Dispatched in Session (Prevented Duplicate)', { eventId });
+    // Persistent Idempotency check: Don't fire if already recorded in storage or Firestore order record
+    if (dispatchedEventIds.has(eventId) || (order as any).analytics?.purchaseTracked === true) {
+      logDebug('Purchase Event Already Dispatched (Persistent Idempotency Enforced)', { eventId });
       return;
     }
 
-    dispatchedEventIds.add(eventId);
+    recordDispatchedEvent(eventId);
 
     const grandTotal = Number(order.totalAmount || 0);
     const contentIds = (order.items || []).map(item => item.productId);
     const numItems = (order.items || []).reduce((sum, it) => sum + (it.quantity || 1), 0);
 
-    const formattedGaItems = (order.items || []).map(item => ({
-      item_id: item.productId,
-      item_name: item.name,
-      price: item.price,
-      quantity: item.quantity
-    }));
+    const formattedGaItems = (order.items || []).map(item => {
+      const prod = productService.getProductById(item.productId);
+      return {
+        item_id: item.productId,
+        item_name: item.name,
+        item_brand: prod?.brand || 'Korean Skin Food',
+        item_category: prod?.category || 'Skincare',
+        price: item.price,
+        quantity: item.quantity
+      };
+    });
 
     logDebug('purchase / Purchase', {
       orderId: order.id,
@@ -578,28 +728,48 @@ class AnalyticsService {
       logDebug('CAPI prep notice', capiErr?.message || capiErr);
     }
   }
+  public purchase = this.trackPurchase.bind(this);
 
   /**
-   * Track Refund (Order Cancelled)
+   * Track Refund (Order Cancelled / Returned)
+   * GA4: refund & Meta: Refund custom event
    */
   public trackRefund(order: Order) {
     if (!order || !order.id) return;
-    logDebug('refund', { orderId: order.id, totalAmount: order.totalAmount });
+    logDebug('refund / Refund', { orderId: order.id, totalAmount: order.totalAmount });
 
+    // GA4
     if (typeof window.gtag === 'function') {
       window.gtag('event', 'refund', {
         transaction_id: order.id,
         value: order.totalAmount,
         currency: 'BDT',
-        items: (order.items || []).map(i => ({
-          item_id: i.productId,
-          item_name: i.name,
-          price: i.price,
-          quantity: i.quantity
-        }))
+        items: (order.items || []).map(i => {
+          const prod = productService.getProductById(i.productId);
+          return {
+            item_id: i.productId,
+            item_name: i.name,
+            item_brand: prod?.brand || 'Korean Skin Food',
+            item_category: prod?.category || 'Skincare',
+            price: i.price,
+            quantity: i.quantity
+          };
+        })
+      });
+    }
+
+    // Meta Pixel
+    if (typeof window.fbq === 'function') {
+      window.fbq('trackCustom', 'Refund', {
+        order_id: order.id,
+        value: order.totalAmount,
+        currency: 'BDT',
+        content_type: 'product',
+        content_ids: (order.items || []).map(i => i.productId)
       });
     }
   }
+  public refund = this.trackRefund.bind(this);
 }
 
 export const analytics = new AnalyticsService();
