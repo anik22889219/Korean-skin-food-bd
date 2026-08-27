@@ -17,12 +17,13 @@ service cloud.firestore {
       allow create: if isStaff() || (
         request.auth != null && 
         request.auth.uid == userId && 
-        (!('role' in request.resource.data) || request.resource.data.role in ['customer', 'creator'])
+        (!('role' in request.resource.data) || request.resource.data.role in ['customer', 'creator']) &&
+        (!('wholesaleAccess' in request.resource.data) || request.resource.data.wholesaleAccess == false)
       );
       allow update: if isStaff() || (
         request.auth != null && 
         request.auth.uid == userId && 
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || request.resource.data.role == resource.data.role || request.resource.data.role == 'creator')
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'wholesaleAccess'])
       );
       allow delete: if isStaff() || (request.auth != null && request.auth.uid == userId);
     }

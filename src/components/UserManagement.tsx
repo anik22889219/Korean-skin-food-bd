@@ -32,6 +32,8 @@ export const UserManagement: React.FC = () => {
   const [formDepartment, setFormDepartment] = useState('');
   const [formLoyaltyPoints, setFormLoyaltyPoints] = useState<number>(0);
   const [formStatus, setFormStatus] = useState<'active' | 'suspended'>('active');
+  const [formWholesaleAccess, setFormWholesaleAccess] = useState<boolean>(false);
+  const [selectedWholesaleFilter, setSelectedWholesaleFilter] = useState<'all' | 'wholesale' | 'retail'>('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Strictly check if current user is Super Admin or HR
@@ -68,6 +70,7 @@ export const UserManagement: React.FC = () => {
           createdAt: data.createdAt,
           department: data.department || '',
           status: data.status || 'active',
+          wholesaleAccess: data.wholesaleAccess === true,
         });
       });
 
@@ -110,6 +113,21 @@ export const UserManagement: React.FC = () => {
     }
   };
 
+  // Handle Quick Wholesale Access toggle directly in table
+  const handleToggleWholesale = async (targetUid: string, nextStatus: boolean) => {
+    try {
+      const userRef = doc(db, 'users', targetUid);
+      await updateDoc(userRef, { 
+        wholesaleAccess: nextStatus,
+        updatedAt: serverTimestamp() 
+      });
+      showToast('success', `Wholesale access ${nextStatus ? 'GRANTED' : 'REVOKED'} for user.`);
+    } catch (err) {
+      console.error('Failed to toggle wholesale access:', err);
+      showToast('error', 'Failed to update wholesale access. Check permissions.');
+    }
+  };
+
   // Open edit modal
   const openEditModal = (userItem: UserProfile) => {
     setEditingUser(userItem);
@@ -120,6 +138,7 @@ export const UserManagement: React.FC = () => {
     setFormDepartment(userItem.department || '');
     setFormLoyaltyPoints(userItem.loyaltyPoints || 0);
     setFormStatus(userItem.status || 'active');
+    setFormWholesaleAccess(userItem.wholesaleAccess === true);
   };
 
   // Submit edit form
@@ -138,6 +157,7 @@ export const UserManagement: React.FC = () => {
         department: formDepartment,
         loyaltyPoints: Number(formLoyaltyPoints),
         status: formStatus,
+        wholesaleAccess: formWholesaleAccess,
         updatedAt: serverTimestamp()
       });
 
@@ -174,6 +194,7 @@ export const UserManagement: React.FC = () => {
         department: formDepartment.trim(),
         loyaltyPoints: Number(formLoyaltyPoints) || 0,
         status: formStatus,
+        wholesaleAccess: formWholesaleAccess,
         createdAt: serverTimestamp(),
       };
 
@@ -214,6 +235,7 @@ export const UserManagement: React.FC = () => {
     setFormDepartment('');
     setFormLoyaltyPoints(0);
     setFormStatus('active');
+    setFormWholesaleAccess(false);
   };
 
   // Filtered users calculation
@@ -226,8 +248,12 @@ export const UserManagement: React.FC = () => {
 
     const matchesRole = selectedRole === 'all' || u.role === selectedRole;
     const matchesStatus = selectedStatus === 'all' || u.status === selectedStatus;
+    const matchesWholesale = 
+      selectedWholesaleFilter === 'all' || 
+      (selectedWholesaleFilter === 'wholesale' && u.wholesaleAccess === true) ||
+      (selectedWholesaleFilter === 'retail' && !u.wholesaleAccess);
 
-    return matchesSearch && matchesRole && matchesStatus;
+    return matchesSearch && matchesRole && matchesStatus && matchesWholesale;
   });
 
   // Calculate quick metrics
@@ -237,6 +263,7 @@ export const UserManagement: React.FC = () => {
   const creatorsCount = users.filter((u) => u.role === 'creator').length;
   const staffCount = users.filter((u) => ['admin', 'inventory_manager', 'customer_support'].includes(u.role)).length;
   const customersCount = users.filter((u) => u.role === 'customer').length;
+  const wholesaleCount = users.filter((u) => u.wholesaleAccess === true).length;
 
   // Role Badge helper
   const getRoleBadge = (role: UserRole) => {
@@ -372,7 +399,7 @@ export const UserManagement: React.FC = () => {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-400 mb-1">
             <span className="text-[10px] font-black uppercase tracking-wider">Total Users</span>
@@ -380,6 +407,15 @@ export const UserManagement: React.FC = () => {
           </div>
           <div className="text-xl font-black text-slate-900">{totalUsers}</div>
           <span className="text-[10px] text-slate-400 font-medium">Registered in DB</span>
+        </div>
+
+        <div className="bg-amber-50/70 p-4 rounded-2xl border border-amber-300/80 shadow-sm">
+          <div className="flex items-center justify-between text-amber-700 mb-1">
+            <span className="text-[10px] font-black uppercase tracking-wider">Wholesale</span>
+            <Building2 size={16} className="text-amber-600" />
+          </div>
+          <div className="text-xl font-black text-amber-950">{wholesaleCount}</div>
+          <span className="text-[10px] text-amber-700/80 font-bold">Wholesale Buyers</span>
         </div>
 
         <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-200 shadow-sm">
@@ -441,6 +477,44 @@ export const UserManagement: React.FC = () => {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
             />
+          </div>
+
+          {/* Wholesale Filter Toggle */}
+          <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setSelectedWholesaleFilter('all')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                selectedWholesaleFilter === 'all'
+                  ? 'bg-white text-slate-900 shadow-xs font-extrabold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              All Access
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedWholesaleFilter('wholesale')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                selectedWholesaleFilter === 'wholesale'
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                  : 'text-amber-800 hover:bg-amber-100/50'
+              }`}
+            >
+              <Building2 size={12} />
+              <span>Wholesale Only</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedWholesaleFilter('retail')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                selectedWholesaleFilter === 'retail'
+                  ? 'bg-white text-slate-900 shadow-xs font-extrabold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Retail Only
+            </button>
           </div>
 
           {/* Role Filter Selector */}
@@ -567,6 +641,34 @@ export const UserManagement: React.FC = () => {
                         Dept: <span className="font-bold text-slate-700">{u.department}</span>
                       </div>
                     )}
+                  </div>
+
+                  {/* Wholesale Access Control */}
+                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border bg-slate-50 border-slate-200/80">
+                    <div className="flex items-center gap-1.5">
+                      <Building2 size={14} className={u.wholesaleAccess ? 'text-amber-600' : 'text-slate-400'} />
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider block text-slate-700">
+                          Wholesale Access
+                        </span>
+                        <span className={`text-[10px] font-bold ${u.wholesaleAccess ? 'text-amber-700' : 'text-slate-400'}`}>
+                          {u.wholesaleAccess ? 'Authorized (Tier 1 & 2 Active)' : 'Standard Retail Only'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleWholesale(u.uid, !u.wholesaleAccess)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer border ${
+                        u.wholesaleAccess
+                          ? 'bg-amber-500 text-slate-950 border-amber-500 hover:bg-amber-600 shadow-xs'
+                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                      }`}
+                      title={u.wholesaleAccess ? 'Click to revoke wholesale pricing' : 'Click to grant wholesale pricing'}
+                    >
+                      {u.wholesaleAccess ? 'Active' : 'Grant'}
+                    </button>
                   </div>
                 </div>
 
@@ -712,6 +814,28 @@ export const UserManagement: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Wholesale Access Authorization Toggle */}
+                <div className="p-3 bg-amber-50/70 border border-amber-300 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="text-amber-700 shrink-0" size={18} />
+                    <div>
+                      <span className="text-xs font-black text-slate-900 block">Wholesale Pricing Access</span>
+                      <span className="text-[11px] text-amber-900 font-medium block">
+                        Enable tiered wholesale pricing (1–49 and 50+ units) for this user.
+                      </span>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formWholesaleAccess}
+                      onChange={(e) => setFormWholesaleAccess(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                  </label>
+                </div>
+
                 <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">
                   <button
                     type="button"
@@ -823,6 +947,28 @@ export const UserManagement: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
+                </div>
+
+                {/* Wholesale Access Authorization Toggle */}
+                <div className="p-3 bg-amber-50/70 border border-amber-300 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="text-amber-700 shrink-0" size={18} />
+                    <div>
+                      <span className="text-xs font-black text-slate-900 block">Grant Wholesale Pricing</span>
+                      <span className="text-[11px] text-amber-900 font-medium block">
+                        Allow wholesale pricing tiers (1–49 & 50+ units) upon account creation.
+                      </span>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formWholesaleAccess}
+                      onChange={(e) => setFormWholesaleAccess(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                  </label>
                 </div>
 
                 <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2">

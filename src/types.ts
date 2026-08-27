@@ -5,9 +5,15 @@ export interface Product {
   brand: string;
   category: string;
   skinTypes: string[];
+  // Pricing Fields
+  importPrice?: number;
+  wholesalePrice?: number;
+  wholesalePrice50Plus?: number;
+  retailPrice?: number;
+  discountRetailPrice?: number;
+  // Legacy compatibility fields
   price: number;
   discountPrice?: number;
-  importPrice?: number;
   ml?: string;
   image: string;
   images?: string[];
@@ -330,6 +336,7 @@ export interface UserProfile {
   department?: string;
   status?: 'active' | 'suspended';
   creatorId?: string;
+  wholesaleAccess?: boolean;
 }
 
 export interface ChatLeadItem {

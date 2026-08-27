@@ -48,6 +48,41 @@ const RouteTracker: React.FC = () => {
   return null;
 };
 
+// Reset window scroll position to the very top whenever the route or search query changes
+const ScrollToTop: React.FC = () => {
+  const { pathname, search, hash } = useLocation();
+
+  useEffect(() => {
+    // Disable browser automatic scroll restoration to avoid starting from scrolled positions
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+
+    if (hash) {
+      const targetId = hash.replace('#', '');
+      const element = document.getElementById(targetId);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+    }
+
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: 'instant'
+    });
+    if (document.documentElement) {
+      document.documentElement.scrollTop = 0;
+    }
+    if (document.body) {
+      document.body.scrollTop = 0;
+    }
+  }, [pathname, search, hash]);
+
+  return null;
+};
+
 // Wrapper for in-store QR scanning to consume useParams and AuthContext cleanly
 const PosScanRouteWrapper: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -81,6 +116,7 @@ export default function App() {
     <AuthProvider>
       <CartProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <RouteTracker />
           <Routes>
             {/* PUBLIC SHOP PAGES */}

@@ -2,9 +2,18 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
-import { ShoppingBag, Heart, Star, Eye, Sparkles, Check, Droplets } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { ShoppingBag, Heart, Star, Eye, Sparkles, Check, Droplets, Building2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { analytics } from '../services/analyticsService';
+import {
+  getRetailPrice,
+  getRetailOriginalPrice,
+  hasRetailDiscount,
+  getRetailDiscountPercentage,
+  getRetailSavingsAmount,
+  getWholesalePrice
+} from '../utils/pricing';
 
 interface ProductCardProps {
   product: Product;
@@ -20,7 +29,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { addToCart, language } = useCart();
+  const { profile } = useAuth();
   const [isAdded, setIsAdded] = useState(false);
+
+  const hasWholesaleAccess = profile?.wholesaleAccess === true;
+  const wholesaleTier1 = getWholesalePrice(product, 1);
+  const wholesaleTier2 = getWholesalePrice(product, 50);
 
   // Local Wishlist State
   const [isWishlisted, setIsWishlisted] = useState<boolean>(() => {
@@ -62,12 +76,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     setTimeout(() => setIsAdded(false), 1800);
   };
 
-  const effectivePrice = product.discountPrice || product.price;
-  const hasDiscount = !!product.discountPrice && product.discountPrice < product.price;
-  const discountPercent = hasDiscount
-    ? Math.round(((product.price - product.discountPrice!) / product.price) * 100)
-    : 0;
-  const savings = hasDiscount ? product.price - product.discountPrice! : 0;
+  const effectivePrice = getRetailPrice(product);
+  const originalPrice = getRetailOriginalPrice(product);
+  const hasDiscount = hasRetailDiscount(product);
+  const discountPercent = getRetailDiscountPercentage(product);
+  const savings = getRetailSavingsAmount(product);
 
   const displayName = language === 'bn' ? (product.nameBN || product.name) : product.name;
 
@@ -93,6 +106,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Top Badges Stack (Left) */}
         <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1 pointer-events-none">
+          {hasWholesaleAccess && (
+            <span className="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-md flex items-center gap-1">
+              <Building2 size={10} /> Wholesale Access
+            </span>
+          )}
+
           {hasDiscount && (
             <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-gradient-to-r from-[#E91E8C] to-pink-600 text-white text-[9px] sm:text-[10px] font-black uppercase tracking-wider shadow-md shadow-pink-500/30">
               -{discountPercent}% OFF
@@ -203,24 +222,41 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         {/* Pricing & CTA Container */}
         <div className="pt-2 border-t border-slate-100 space-y-2">
           {/* Price details */}
-          <div className="flex items-baseline justify-between gap-1">
-            <div className="flex items-baseline gap-1.5 flex-wrap">
-              <span className="text-sm sm:text-base font-black font-mono text-slate-950">
-                ৳{effectivePrice.toLocaleString()}
-              </span>
-              {hasDiscount && (
-                <span className="text-[10px] sm:text-xs font-mono line-through text-slate-400">
-                  ৳{product.price.toLocaleString()}
+          {hasWholesaleAccess ? (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] font-bold">
+                <span className="text-amber-800">Wholesale (1–49):</span>
+                <span className="font-mono text-slate-900 font-extrabold">৳{wholesaleTier1.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] font-bold bg-amber-50/70 p-1 rounded-md border border-amber-200/60">
+                <span className="text-amber-900">Bulk Tier (50+):</span>
+                <span className="font-mono text-amber-950 font-black">৳{wholesaleTier2.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
+                <span>Retail Ref:</span>
+                <span className="line-through font-mono">৳{effectivePrice.toLocaleString()}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-baseline justify-between gap-1">
+              <div className="flex items-baseline gap-1.5 flex-wrap">
+                <span className="text-sm sm:text-base font-black font-mono text-slate-950">
+                  ৳{effectivePrice.toLocaleString()}
+                </span>
+                {hasDiscount && (
+                  <span className="text-[10px] sm:text-xs font-mono line-through text-slate-400">
+                    ৳{originalPrice.toLocaleString()}
+                  </span>
+                )}
+              </div>
+
+              {hasDiscount && savings > 0 && (
+                <span className="hidden xs:inline-block text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 font-mono">
+                  Save ৳{savings}
                 </span>
               )}
             </div>
-
-            {hasDiscount && savings > 0 && (
-              <span className="hidden xs:inline-block text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 font-mono">
-                Save ৳{savings}
-              </span>
-            )}
-          </div>
+          )}
 
           {/* Add to Bag CTA Button */}
           <button

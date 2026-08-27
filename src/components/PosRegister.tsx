@@ -8,6 +8,7 @@ import { Product, Order } from '../types';
 import InvoiceDocument from './InvoiceDocument';
 import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 import { playSuccessBeep } from './PosScan';
+import { getRetailPrice, getWholesalePrice, getProductUnitPrice } from '../utils/pricing';
 import { 
   Tv, 
   Smartphone, 
@@ -42,6 +43,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isPairingModalOpen, setIsPairingModalOpen] = useState<boolean>(false);
   
+  // Pricing Mode: Retail vs Wholesale (with 1-49 and 50+ tiered pricing)
+  const [pricingMode, setPricingMode] = useState<'retail' | 'wholesale'>('retail');
+
   // Form fields
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -164,10 +168,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   // Compute values
   const subtotal = useMemo(() => {
     return cartItems.reduce((sum, item) => {
-      const price = item.product.discountPrice || item.product.price;
+      const price = getProductUnitPrice(item.product, pricingMode, item.quantity);
       return sum + (price * item.quantity);
     }, 0);
-  }, [cartItems]);
+  }, [cartItems, pricingMode]);
 
   const totalItemsCount = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -302,7 +306,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         items: cartItems.map(item => ({
           productId: item.product.id,
           name: item.product.name,
-          price: item.product.discountPrice || item.product.price,
+          price: getProductUnitPrice(item.product, pricingMode, item.quantity),
           quantity: item.quantity,
           scannedQuantity: item.quantity,
           barcode: item.product.barcode
@@ -680,7 +684,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                                 </h5>
                                 <div className="flex items-center gap-2 mt-0.5 text-[10px]">
                                   <span className="font-mono font-extrabold text-[#E91E8C]">
-                                    ৳{p.discountPrice || p.price}
+                                    ৳{getRetailPrice(p)}
                                   </span>
                                   {isOutOfStock ? (
                                     <span className="text-red-500 font-bold bg-red-50 px-1.5 rounded">
@@ -791,7 +795,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                           </h5>
                           <div className="flex items-center justify-between mt-0.5">
                             <span className="text-[#E91E8C] font-black font-mono text-xs">
-                              ৳{p.discountPrice || p.price}
+                              ৳{getRetailPrice(p)}
                             </span>
                             {isOutOfStock ? (
                               <span className="text-[9px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">Stock 0</span>
@@ -820,7 +824,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
             {/* 1. REAL-TIME CART */}
             <div className="bg-white p-6 rounded-[32px] border border-pink-100 shadow-sm space-y-4">
-              <div className="flex justify-between items-center border-b border-pink-50 pb-3">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 border-b border-pink-50 pb-3">
                 <div>
                   <h3 className="text-base font-extrabold text-gray-900 uppercase tracking-wider flex items-center gap-2">
                     <ShoppingBag className="text-[#E91E8C]" size={18} />
@@ -828,9 +832,36 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">Scanned items from mobile & manual search</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="bg-pink-50 border border-pink-100 text-[#E91E8C] font-extrabold text-xs px-3 py-1.5 rounded-full font-mono shadow-xs">
-                    {totalItemsCount} items ({scans.length} scans)
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Pricing Mode Toggle */}
+                  <div className="flex items-center bg-gray-100 p-0.5 rounded-xl border border-gray-200 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setPricingMode('retail')}
+                      className={`px-2.5 py-1 rounded-lg transition ${
+                        pricingMode === 'retail'
+                          ? 'bg-[#E91E8C] text-white shadow-xs'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Retail
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPricingMode('wholesale')}
+                      className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 ${
+                        pricingMode === 'wholesale'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      <span>Wholesale</span>
+                      <span className="text-[9px] bg-purple-200/50 text-purple-900 px-1 py-0.2 rounded font-mono">1-49 / 50+</span>
+                    </button>
+                  </div>
+
+                  <span className="bg-pink-50 border border-pink-100 text-[#E91E8C] font-extrabold text-xs px-3 py-1 rounded-full font-mono shadow-xs">
+                    {totalItemsCount} items
                   </span>
                 </div>
               </div>
@@ -848,7 +879,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
               ) : (
                 <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                   {cartItems.map(item => {
-                    const price = item.product.discountPrice || item.product.price;
+                    const price = getProductUnitPrice(item.product, pricingMode, item.quantity);
                     const itemSubtotal = price * item.quantity;
                     const isMaxStock = item.quantity >= item.product.stock;
 
@@ -867,8 +898,17 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                           <div className="min-w-0 flex-1">
                             <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">{item.product.brand}</span>
                             <h4 className="font-bold text-gray-850 truncate text-xs">{item.product.name}</h4>
-                            <div className="flex items-center gap-2 mt-0.5">
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                               <span className="text-[#E91E8C] font-extrabold font-mono text-xs">৳{price}</span>
+                              {pricingMode === 'wholesale' && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                  item.quantity >= 50 
+                                    ? 'bg-purple-100 text-purple-700 border border-purple-200' 
+                                    : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                }`}>
+                                  {item.quantity >= 50 ? 'Tier 50+ (৳' + (item.product.wholesalePrice50Plus ?? item.product.wholesalePrice) + ')' : 'Tier 1-49 (৳' + (item.product.wholesalePrice ?? item.product.retailPrice) + ')'}
+                                </span>
+                              )}
                               <span className="text-[10px] text-gray-400">Stock: {item.product.stock}</span>
                             </div>
                           </div>

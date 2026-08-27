@@ -3,6 +3,7 @@ import { Search, X, Camera, ShoppingBag, Eye, Sparkles, ChevronRight, Tag } from
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { analytics } from '../services/analyticsService';
+import { getRetailPrice, getRetailOriginalPrice, hasRetailDiscount } from '../utils/pricing';
 
 interface HeaderSearchProps {
   products: Product[];
@@ -155,11 +156,11 @@ export const HeaderSearch: React.FC<HeaderSearchProps> = ({
                     )}
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs font-black text-rose-600">
-                        ৳{product.price.toLocaleString()}
+                        ৳{getRetailPrice(product).toLocaleString()}
                       </span>
-                      {product.originalPrice && product.originalPrice > product.price && (
+                      {hasRetailDiscount(product) && (
                         <span className="text-[10px] text-slate-400 line-through">
-                          ৳{product.originalPrice.toLocaleString()}
+                          ৳{getRetailOriginalPrice(product).toLocaleString()}
                         </span>
                       )}
                       <span className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${

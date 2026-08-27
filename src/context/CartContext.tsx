@@ -6,6 +6,7 @@ import { db, sanitizeForFirestore } from '../services/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { analytics } from '../services/analyticsService';
 import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
+import { getProductUnitPrice, getRetailPrice } from '../utils/pricing';
 
 interface CartItem {
   product: Product;
@@ -224,8 +225,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const availablePoints = profile?.loyaltyPoints ?? 0;
 
   const calculateCartSubtotal = () => {
+    const isWholesale = profile?.wholesaleAccess === true;
     return cart.reduce((sum, item) => {
-      const price = item.product.discountPrice || item.product.price;
+      const price = getProductUnitPrice(item.product, isWholesale ? 'wholesale' : 'retail', item.quantity);
       return sum + price * item.quantity;
     }, 0);
   };
@@ -313,12 +315,21 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      const orderItems: OrderItem[] = cart.map((item) => ({
-        productId: item.product.id,
-        name: item.product.name,
-        price: item.product.discountPrice || item.product.price,
-        quantity: item.quantity,
-      }));
+      const isWholesale = profile?.wholesaleAccess === true;
+      const orderItems: OrderItem[] = cart.map((item) => {
+        const unitPrice = getProductUnitPrice(item.product, isWholesale ? 'wholesale' : 'retail', item.quantity);
+        const tier = isWholesale
+          ? (item.quantity >= 50 ? 'wholesale_50_plus' : 'wholesale_1_49')
+          : 'retail';
+        return {
+          productId: item.product.id,
+          name: item.product.name,
+          price: unitPrice,
+          quantity: item.quantity,
+          pricingType: isWholesale ? 'wholesale' : 'retail',
+          pricingTier: tier
+        };
+      });
 
       const grandTotal = calculateGrandTotal();
       const earnedPts = calculatePointsEarned();

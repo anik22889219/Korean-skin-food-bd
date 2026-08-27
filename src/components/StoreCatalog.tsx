@@ -21,6 +21,7 @@ import { TopCreatorsSection } from './TopCreatorsSection';
 import { ProductCard } from './ProductCard';
 import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { analytics } from '../services/analyticsService';
+import { getRetailPrice } from '../utils/pricing';
 
 const CATEGORIES = [
   'All', 
@@ -620,7 +621,7 @@ export const StoreCatalog: React.FC = () => {
                             </h5>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-xs font-black text-rose-600">
-                                ৳{product.price.toLocaleString()}
+                                ৳{getRetailPrice(product).toLocaleString()}
                               </span>
                               <span className={`text-[9px] font-medium px-1 py-0.2 rounded ${
                                 product.stock > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'

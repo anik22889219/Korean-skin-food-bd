@@ -10,14 +10,19 @@ import { db } from '../services/firebase';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { analytics } from '../services/analyticsService';
+import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
+import { GlobalThemeSettings } from '../types/theme';
 import { 
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
-  Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle
+  Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle,
+  Share2, Copy, Sparkles, Send, ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductDetailSkeleton } from './Skeletons';
 import { ProductCard } from './ProductCard';
+import { getRetailPrice, getRetailOriginalPrice, hasRetailDiscount, getWholesalePrice } from '../utils/pricing';
+import { Building2 } from 'lucide-react';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +35,16 @@ export const ProductDetail: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'desc' | 'ingredients' | 'how-to'>('desc');
   const [selectedMainImage, setSelectedMainImage] = useState<string>('');
   const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
+  const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  // Subscribe to Global Theme for store logo and branding
+  useEffect(() => {
+    const unsubscribe = themeService.subscribeGlobal((gt) => {
+      setGlobalTheme(gt);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Load site settings for WhatsApp contact number
   useEffect(() => {
@@ -42,11 +57,97 @@ export const ProductDetail: React.FC = () => {
     loadSettings();
   }, []);
 
+  // Social Share Handlers
+  const handleCopyProductLink = async () => {
+    const currentUrl = window.location.href;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(currentUrl);
+      } else {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = currentUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch (err) {
+      console.error('Failed to copy link:', err);
+    }
+  };
+
+  const handleShareFacebook = () => {
+    const currentUrl = window.location.href;
+    window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(currentUrl)}`, '_blank', 'noopener,noreferrer,width=600,height=500');
+  };
+
+  const handleShareWhatsAppSocial = () => {
+    if (!product) return;
+    const currentUrl = window.location.href;
+    const priceText = `৳${getRetailPrice(product)}`;
+    const text = `🌸 *${product.name}* (${product.brand})\n💰 Price: ${priceText}\n✨ Check out this authentic Korean skincare product at Korean Skin Food BD:\n${currentUrl}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareMessenger = () => {
+    const currentUrl = window.location.href;
+    // Messenger web share
+    window.open(`https://www.facebook.com/dialog/send?link=${encodeURIComponent(currentUrl)}&app_id=291494419107518&redirect_uri=${encodeURIComponent(currentUrl)}`, '_blank', 'noopener,noreferrer,width=600,height=500');
+  };
+
+  const handleShareTelegram = () => {
+    if (!product) return;
+    const currentUrl = window.location.href;
+    const text = `🌸 ${product.name} - Korean Skin Food BD`;
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(currentUrl)}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareTwitter = () => {
+    if (!product) return;
+    const currentUrl = window.location.href;
+    const text = `Check out ${product.name} by ${product.brand} on Korean Skin Food BD! ✨🇰🇷 #KoreanSkincare #KBeauty`;
+    window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(currentUrl)}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSharePinterest = () => {
+    if (!product) return;
+    const currentUrl = window.location.href;
+    const imageUrl = selectedMainImage || product.image;
+    const description = `${product.name} - Authentic Korean Skincare from Korean Skin Food BD`;
+    window.open(`https://pinterest.com/pin/create/button/?url=${encodeURIComponent(currentUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(description)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleNativeShare = async () => {
+    if (!product) return;
+    const currentUrl = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: product.name,
+          text: `Check out ${product.name} on Korean Skin Food BD`,
+          url: currentUrl
+        });
+      } catch (err) {
+        // User dismissed or share failed
+        console.log('Share canceled or error:', err);
+      }
+    } else {
+      handleCopyProductLink();
+    }
+  };
+
   // Send WhatsApp message template with product details
   const handleWhatsAppOrder = () => {
     if (!product) return;
 
-    const currentPrice = product.discountPrice || product.price;
+    const currentPrice = getRetailPrice(product);
     const pageUrl = window.location.href;
 
     const summaryText = 
@@ -99,6 +200,7 @@ export const ProductDetail: React.FC = () => {
   // Load Product Info
   useEffect(() => {
     if (!id) return;
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     const prod = productService.getProductById(id);
     if (prod) {
       setProduct(prod);
@@ -431,6 +533,152 @@ export const ProductDetail: React.FC = () => {
             <span className="flex items-center gap-1"><ShieldCheck size={13} className="text-emerald-500" /> 100% Authentic Import</span>
             <span className="flex items-center gap-1"><RefreshCw size={13} className="text-pink-500" /> 7-Day Refund Guard</span>
           </div>
+
+          {/* Social Media Sharing & Brand Logo Section (Desktop: Below Image) */}
+          <div id="product_social_share_section" className="hidden lg:block bg-gradient-to-br from-pink-50/60 via-white to-pink-50/30 rounded-2xl p-4 border border-pink-100/90 shadow-2xs space-y-3">
+            {/* Top Brand Logo & Share Title */}
+            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-pink-100/60">
+              <div className="flex items-center gap-2.5">
+                {globalTheme.logoUrl ? (
+                  <img 
+                    src={globalTheme.logoUrl} 
+                    alt={globalTheme.logoText || "Korean Skin Food BD"} 
+                    className="h-7 w-auto object-contain shrink-0 rounded-sm" 
+                  />
+                ) : (
+                  <div className="w-7 h-7 bg-gradient-to-tr from-[#E91E8C] to-[#FF62B2] rounded-lg flex items-center justify-center text-white shadow-xs shadow-pink-500/20 shrink-0">
+                    <Wand2 size={13} />
+                  </div>
+                )}
+                <div>
+                  <h4 className="text-xs font-black text-gray-900 leading-tight tracking-tight">
+                    {language === 'bn' ? 'পণ্যটি শেয়ার করুন' : 'Share This Product'}
+                  </h4>
+                  <p className="text-[10px] text-gray-500 font-medium">
+                    {language === 'bn' ? 'বন্ধু ও পরিবারের সাথে বিউটি সিক্রেট শেয়ার করুন' : 'Spread the authentic K-Beauty glow'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Native share on mobile / quick action */}
+              <button
+                type="button"
+                onClick={handleNativeShare}
+                id="btn_product_native_share"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-[#E91E8C] bg-pink-50 hover:bg-pink-100 px-2.5 py-1 rounded-full border border-pink-200 transition-all cursor-pointer hover:scale-105 active:scale-95 shrink-0"
+                title="Share"
+              >
+                <Share2 size={12} />
+                <span className="hidden sm:inline">{language === 'bn' ? 'শেয়ার' : 'Share'}</span>
+              </button>
+            </div>
+
+            {/* Social Share Buttons Row */}
+            <div className="flex items-center flex-wrap gap-2 pt-0.5">
+              {/* Facebook */}
+              <button
+                type="button"
+                id="btn_share_facebook"
+                onClick={handleShareFacebook}
+                title="Share on Facebook"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#1877F2]/10 hover:bg-[#1877F2] text-[#1877F2] hover:text-white border border-[#1877F2]/20 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+              </button>
+
+              {/* WhatsApp */}
+              <button
+                type="button"
+                id="btn_share_whatsapp"
+                onClick={handleShareWhatsAppSocial}
+                title="Share on WhatsApp"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366] text-[#25D366] hover:text-white border border-[#25D366]/25 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                </svg>
+              </button>
+
+              {/* Messenger */}
+              <button
+                type="button"
+                id="btn_share_messenger"
+                onClick={handleShareMessenger}
+                title="Share on Messenger"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-[#00B2FF]/10 via-[#006AFF]/10 to-[#E91E8C]/10 hover:from-[#00B2FF] hover:via-[#006AFF] hover:to-[#E91E8C] text-[#0084FF] hover:text-white border border-[#0084FF]/20 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.654V24l4.088-2.242c1.077.299 2.222.464 3.443.464 6.627 0 12-4.975 12-11.111C24 4.974 18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.259 5.889-3.259-6.56 6.963z"/>
+                </svg>
+              </button>
+
+              {/* Telegram */}
+              <button
+                type="button"
+                id="btn_share_telegram"
+                onClick={handleShareTelegram}
+                title="Share on Telegram"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#229ED9]/10 hover:bg-[#229ED9] text-[#229ED9] hover:text-white border border-[#229ED9]/25 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.562 8.161c-.18.868-1.503 6.985-2.184 10.316-.288 1.411-.849 1.637-1.393 1.685-1.183.104-2.079-.74-3.228-1.493-1.8-1.179-2.817-1.912-4.564-3.063-2.019-1.33-.71-2.062.44-3.257.301-.313 5.534-5.074 5.635-5.506.013-.054.024-.255-.096-.361-.12-.107-.297-.071-.425-.042-.181.041-3.067 1.95-8.66 5.727-.82.564-1.562.839-2.227.824-.733-.016-2.144-.416-3.193-.757-1.287-.419-2.31-.641-2.221-1.353.046-.371.558-.751 1.536-1.141 6.02-2.622 10.038-4.352 12.054-5.19 5.748-2.392 6.941-2.808 7.722-2.822.172-.003.555.04.804.242.21.171.269.402.296.564.028.163.064.526.035.795z"/>
+                </svg>
+              </button>
+
+              {/* X / Twitter */}
+              <button
+                type="button"
+                id="btn_share_twitter"
+                onClick={handleShareTwitter}
+                title="Post to X (Twitter)"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-900/10 hover:bg-slate-950 text-slate-800 hover:text-white border border-slate-900/15 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                </svg>
+              </button>
+
+              {/* Pinterest */}
+              <button
+                type="button"
+                id="btn_share_pinterest"
+                onClick={handleSharePinterest}
+                title="Pin on Pinterest"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#E60023]/10 hover:bg-[#E60023] text-[#E60023] hover:text-white border border-[#E60023]/20 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.668.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738a.36.36 0 0 1 .083.345l-.333 1.36c-.053.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.631-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146 1.124.347 2.317.535 3.554.535 6.621 0 11.988-5.367 11.988-11.987C24.004 5.367 18.638 0 12.017 0z"/>
+                </svg>
+              </button>
+
+              {/* Copy Link Button */}
+              <button
+                type="button"
+                id="btn_copy_product_link"
+                onClick={handleCopyProductLink}
+                className={`flex items-center gap-1.5 px-3 h-9 rounded-xl text-xs font-bold transition-all duration-200 shadow-2xs border cursor-pointer ${
+                  copiedLink
+                    ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                    : 'bg-pink-50/80 hover:bg-[#E91E8C] text-[#E91E8C] hover:text-white border-pink-200/80 hover:border-[#E91E8C]'
+                }`}
+                title="Copy Product Link"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check size={14} className="animate-in zoom-in" />
+                    <span>{language === 'bn' ? 'কপি হয়েছে!' : 'Link Copied!'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={13} />
+                    <span>{language === 'bn' ? 'লিংক কপি' : 'Copy Link'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Right Column: Skincare Specs and Add to Cart */}
@@ -458,30 +706,68 @@ export const ProductDetail: React.FC = () => {
           </div>
 
           {/* Pricing Box */}
-          <div className="p-4 bg-pink-50/15 rounded-2xl border border-pink-100/60 flex items-center justify-between">
-            <div>
-              <span className="text-[10px] text-gray-400 font-bold block uppercase tracking-wider">Authorized Price</span>
-              {product.discountPrice ? (
-                <div className="flex items-baseline gap-2 font-mono">
-                  <span className="text-2xl font-black text-[#E91E8C]">৳{product.discountPrice}</span>
-                  <span className="text-sm text-gray-400 line-through">৳{product.price}</span>
-                </div>
-              ) : (
-                <span className="text-2xl font-black text-slate-900 font-mono">৳{product.price} BDT</span>
-              )}
-            </div>
+          {profile?.wholesaleAccess ? (
+            <div className="p-4 bg-gradient-to-br from-amber-50/80 via-white to-amber-50/40 rounded-2xl border-2 border-amber-300 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-500 text-slate-950 uppercase tracking-wider">
+                  <Building2 size={12} /> Wholesale Access Active
+                </span>
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                  product.stock > 0 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                    : 'bg-red-50 text-red-700 border-red-100'
+                }`}>
+                  {product.stock > 0 ? `Stock: ${product.stock}` : 'Out of Stock'}
+                </span>
+              </div>
 
-            <div className="text-right">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase tracking-wider">Availability</span>
-              <span className={`inline-block mt-0.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                product.stock > 0 
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-                  : 'bg-red-50 text-red-700 border-red-100'
-              }`}>
-                {product.stock > 0 ? `In Stock (${product.stock} left)` : 'Out of Stock'}
-              </span>
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 bg-white rounded-xl border border-amber-200">
+                  <span className="text-[10px] text-amber-800 font-bold block uppercase tracking-wider">Wholesale (1–49 units)</span>
+                  <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
+                    ৳{getWholesalePrice(product, 1).toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-amber-100/60 rounded-xl border border-amber-300">
+                  <span className="text-[10px] text-amber-900 font-black block uppercase tracking-wider">Bulk Tier (50+ units)</span>
+                  <div className="text-xl font-black text-amber-950 font-mono mt-0.5">
+                    ৳{getWholesalePrice(product, 50).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-amber-200/60">
+                <span>Standard Retail Reference:</span>
+                <span className="line-through font-mono font-bold">৳{getRetailPrice(product).toLocaleString()}</span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="p-4 bg-pink-50/15 rounded-2xl border border-pink-100/60 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-gray-400 font-bold block uppercase tracking-wider">Authorized Price</span>
+                {hasRetailDiscount(product) ? (
+                  <div className="flex items-baseline gap-2 font-mono">
+                    <span className="text-2xl font-black text-[#E91E8C]">৳{getRetailPrice(product)}</span>
+                    <span className="text-sm text-gray-400 line-through">৳{getRetailOriginalPrice(product)}</span>
+                  </div>
+                ) : (
+                  <span className="text-2xl font-black text-slate-900 font-mono">৳{getRetailPrice(product)} BDT</span>
+                )}
+              </div>
+
+              <div className="text-right">
+                <span className="text-[10px] text-gray-400 font-bold block uppercase tracking-wider">Availability</span>
+                <span className={`inline-block mt-0.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                  product.stock > 0 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                    : 'bg-red-50 text-red-700 border-red-100'
+                }`}>
+                  {product.stock > 0 ? `In Stock (${product.stock} left)` : 'Out of Stock'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Skin Type Suitability */}
           <div className="space-y-2">
@@ -542,6 +828,152 @@ export const ProductDetail: React.FC = () => {
               <MessageCircle size={19} className="fill-white" />
               <span>Order via WhatsApp</span>
             </button>
+          </div>
+
+          {/* Social Media Sharing & Brand Logo Section (Mobile Only: Below Order Buttons) */}
+          <div id="product_social_share_section_mobile" className="lg:hidden bg-gradient-to-br from-pink-50/60 via-white to-pink-50/30 rounded-2xl p-4 border border-pink-100/90 shadow-2xs space-y-3 mt-4">
+            {/* Top Brand Logo & Share Title */}
+            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-pink-100/60">
+              <div className="flex items-center gap-2.5">
+                {globalTheme.logoUrl ? (
+                  <img 
+                    src={globalTheme.logoUrl} 
+                    alt={globalTheme.logoText || "Korean Skin Food BD"} 
+                    className="h-7 w-auto object-contain shrink-0 rounded-sm" 
+                  />
+                ) : (
+                  <div className="w-7 h-7 bg-gradient-to-tr from-[#E91E8C] to-[#FF62B2] rounded-lg flex items-center justify-center text-white shadow-xs shadow-pink-500/20 shrink-0">
+                    <Wand2 size={13} />
+                  </div>
+                )}
+                <div>
+                  <h4 className="text-xs font-black text-gray-900 leading-tight tracking-tight">
+                    {language === 'bn' ? 'পণ্যটি শেয়ার করুন' : 'Share This Product'}
+                  </h4>
+                  <p className="text-[10px] text-gray-500 font-medium">
+                    {language === 'bn' ? 'বন্ধু ও পরিবারের সাথে বিউটি সিক্রেট শেয়ার করুন' : 'Spread the authentic K-Beauty glow'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Native share on mobile */}
+              <button
+                type="button"
+                onClick={handleNativeShare}
+                id="btn_product_native_share_mobile"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-[#E91E8C] bg-pink-50 hover:bg-pink-100 px-2.5 py-1 rounded-full border border-pink-200 transition-all cursor-pointer hover:scale-105 active:scale-95 shrink-0"
+                title="Share"
+              >
+                <Share2 size={12} />
+                <span>{language === 'bn' ? 'শেয়ার' : 'Share'}</span>
+              </button>
+            </div>
+
+            {/* Social Share Buttons Row */}
+            <div className="flex items-center flex-wrap gap-2 pt-0.5">
+              {/* Facebook */}
+              <button
+                type="button"
+                id="btn_share_facebook_mobile"
+                onClick={handleShareFacebook}
+                title="Share on Facebook"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#1877F2]/10 hover:bg-[#1877F2] text-[#1877F2] hover:text-white border border-[#1877F2]/20 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+              </button>
+
+              {/* WhatsApp */}
+              <button
+                type="button"
+                id="btn_share_whatsapp_mobile"
+                onClick={handleShareWhatsAppSocial}
+                title="Share on WhatsApp"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366] text-[#25D366] hover:text-white border border-[#25D366]/25 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                </svg>
+              </button>
+
+              {/* Messenger */}
+              <button
+                type="button"
+                id="btn_share_messenger_mobile"
+                onClick={handleShareMessenger}
+                title="Share on Messenger"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-[#00B2FF]/10 via-[#006AFF]/10 to-[#E91E8C]/10 hover:from-[#00B2FF] hover:via-[#006AFF] hover:to-[#E91E8C] text-[#0084FF] hover:text-white border border-[#0084FF]/20 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.654V24l4.088-2.242c1.077.299 2.222.464 3.443.464 6.627 0 12-4.975 12-11.111C24 4.974 18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.259 5.889-3.259-6.56 6.963z"/>
+                </svg>
+              </button>
+
+              {/* Telegram */}
+              <button
+                type="button"
+                id="btn_share_telegram_mobile"
+                onClick={handleShareTelegram}
+                title="Share on Telegram"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#229ED9]/10 hover:bg-[#229ED9] text-[#229ED9] hover:text-white border border-[#229ED9]/25 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.562 8.161c-.18.868-1.503 6.985-2.184 10.316-.288 1.411-.849 1.637-1.393 1.685-1.183.104-2.079-.74-3.228-1.493-1.8-1.179-2.817-1.912-4.564-3.063-2.019-1.33-.71-2.062.44-3.257.301-.313 5.534-5.074 5.635-5.506.013-.054.024-.255-.096-.361-.12-.107-.297-.071-.425-.042-.181.041-3.067 1.95-8.66 5.727-.82.564-1.562.839-2.227.824-.733-.016-2.144-.416-3.193-.757-1.287-.419-2.31-.641-2.221-1.353.046-.371.558-.751 1.536-1.141 6.02-2.622 10.038-4.352 12.054-5.19 5.748-2.392 6.941-2.808 7.722-2.822.172-.003.555.04.804.242.21.171.269.402.296.564.028.163.064.526.035.795z"/>
+                </svg>
+              </button>
+
+              {/* X / Twitter */}
+              <button
+                type="button"
+                id="btn_share_twitter_mobile"
+                onClick={handleShareTwitter}
+                title="Post to X (Twitter)"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-900/10 hover:bg-slate-950 text-slate-800 hover:text-white border border-slate-900/15 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                </svg>
+              </button>
+
+              {/* Pinterest */}
+              <button
+                type="button"
+                id="btn_share_pinterest_mobile"
+                onClick={handleSharePinterest}
+                title="Pin on Pinterest"
+                className="flex items-center justify-center w-9 h-9 rounded-xl bg-[#E60023]/10 hover:bg-[#E60023] text-[#E60023] hover:text-white border border-[#E60023]/20 transition-all duration-200 shadow-2xs hover:scale-110 active:scale-95 cursor-pointer"
+              >
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.668.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738a.36.36 0 0 1 .083.345l-.333 1.36c-.053.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.631-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146 1.124.347 2.317.535 3.554.535 6.621 0 11.988-5.367 11.988-11.987C24.004 5.367 18.638 0 12.017 0z"/>
+                </svg>
+              </button>
+
+              {/* Copy Link Button */}
+              <button
+                type="button"
+                id="btn_copy_product_link_mobile"
+                onClick={handleCopyProductLink}
+                className={`flex items-center gap-1.5 px-3 h-9 rounded-xl text-xs font-bold transition-all duration-200 shadow-2xs border cursor-pointer ${
+                  copiedLink
+                    ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                    : 'bg-pink-50/80 hover:bg-[#E91E8C] text-[#E91E8C] hover:text-white border-pink-200/80 hover:border-[#E91E8C]'
+                }`}
+                title="Copy Product Link"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check size={14} className="animate-in zoom-in" />
+                    <span>{language === 'bn' ? 'কপি হয়েছে!' : 'Link Copied!'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={13} />
+                    <span>{language === 'bn' ? 'লিংক কপি' : 'Copy Link'}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

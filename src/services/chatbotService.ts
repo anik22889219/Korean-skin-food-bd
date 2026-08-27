@@ -1,5 +1,6 @@
 import { db, sanitizeForFirestore } from './firebase';
 import { collection, doc, setDoc, getDoc } from 'firebase/firestore';
+import { themeService } from './themeService';
 
 export interface ChatMessage {
   id: string;
@@ -166,19 +167,38 @@ export function formatWhatsAppNumber(rawNumber?: string): string {
  * Retrieves the site settings to fetch the WhatsApp number
  */
 export async function fetchSiteSettings(): Promise<{ whatsappNumber: string }> {
+  // 1. Try memory / local theme settings cache first for immediate zero-latency result
   try {
-    const settingsRef = doc(db, 'site_settings', 'main_config');
+    const globalTheme = themeService.getGlobalTheme();
+    if (globalTheme) {
+      const contactNumber = globalTheme.contactPhone || (globalTheme as any).whatsappNumber;
+      if (contactNumber) {
+        const cleaned = formatWhatsAppNumber(contactNumber);
+        if (cleaned) {
+          return { whatsappNumber: cleaned };
+        }
+      }
+    }
+  } catch {
+    // Continue to Firestore check
+  }
+
+  // 2. Fallback to querying Firestore site_settings safely
+  try {
+    const settingsRef = doc(db, 'site_settings', 'theme_global');
     const docSnap = await getDoc(settingsRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
-      if (data && data.whatsappNumber) {
-        const cleaned = formatWhatsAppNumber(data.whatsappNumber);
+      if (data && (data.contactPhone || data.whatsappNumber)) {
+        const cleaned = formatWhatsAppNumber(data.contactPhone || data.whatsappNumber);
         return { whatsappNumber: cleaned };
       }
     }
   } catch (error) {
-    console.error("Error fetching site settings:", error);
+    // Graceful offline fallback: log as warning without triggering console.error tracking
+    console.warn("[ChatbotService] Using default WhatsApp number (offline/cached):", error instanceof Error ? error.message : error);
   }
-  // Fallback to default WhatsApp number
+
+  // 3. Fallback to default WhatsApp number
   return { whatsappNumber: '8801755837545' };
 }

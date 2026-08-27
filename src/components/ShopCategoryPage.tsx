@@ -18,6 +18,7 @@ import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand }
 import { ProductCard } from './ProductCard';
 import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { analytics } from '../services/analyticsService';
+import { getRetailPrice } from '../utils/pricing';
 
 const CATEGORIES = [
   'All',
@@ -123,7 +124,7 @@ export const ShopCategoryPage: React.FC = () => {
   }, []);
 
   const handleQuickViewWhatsApp = (prod: Product) => {
-    const currentPrice = prod.discountPrice || prod.price;
+    const currentPrice = getRetailPrice(prod);
     const pageUrl = `${window.location.origin}/product/${prod.id}`;
 
     const summaryText = 
@@ -305,7 +306,7 @@ export const ShopCategoryPage: React.FC = () => {
         (p.brand && isSameBrand(p.brand, selectedBrand));
 
       // 6. Price Range Filter
-      const effectivePrice = p.discountPrice || p.price;
+      const effectivePrice = getRetailPrice(p);
       const matchesPrice = effectivePrice >= priceMin && effectivePrice <= priceMax;
 
       // 7. Stock Filter
@@ -317,10 +318,10 @@ export const ShopCategoryPage: React.FC = () => {
     // Sort Handler
     switch (sortBy) {
       case 'price-asc':
-        list.sort((a, b) => (a.discountPrice || a.price) - (b.discountPrice || b.price));
+        list.sort((a, b) => getRetailPrice(a) - getRetailPrice(b));
         break;
       case 'price-desc':
-        list.sort((a, b) => (b.discountPrice || b.price) - (a.discountPrice || a.price));
+        list.sort((a, b) => getRetailPrice(b) - getRetailPrice(a));
         break;
       case 'newest':
         list.reverse();

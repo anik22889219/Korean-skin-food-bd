@@ -4,6 +4,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBa
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
 import { getCanonicalBrandName } from '../data/brands';
+import { normalizeProductPricing } from '../utils/pricing';
 
 // Ensure initial products cache starts empty
 let productsCache: Product[] = [];
@@ -33,7 +34,8 @@ async function seedInitialProductsIfMissing(existingDocsCount: number) {
 onSnapshot(collection(db, 'products'), (snapshot) => {
   const prods: Product[] = [];
   snapshot.forEach((docSnap) => {
-    const data = docSnap.data() as Product;
+    const rawData = docSnap.data() as Product;
+    const data = normalizeProductPricing(rawData);
     const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
     prods.push({
       ...data,
@@ -96,11 +98,12 @@ export const productService = {
   },
 
   async saveProducts(products: Product[]) {
-    productsCache = products;
+    const normalized = products.map(p => normalizeProductPricing(p));
+    productsCache = normalized;
     notifySubscribers();
     const BATCH_SIZE = 40;
-    for (let i = 0; i < products.length; i += BATCH_SIZE) {
-      const chunk = products.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
+      const chunk = normalized.slice(i, i + BATCH_SIZE);
       const batch = writeBatch(db);
       chunk.forEach(p => {
         batch.set(doc(db, 'products', p.id), sanitizeForFirestore(p), { merge: true });
@@ -118,10 +121,11 @@ export const productService = {
   },
 
   createProduct(product: Omit<Product, 'qrCodeUrl'>): Product {
+    const normalizedPricing = normalizeProductPricing(product as Product);
     const barcodeNormalized = normalizeBarcode(product.barcode);
     const normalizedBrand = getCanonicalBrandName(product.brand) || product.brand;
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${product.id}`;
-    const newProduct: Product = { ...product, brand: normalizedBrand, barcodeNormalized, qrCodeUrl };
+    const newProduct: Product = { ...normalizedPricing, brand: normalizedBrand, barcodeNormalized, qrCodeUrl };
     
     // Update local cache synchronously
     productsCache = productsCache.filter(p => p.id !== product.id);
@@ -149,10 +153,11 @@ export const productService = {
   },
 
   updateProduct(product: Product): Product {
+    const normalizedPricing = normalizeProductPricing(product);
     const oldProduct = productsCache.find(p => p.id === product.id);
     const barcodeNormalized = normalizeBarcode(product.barcode);
     const normalizedBrand = getCanonicalBrandName(product.brand) || product.brand;
-    const updatedProduct: Product = { ...product, brand: normalizedBrand, barcodeNormalized };
+    const updatedProduct: Product = { ...normalizedPricing, brand: normalizedBrand, barcodeNormalized };
     
     // Update local cache synchronously
     productsCache = productsCache.map(p => p.id === product.id ? updatedProduct : p);

@@ -19,13 +19,29 @@ declare global {
     _fbq?: any;
     __KSF_ANALYTICS_INITIALIZED__?: boolean;
     __KSF_META_PIXEL_INITIALIZED__?: boolean;
+    __KSF_ANALYTICS_DEBUG__?: {
+      GA4_MEASUREMENT_ID: string;
+      isConfigured: boolean;
+      META_PIXEL_ID: string;
+      source: 'env' | 'hardcoded-fallback';
+      gtagScriptRequested: boolean;
+      fbqScriptRequested: boolean;
+    };
   }
 }
 
 // Configurable Environment Variables
 const metaEnv = (import.meta as any).env || {};
+const rawMetaPixelEnv = metaEnv.VITE_META_PIXEL_ID as string | undefined;
 const GA4_MEASUREMENT_ID = (metaEnv.VITE_GA4_MEASUREMENT_ID as string) || '';
-const META_PIXEL_ID = (metaEnv.VITE_META_PIXEL_ID as string) || '1181966473667367';
+const META_PIXEL_ID = rawMetaPixelEnv || '1181966473667367';
+const metaPixelSource: 'env' | 'hardcoded-fallback' = rawMetaPixelEnv ? 'env' : 'hardcoded-fallback';
+const isGa4Configured = Boolean(
+  GA4_MEASUREMENT_ID &&
+  GA4_MEASUREMENT_ID.trim() !== '' &&
+  !/^G-X+$/i.test(GA4_MEASUREMENT_ID.trim()) &&
+  GA4_MEASUREMENT_ID.trim() !== 'G-XXXXXXXXXX'
+);
 const IS_DEV = Boolean(metaEnv.DEV);
 
 const DISPATCHED_STORAGE_KEY = 'ksf_dispatched_analytics_events_v1';
@@ -121,6 +137,9 @@ class AnalyticsService {
     this.isInitialized = true;
     window.__KSF_ANALYTICS_INITIALIZED__ = true;
 
+    let gtagScriptRequested = false;
+    let fbqScriptRequested = false;
+
     // 1. Initialize Google Analytics 4 (GA4)
     if (GA4_MEASUREMENT_ID) {
       try {
@@ -141,6 +160,7 @@ class AnalyticsService {
         script.async = true;
         script.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}`;
         document.head.appendChild(script);
+        gtagScriptRequested = true;
         logDebug('GA4 Initialized', { measurementId: GA4_MEASUREMENT_ID });
       } catch (err) {
         console.warn('[Analytics] GA4 init failed:', err);
@@ -174,6 +194,9 @@ class AnalyticsService {
           } else {
             document.head.appendChild(script);
           }
+          fbqScriptRequested = true;
+        } else {
+          fbqScriptRequested = Boolean(document.querySelector('script[src*="fbevents.js"]'));
         }
 
         if (!window.__KSF_META_PIXEL_INITIALIZED__) {
@@ -184,6 +207,38 @@ class AnalyticsService {
       } catch (err) {
         console.warn('[Analytics] Meta Pixel init failed:', err);
       }
+    }
+
+    // 3. Analytics Configuration Diagnostic (Active in all environments)
+    const diagnostic = {
+      GA4_MEASUREMENT_ID,
+      isConfigured: isGa4Configured,
+      META_PIXEL_ID,
+      source: metaPixelSource,
+      gtagScriptRequested,
+      fbqScriptRequested,
+    };
+
+    window.__KSF_ANALYTICS_DEBUG__ = diagnostic;
+
+    try {
+      console.group('[Analytics Diagnostic]');
+      console.log('GA4_MEASUREMENT_ID:', GA4_MEASUREMENT_ID, `(isConfigured: ${isGa4Configured})`);
+      console.log('META_PIXEL_ID:', META_PIXEL_ID, `(source: ${metaPixelSource})`);
+      console.log('gtagScriptRequested:', gtagScriptRequested);
+      console.log('fbqScriptRequested:', fbqScriptRequested);
+      console.log('Debug Object:', diagnostic);
+      console.groupEnd();
+    } catch (_) {
+      console.log('[Analytics Diagnostic]', diagnostic);
+    }
+
+    if (!isGa4Configured) {
+      console.warn('[Analytics] GA4_MEASUREMENT_ID is not configured or still a placeholder — GA4 tracking will not fire.');
+    }
+
+    if (metaPixelSource === 'hardcoded-fallback') {
+      console.warn('[Analytics] VITE_META_PIXEL_ID env var is not set — using hardcoded fallback pixel ID. Set VITE_META_PIXEL_ID explicitly for this environment to avoid ambiguity between staging/production pixels.');
     }
   }
 

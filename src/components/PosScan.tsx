@@ -4,6 +4,7 @@ import { db } from '../services/firebase';
 import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
 import { Product, UserProfile } from '../types';
+import { getRetailPrice } from '../utils/pricing';
 import { 
   findProductByScannedCode, 
   scanBarcodeFromImageFile, 
@@ -804,7 +805,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                 <div className="flex-1 min-w-0 text-left text-[11px]">
                   <span className="text-[9px] uppercase font-extrabold text-[#E91E8C] block">Scanned Product</span>
                   <h4 className="font-bold text-gray-800 truncate">{lastScannedProduct.name}</h4>
-                  <p className="text-gray-500 font-mono mt-0.5">Price: <strong>৳{lastScannedProduct.discountPrice || lastScannedProduct.price}</strong></p>
+                  <p className="text-gray-500 font-mono mt-0.5">Price: <strong>৳{getRetailPrice(lastScannedProduct)}</strong></p>
                 </div>
               </div>
             )}
@@ -979,7 +980,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                     
                     <div className="flex-1 min-w-0">
                       <h5 className="font-bold text-gray-800 text-[11px] truncate">{item.product.name}</h5>
-                      <span className="text-[#E91E8C] font-black font-mono text-[10px]">৳{item.product.discountPrice || item.product.price}</span>
+                      <span className="text-[#E91E8C] font-black font-mono text-[10px]">৳{getRetailPrice(item.product)}</span>
                     </div>
 
                     <div className="flex items-center gap-1 flex-shrink-0">

@@ -183,7 +183,12 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
             {order.items.map((item, idx) => (
               <tr key={idx} className="hover:bg-gray-50/50">
                 <td className="py-2.5 pr-2 font-semibold text-gray-800">
-                  {item.name}
+                  <div>{item.name}</div>
+                  {item.pricingType === 'wholesale' && (
+                    <span className="inline-block mt-0.5 text-[9px] font-black uppercase tracking-wider text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                      Wholesale ({item.pricingTier || 'Tier'})
+                    </span>
+                  )}
                 </td>
                 <td className="py-2.5 text-right font-mono text-gray-500 whitespace-nowrap">
                   ৳{item.price.toLocaleString()}

@@ -1,10 +1,18 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ShoppingBag, MessageCircle, Star, Sparkles, ShieldCheck, Truck } from 'lucide-react';
+import { X, ShoppingBag, MessageCircle, Star, Sparkles, ShieldCheck, Truck, Building2 } from 'lucide-react';
 import { Product } from '../types';
+import { useAuth } from '../context/AuthContext';
 import { analytics } from '../services/analyticsService';
 import { formatWhatsAppNumber } from '../services/chatbotService';
+import {
+  getRetailPrice,
+  getRetailOriginalPrice,
+  hasRetailDiscount,
+  getRetailDiscountPercentage,
+  getWholesalePrice
+} from '../utils/pricing';
 
 interface ProductQuickViewModalProps {
   product: Product | null;
@@ -38,11 +46,15 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
 
   if (!isOpen || !product) return null;
 
-  const currentPrice = product.discountPrice || product.price;
-  const hasDiscount = !!product.discountPrice && product.discountPrice < product.price;
-  const discountPercent = hasDiscount
-    ? Math.round(((product.price - product.discountPrice!) / product.price) * 100)
-    : 0;
+  const { profile } = useAuth();
+  const hasWholesaleAccess = profile?.wholesaleAccess === true;
+  const wholesaleTier1 = getWholesalePrice(product, 1);
+  const wholesaleTier2 = getWholesalePrice(product, 50);
+
+  const currentPrice = getRetailPrice(product);
+  const originalPrice = getRetailOriginalPrice(product);
+  const hasDiscount = hasRetailDiscount(product);
+  const discountPercent = getRetailDiscountPercentage(product);
 
   const handleWhatsAppOrder = () => {
     const pageUrl = `${window.location.origin}/product/${product.id}`;
@@ -117,16 +129,35 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
               </div>
 
               {/* Pricing */}
-              <div className="flex items-center gap-2 text-xs font-mono font-bold">
-                <span className="text-xl text-slate-900 font-black">
-                  ৳{currentPrice.toLocaleString()} BDT
-                </span>
-                {hasDiscount && (
-                  <span className="line-through text-slate-400">
-                    ৳{product.price.toLocaleString()}
+              {hasWholesaleAccess ? (
+                <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-300 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-black">
+                    <span className="text-amber-800 flex items-center gap-1">
+                      <Building2 size={12} /> Wholesale (1–49):
+                    </span>
+                    <span className="font-mono text-slate-900">৳{wholesaleTier1.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-black bg-amber-100/70 p-1 rounded-md">
+                    <span className="text-amber-950">Bulk Tier (50+):</span>
+                    <span className="font-mono text-amber-950">৳{wholesaleTier2.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold pt-0.5">
+                    <span>Retail Reference:</span>
+                    <span className="line-through font-mono">৳{currentPrice.toLocaleString()}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                  <span className="text-xl text-slate-900 font-black">
+                    ৳{currentPrice.toLocaleString()} BDT
                   </span>
-                )}
-              </div>
+                  {hasDiscount && (
+                    <span className="line-through text-slate-400">
+                      ৳{originalPrice.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Stock Status */}
               <div className="flex items-center gap-2 text-xs">

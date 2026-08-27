@@ -21,6 +21,7 @@ import { productService } from '../services/productService';
 import { Product } from '../types';
 import { GlobalThemeSettings } from '../types/theme';
 import { analytics } from '../services/analyticsService';
+import { getProductUnitPrice } from '../utils/pricing';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -543,37 +544,55 @@ export const MainLayout: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {cart.map(item => (
-                          <div key={item.product.id} className="bg-pink-50/20 p-3 rounded-2xl border border-pink-100/50 flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <img src={item.product.image} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
-                              <div className="min-w-0">
-                                <h4 className="font-bold text-gray-800 leading-tight truncate">
-                                  {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
-                                </h4>
-                                <span className="text-[#E91E8C] font-extrabold block mt-0.5 font-mono">
-                                  ৳{item.product.discountPrice || item.product.price}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3 shrink-0">
-                              <div className="flex items-center bg-white rounded-lg border border-pink-100">
-                                <button onClick={() => updateCartQty(item.product.id, -1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
-                                  <Minus size={11} />
-                                </button>
-                                <span className="px-1.5 text-gray-800 font-mono font-bold text-[11px]">{item.quantity}</span>
-                                <button onClick={() => updateCartQty(item.product.id, 1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
-                                  <Plus size={11} />
-                                </button>
-                              </div>
-
-                              <button onClick={() => removeFromCart(item.product.id)} className="text-gray-400 hover:text-red-600 cursor-pointer p-1">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
+                        {profile?.wholesaleAccess && (
+                          <div className="bg-amber-500/10 border border-amber-300/80 p-2.5 rounded-xl flex items-center gap-2 text-[11px] font-bold text-amber-900">
+                            <Sparkles size={14} className="text-amber-600 shrink-0" />
+                            <span>Wholesale Pricing Active: Quantity-based tiers (1–49 & 50+) apply automatically.</span>
                           </div>
-                        ))}
+                        )}
+                        {cart.map(item => {
+                          const isWholesale = profile?.wholesaleAccess === true;
+                          const unitPrice = getProductUnitPrice(item.product, isWholesale ? 'wholesale' : 'retail', item.quantity);
+                          const tierLabel = isWholesale ? (item.quantity >= 50 ? 'Wholesale (50+)' : 'Wholesale (1-49)') : null;
+                          return (
+                            <div key={item.product.id} className="bg-pink-50/20 p-3 rounded-2xl border border-pink-100/50 flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <img src={item.product.image} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
+                                <div className="min-w-0">
+                                  <h4 className="font-bold text-gray-800 leading-tight truncate">
+                                    {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
+                                  </h4>
+                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                    <span className="text-[#E91E8C] font-extrabold font-mono">
+                                      ৳{unitPrice.toLocaleString()}
+                                    </span>
+                                    {tierLabel && (
+                                      <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-1.5 py-0.2 rounded border border-amber-200">
+                                        {tierLabel}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-3 shrink-0">
+                                <div className="flex items-center bg-white rounded-lg border border-pink-100">
+                                  <button onClick={() => updateCartQty(item.product.id, -1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
+                                    <Minus size={11} />
+                                  </button>
+                                  <span className="px-1.5 text-gray-800 font-mono font-bold text-[11px]">{item.quantity}</span>
+                                  <button onClick={() => updateCartQty(item.product.id, 1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
+                                    <Plus size={11} />
+                                  </button>
+                                </div>
+
+                                <button onClick={() => removeFromCart(item.product.id)} className="text-gray-400 hover:text-red-600 cursor-pointer p-1">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </>
