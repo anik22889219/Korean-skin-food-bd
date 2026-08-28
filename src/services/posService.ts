@@ -1,8 +1,35 @@
-import { PosSession, Order, Product } from '../types';
+import { PosSession, Order, Product, PosAllowedRole, PosDeviceType, PosSessionNotification } from '../types';
 import { productService } from './productService';
-import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { collection, onSnapshot, doc, setDoc, query, orderBy, addDoc, getDocs } from 'firebase/firestore';
+import { auth, db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
+import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, addDoc, getDocs, getDoc, arrayUnion } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
+
+export const ALLOWED_POS_ROLES: PosAllowedRole[] = ['admin', 'super_admin', 'inventory_manager'];
+
+export function isAllowedPosRole(role?: string | null): boolean {
+  if (!role) return false;
+  return (ALLOWED_POS_ROLES as readonly string[]).includes(role);
+}
+
+export function detectDeviceType(): PosDeviceType {
+  if (typeof window === 'undefined') return 'desktop';
+  const ua = navigator.userAgent;
+  // Tablets check (iPad or tablet user agents or screen size)
+  if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(ua)) {
+    return 'tablet';
+  }
+  // Mobile check
+  if (/Mobile|iP(hone|od)|Android|BlackBerry|IEMobile|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/i.test(ua)) {
+    return 'mobile';
+  }
+  if (window.innerWidth <= 768 && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
+    return 'mobile';
+  }
+  if (window.innerWidth <= 1024 && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
+    return 'tablet';
+  }
+  return 'desktop';
+}
 
 const DEFAULT_ORDERS: Order[] = [
   {
@@ -62,16 +89,8 @@ const DEFAULT_ORDERS: Order[] = [
 ];
 
 let ordersCache: Order[] = [...DEFAULT_ORDERS];
-let sessionsCache: PosSession[] = [
-  {
-    id: 'pos-main',
-    name: 'Register #1 (Ground Floor)',
-    status: 'active',
-    computerJoined: true,
-    lastScanTime: new Date().toISOString(),
-    items: []
-  }
-];
+// Pure in-memory cache synchronized from Firestore — NOT the source of truth, NO hardcoded singleton pos-main
+let sessionsCache: PosSession[] = [];
 
 // Firestore real-time subscriptions
 let draftOrdersCache: Order[] = [];
@@ -127,16 +146,16 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snaps
 
 onSnapshot(collection(db, 'pos_sessions'), (snapshot) => {
   const sess: PosSession[] = [];
-  snapshot.forEach((doc) => {
-    const data = doc.data() as PosSession;
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data() as PosSession;
     sess.push({
       ...data,
+      id: docSnap.id,
+      sessionId: data.sessionId || docSnap.id,
       items: Array.isArray(data?.items) ? data.items : []
     });
   });
-  if (sess.length > 0) {
-    sessionsCache = sess;
-  }
+  sessionsCache = sess;
 }, (err) => {
   console.warn('[Firebase] pos_sessions onSnapshot warning:', err);
   if (err?.code === 'permission-denied' || err?.message?.includes('permission') || err?.message?.includes('Permission')) {
@@ -193,13 +212,16 @@ export async function addProductToSession(
 
   try {
     const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+    const nowIso = new Date().toISOString();
     await addDoc(scansColRef, {
       product_id: canonicalProductId,
-      scanned_at: new Date().toISOString()
+      scanned_at: nowIso
     });
 
     setDoc(doc(db, 'pos_sessions', sessionId), {
-      lastScanTime: new Date().toISOString()
+      lastScanTime: nowIso,
+      lastSeenAt: nowIso,
+      updated_at: nowIso
     }, { merge: true }).catch(() => {});
 
     posService.scanProductIntoSession(sessionId, canonicalProductId);
@@ -227,27 +249,304 @@ export const posService = {
     });
   },
 
-  getActiveSession(): PosSession {
-    let active = sessionsCache.find(s => s.status === 'active');
-    if (!active) {
-      active = {
-        id: 'pos-main',
-        name: 'Register #1 (Ground Floor)',
-        status: 'active',
-        computerJoined: true,
-        lastScanTime: new Date().toISOString(),
-        items: []
-      };
-      sessionsCache.push(active);
-      this.saveSessions(sessionsCache);
+  /**
+   * Get or create a user-specific POS session in Firestore.
+   * Enforces:
+   * 1. Only admin, super_admin, and inventory_manager can open a session.
+   * 2. Exactly ONE active session per user (re-uses existing active session on page refresh/reopen).
+   * 3. Multiple users have completely isolated sessions.
+   * 4. Detects deviceType (mobile | tablet | desktop).
+   */
+  async getOrCreateUserPosSession(params: {
+    userId: string;
+    userName: string;
+    userRole: string;
+    operatorEmail?: string;
+  }): Promise<PosSession> {
+    const { userId, userName, userRole, operatorEmail } = params;
+
+    if (!userId) {
+      throw new Error('User ID is required to start a POS session.');
     }
-    return active;
+
+    if (!isAllowedPosRole(userRole)) {
+      throw new Error(`Access denied: Role "${userRole}" is not authorized to use the POS system. Allowed roles: ${ALLOWED_POS_ROLES.join(', ')}.`);
+    }
+
+    const deviceType = detectDeviceType();
+    const nowIso = new Date().toISOString();
+    const userSessionStorageKey = `ksf_pos_user_session_${userId}`;
+
+    // 1. Check local storage cache for rapid session ID restoration
+    try {
+      const cachedSessionId = localStorage.getItem(userSessionStorageKey);
+      if (cachedSessionId) {
+        const sessionRef = doc(db, 'pos_sessions', cachedSessionId);
+        const snap = await getDoc(sessionRef);
+        if (snap.exists()) {
+          const data = snap.data() as PosSession;
+          const isActive = data.status === 'active' || data.status === 'open';
+          if (data.userId === userId && isActive) {
+            // Restore and update heartbeat & device
+            const updatedFields: Partial<PosSession> = {
+              lastSeenAt: nowIso,
+              updated_at: nowIso,
+              deviceType,
+              userName: userName || data.userName,
+              userRole: userRole || data.userRole
+            };
+            await updateDoc(sessionRef, sanitizeForFirestore(updatedFields)).catch(() => {});
+            return {
+              ...data,
+              ...updatedFields,
+              id: snap.id,
+              sessionId: data.sessionId || snap.id,
+              items: Array.isArray(data.items) ? data.items : []
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[posService] Error reading cached session:', e);
+    }
+
+    // 2. Query Firestore collection pos_sessions where userId == userId for existing active/open session
+    try {
+      const q = query(
+        collection(db, 'pos_sessions'),
+        where('userId', '==', userId)
+      );
+      const snapshot = await getDocs(q);
+      const userActiveSessions: PosSession[] = [];
+
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data() as PosSession;
+        if (data.status === 'active' || data.status === 'open') {
+          userActiveSessions.push({
+            ...data,
+            id: docSnap.id,
+            sessionId: data.sessionId || docSnap.id,
+            items: Array.isArray(data.items) ? data.items : []
+          });
+        }
+      });
+
+      if (userActiveSessions.length > 0) {
+        // Sort by lastSeenAt / updated_at descending to grab the most active one
+        userActiveSessions.sort((a, b) => {
+          const timeA = new Date(a.lastSeenAt || a.updated_at || a.startedAt || a.created_at || 0).getTime();
+          const timeB = new Date(b.lastSeenAt || b.updated_at || b.startedAt || b.created_at || 0).getTime();
+          return timeB - timeA;
+        });
+
+        const activeSession = userActiveSessions[0];
+        try {
+          localStorage.setItem(userSessionStorageKey, activeSession.id);
+        } catch {}
+
+        // Update heartbeat and device
+        const sessionRef = doc(db, 'pos_sessions', activeSession.id);
+        await updateDoc(sessionRef, {
+          lastSeenAt: nowIso,
+          updated_at: nowIso,
+          deviceType
+        }).catch(() => {});
+
+        return {
+          ...activeSession,
+          lastSeenAt: nowIso,
+          updated_at: nowIso,
+          deviceType
+        };
+      }
+    } catch (err) {
+      console.warn('[posService] Error querying active user POS sessions from Firestore:', err);
+    }
+
+    // 3. No active session found — Create a fresh user-based session
+    const uniqueSuffix = Math.floor(100000 + Math.random() * 900000);
+    const userPrefix = userId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 6) || 'usr';
+    const newSessionId = `pos-${userPrefix}-${uniqueSuffix}`;
+
+    const newSession: PosSession = {
+      id: newSessionId,
+      sessionId: newSessionId,
+      userId,
+      userName: userName || 'Store Staff',
+      userRole: userRole as PosAllowedRole,
+      deviceType,
+      status: 'active',
+      startedAt: nowIso,
+      lastSeenAt: nowIso,
+      name: `${userName || 'Staff'}'s POS Session`,
+      created_at: nowIso,
+      updated_at: nowIso,
+      operatorName: userName,
+      operatorEmail: operatorEmail || '',
+      computerJoined: true,
+      scannerConnected: false,
+      mobileScannerId: null,
+      mobileScannerName: null,
+      items: []
+    };
+
+    try {
+      await setDoc(doc(db, 'pos_sessions', newSessionId), sanitizeForFirestore(newSession));
+      try {
+        localStorage.setItem(userSessionStorageKey, newSessionId);
+      } catch {}
+
+      // Dispatch idempotent administrative realtime notification for new POS session
+      const notifId = `pos-session-${newSessionId}`;
+      const notificationPayload: PosSessionNotification = {
+        id: notifId,
+        notificationId: notifId,
+        type: 'POS_SESSION_STARTED',
+        sessionId: newSessionId,
+        userId,
+        userName: userName || 'Store Staff',
+        userRole: (userRole as PosAllowedRole) || 'staff',
+        deviceType,
+        createdAt: nowIso,
+        read: false,
+        readBy: [],
+        dismissedBy: []
+      };
+
+      try {
+        await setDoc(doc(db, 'admin_notifications', notifId), sanitizeForFirestore(notificationPayload));
+      } catch (notifErr) {
+        console.warn('[posService] Non-blocking admin notification write note:', notifErr);
+      }
+    } catch (err) {
+      console.error('[posService] Error creating new user POS session:', err);
+    }
+
+    return newSession;
   },
 
-  scanProductIntoSession(sessionId: string, productId: string): { success: boolean; message: string; session: PosSession } {
+  /**
+   * Realtime subscription to POS session administrative notifications (For admin and super_admin only)
+   */
+  subscribeAdminNotifications(
+    callback: (notifications: PosSessionNotification[]) => void,
+    onError?: (err: any) => void
+  ): () => void {
+    try {
+      const q = query(
+        collection(db, 'admin_notifications'),
+        where('type', '==', 'POS_SESSION_STARTED')
+      );
+      return onSnapshot(q, (snapshot) => {
+        const notifs: PosSessionNotification[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as PosSessionNotification;
+          notifs.push({
+            ...data,
+            id: docSnap.id,
+            notificationId: data.notificationId || docSnap.id,
+            sessionId: data.sessionId || docSnap.id.replace('pos-session-', '')
+          });
+        });
+        // Sort descending by creation timestamp
+        notifs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        callback(notifs);
+      }, (err) => {
+        if (onError) onError(err);
+        else console.warn('[posService] Realtime admin notifications notice:', err);
+      });
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  },
+
+  /**
+   * Mark a POS session notification as read by an admin user
+   */
+  async markNotificationRead(notificationId: string, adminUserId?: string): Promise<void> {
+    if (!notificationId) return;
+    try {
+      const notifRef = doc(db, 'admin_notifications', notificationId);
+      if (adminUserId) {
+        await updateDoc(notifRef, {
+          readBy: arrayUnion(adminUserId)
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[posService] Error marking notification read:', err);
+    }
+  },
+
+  /**
+   * Mark a POS session notification as dismissed by an admin user
+   */
+  async markNotificationDismissed(notificationId: string, adminUserId?: string): Promise<void> {
+    if (!notificationId) return;
+    try {
+      const notifRef = doc(db, 'admin_notifications', notificationId);
+      if (adminUserId) {
+        await updateDoc(notifRef, {
+          dismissedBy: arrayUnion(adminUserId)
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[posService] Error marking notification dismissed:', err);
+    }
+  },
+
+  /**
+   * Close / complete a user's POS session in Firestore
+   */
+  async closeUserSession(sessionId: string, userId?: string): Promise<void> {
+    if (!sessionId) return;
+    try {
+      const nowIso = new Date().toISOString();
+      const sessionRef = doc(db, 'pos_sessions', sessionId);
+      await updateDoc(sessionRef, {
+        status: 'completed',
+        closed_at: nowIso,
+        lastSeenAt: nowIso,
+        updated_at: nowIso
+      });
+
+      if (userId) {
+        try {
+          localStorage.removeItem(`ksf_pos_user_session_${userId}`);
+        } catch {}
+      }
+    } catch (err) {
+      console.error('[posService] Error closing user session:', err);
+    }
+  },
+
+  /**
+   * Look up active session for a specific user (NO global fallback)
+   */
+  getUserActiveSession(userId: string): PosSession | null {
+    if (!userId) return null;
+    const active = sessionsCache.find(s => s.userId === userId && (s.status === 'active' || s.status === 'open'));
+    return active || null;
+  },
+
+  /**
+   * Backwards-compatible session getter: looks up the caller's active session without hardcoded pos-main
+   */
+  getActiveSession(userId?: string): PosSession | null {
+    const targetUid = userId || auth.currentUser?.uid;
+    if (targetUid) {
+      const userSession = sessionsCache.find(s => s.userId === targetUid && (s.status === 'active' || s.status === 'open'));
+      if (userSession) return userSession;
+    }
+    // Return the first active session if available, otherwise null
+    const firstActive = sessionsCache.find(s => s.status === 'active' || s.status === 'open');
+    return firstActive || null;
+  },
+
+  scanProductIntoSession(sessionId: string, productId: string): { success: boolean; message: string; session?: PosSession } {
     const sessionIndex = sessionsCache.findIndex(s => s.id === sessionId);
     if (sessionIndex === -1) {
-      return { success: false, message: 'Session not found', session: this.getActiveSession() };
+      return { success: false, message: 'POS session not found' };
     }
 
     const product = productService.getProductById(productId);
@@ -277,14 +576,17 @@ export const posService = {
       });
     }
 
-    session.lastScanTime = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    session.lastScanTime = nowIso;
+    session.lastSeenAt = nowIso;
+    session.updated_at = nowIso;
     sessionsCache[sessionIndex] = session;
     this.saveSessions(sessionsCache);
 
     return { success: true, message: `${product.name} scanned successfully!`, session };
   },
 
-  updateSessionItemQuantity(sessionId: string, productId: string, quantity: number): PosSession {
+  updateSessionItemQuantity(sessionId: string, productId: string, quantity: number): PosSession | null {
     const sIdx = sessionsCache.findIndex(s => s.id === sessionId);
     if (sIdx !== -1) {
       const session = { ...sessionsCache[sIdx] };
@@ -294,24 +596,33 @@ export const posService = {
       } else {
         session.items = currentItems.map(item => item.productId === productId ? { ...item, quantity } : item);
       }
-      session.lastScanTime = new Date().toISOString();
+      const nowIso = new Date().toISOString();
+      session.lastScanTime = nowIso;
+      session.lastSeenAt = nowIso;
+      session.updated_at = nowIso;
       sessionsCache[sIdx] = session;
       this.saveSessions(sessionsCache);
       return session;
     }
-    return this.getActiveSession();
+    return null;
   },
 
-  clearSessionCart(sessionId: string): PosSession {
+  clearSessionCart(sessionId: string): PosSession | null {
     const sIdx = sessionsCache.findIndex(s => s.id === sessionId);
     if (sIdx !== -1) {
-      const session = { ...sessionsCache[sIdx], items: [] };
-      session.lastScanTime = new Date().toISOString();
+      const nowIso = new Date().toISOString();
+      const session = { 
+        ...sessionsCache[sIdx], 
+        items: [],
+        lastScanTime: nowIso,
+        lastSeenAt: nowIso,
+        updated_at: nowIso
+      };
       sessionsCache[sIdx] = session;
       this.saveSessions(sessionsCache);
       return session;
     }
-    return this.getActiveSession();
+    return null;
   },
 
   checkoutSession(sessionId: string, customerName: string, customerPhone: string): { success: boolean; order?: Order; message: string } {
@@ -359,16 +670,17 @@ export const posService = {
         quantity: -item.quantity,
         type: 'sale',
         source: 'POS',
-        performedBy: 'POS Register Operator',
+        performedBy: session.userName || 'POS Operator',
         previousStock: prevStock,
         newStock: prod.stock,
-        reason: `POS Sale - Register Checkout`
+        reason: `POS Sale - User Session Checkout`
       });
     }
 
     // Create Order
     const totalAmount = sessionItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const orderId = 'POS-' + Math.floor(100000 + Math.random() * 900000);
+    const nowIso = new Date().toISOString();
     const newOrder: Order = {
       id: orderId,
       customerName: customerName || 'In-Person Customer',
@@ -382,7 +694,7 @@ export const posService = {
       status: 'delivered',
       order_source: 'POS',
       stock_deducted: true,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       paymentMethod: 'POS_In_Person',
       sessionType: 'POS',
       isPaid: true
@@ -393,8 +705,13 @@ export const posService = {
     setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(newOrder)).catch(console.error);
 
     // Clear session cart
-    const updatedSession = { ...session, items: [] };
-    updatedSession.lastScanTime = new Date().toISOString();
+    const updatedSession = { 
+      ...session, 
+      items: [],
+      lastScanTime: nowIso,
+      lastSeenAt: nowIso,
+      updated_at: nowIso
+    };
     sessionsCache[sIdx] = updatedSession;
     this.saveSessions(sessionsCache);
 

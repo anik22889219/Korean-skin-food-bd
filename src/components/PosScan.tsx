@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { collection, doc, setDoc, onSnapshot, query, addDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { collection, doc, onSnapshot, query, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
-import { addProductToSession } from '../services/posService';
-import { Product, UserProfile } from '../types';
+import { addProductToSession, posService, isAllowedPosRole, detectDeviceType } from '../services/posService';
+import { Product, UserProfile, PosSession } from '../types';
 import { getRetailPrice } from '../utils/pricing';
 import { 
   findProductByScannedCode, 
@@ -32,17 +32,17 @@ import {
   Volume2,
   VolumeX,
   Bug,
-  Info
+  Loader2
 } from 'lucide-react';
 
 interface PosScanProps {
-  sessionId: string;
+  sessionId?: string;
   onBack: () => void;
   currentUser: UserProfile | null;
   onLoginStaff: (email: string, role: any) => void;
 }
 
-// Shared resilient Web Audio API synthesizer for retail barcode scanning
+// Resilient Web Audio API synthesizer for retail barcode scanning chime
 let globalAudioCtx: AudioContext | null = null;
 
 function getAudioContext(): AudioContext | null {
@@ -75,7 +75,6 @@ export function playSuccessBeep(volume: number = 0.25) {
     const osc2 = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    // Harmonic dual-tone register chime (1400Hz -> 2300Hz quick bell curve)
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(1400, now);
     osc1.frequency.exponentialRampToValueAtTime(2350, now + 0.07);
@@ -96,9 +95,7 @@ export function playSuccessBeep(volume: number = 0.25) {
     osc2.start(now);
     osc1.stop(now + 0.18);
     osc2.stop(now + 0.18);
-  } catch (e) {
-    // Autoplay or audio context restriction fallback
-  }
+  } catch (e) {}
 }
 
 /**
@@ -126,17 +123,25 @@ export function playErrorBeep(volume: number = 0.2) {
 
     osc.start(now);
     osc.stop(now + 0.22);
-  } catch (e) {
-    // Audio Context restricted
-  }
+  } catch (e) {}
 }
 
-export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }: PosScanProps) {
+export default function PosScan({ sessionId: propSessionId, onBack, currentUser, onLoginStaff }: PosScanProps) {
+  // Check if current user is authorized staff (Only admin, super_admin, inventory_manager)
+  const isUserStaff = Boolean(currentUser && isAllowedPosRole(currentUser.role));
+
+  // Active user-based session state
+  const [activeSession, setActiveSession] = useState<PosSession | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string>(propSessionId || '');
+  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  // Scanner & Cart states
   const [scannedItemsCount, setScannedItemsCount] = useState(0);
   const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [scanStatusMsg, setScanStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Audio Feedback Toggle State (persisted in localStorage)
+  // Sound & debug
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('pos_scan_sound_enabled');
@@ -146,29 +151,48 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
     }
   });
 
+  const [showDebugMode, setShowDebugMode] = useState<boolean>(false);
+  const [debugInfo, setDebugInfo] = useState<BarcodeDebugInfo | null>(null);
+
+  // Camera & tab states
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isPhotoScanning, setIsPhotoScanning] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [useFrontCamera, setUseFrontCamera] = useState<boolean>(false);
+  const [posCameraZoom, setPosCameraZoom] = useState<number>(1.5);
+  const [manualCode, setManualCode] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'cart'>('camera');
+  
+  // Live cart
+  const [scansList, setScansList] = useState<any[]>([]);
+  const [editingQtyMobile, setEditingQtyMobile] = useState<{ [productId: string]: string }>({});
+
+  // Staff login simulation (for quick testing)
+  const [emailInput, setEmailInput] = useState('');
+  const [roleInput, setRoleInput] = useState<'admin' | 'super_admin' | 'inventory_manager'>('admin');
+
+  // Scanner Controller Ref
+  const lastScanRef = useRef<{ productId: string; time: number } | null>(null);
+  const scannerControllerRef = useRef<ScannerController | null>(null);
+
+  // Sound toggle
   const toggleSound = () => {
     const next = !soundEnabled;
     setSoundEnabled(next);
     try {
       localStorage.setItem('pos_scan_sound_enabled', String(next));
     } catch {}
-    if (next) {
-      playSuccessBeep(0.22);
-    }
+    if (next) playSuccessBeep(0.22);
   };
 
   const handleTestSound = () => {
     playSuccessBeep(0.28);
-    if (navigator.vibrate) {
-      navigator.vibrate(80);
-    }
+    if (navigator.vibrate) navigator.vibrate(80);
   };
 
-  // Warm up audio context on component mount or first touch
+  // Warm up audio context on interaction
   useEffect(() => {
-    const unlockAudio = () => {
-      getAudioContext();
-    };
+    const unlockAudio = () => getAudioContext();
     window.addEventListener('click', unlockAudio, { once: true });
     window.addEventListener('touchstart', unlockAudio, { once: true });
     return () => {
@@ -176,95 +200,111 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
       window.removeEventListener('touchstart', unlockAudio);
     };
   }, []);
-  
-  // Barcode Debug Mode State
-  const [showDebugMode, setShowDebugMode] = useState<boolean>(true);
-  const [debugInfo, setDebugInfo] = useState<BarcodeDebugInfo | null>(null);
 
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [isPhotoScanning, setIsPhotoScanning] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [useFrontCamera, setUseFrontCamera] = useState(false);
-  const [posCameraZoom, setPosCameraZoom] = useState<number>(1.5);
-
-  const handleLiveLensSnapPos = async () => {
-    setIsPhotoScanning(true);
-    setScanStatusMsg({ type: 'success', text: '🔍 Performing Google Lens HD Instant Scan from live camera frame...' });
-
-    try {
-      const scannedText = await scanBarcodeFromLiveVideoSnapshot("reader-container");
-      if (scannedText) {
-        await handleScanSuccess(scannedText);
-      } else {
-        setScanStatusMsg({
-          type: 'error',
-          text: 'Could not read barcode from instant frame. Tip: Hold camera ~15cm away (do not place too close to avoid lens focus blur) and tap "📸 Google Lens Live Scan" again!'
-        });
-      }
-    } catch (err) {
-      console.error("POS Live Lens snap error:", err);
-      setScanStatusMsg({ type: 'error', text: 'Error performing live Lens snapshot scan.' });
-    } finally {
-      setIsPhotoScanning(false);
-    }
-  };
-
-  const handlePosZoomChange = async (newZoom: number) => {
-    setPosCameraZoom(newZoom);
-    if (isCameraActive) {
-      await applyCameraTrackConstraints("reader-container", { zoom: newZoom, triggerFocus: true });
-    }
-  };
-
-  const handleGoogleLensPhotoScanPos = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsPhotoScanning(true);
-    setScanStatusMsg({ type: 'success', text: '🔍 Analyzing photo with Google Lens barcode scanner...' });
-
-    try {
-      const scannedText = await scanBarcodeFromImageFile(file);
-      if (scannedText) {
-        await handleScanSuccess(scannedText);
-      } else {
-        setScanStatusMsg({
-          type: 'error',
-          text: 'Could not read barcode from photo. Ensure barcode is clear and try taking a closer photo.'
-        });
-      }
-    } catch (err) {
-      console.error("POS Photo scan error:", err);
-      setScanStatusMsg({ type: 'error', text: 'Error analyzing photo barcode.' });
-    } finally {
-      setIsPhotoScanning(false);
-      e.target.value = '';
-    }
-  };
-
-  // Manual search state
-  const [manualCode, setManualCode] = useState('');
-  const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'cart'>('camera');
-  
-  // Live scans list for mobile cart view
-  const [scansList, setScansList] = useState<any[]>([]);
-  const [editingQtyMobile, setEditingQtyMobile] = useState<{ [productId: string]: string }>({});
-
-  // Login form for unauthenticated staff
-  const [emailInput, setEmailInput] = useState('');
-  const [roleInput, setRoleInput] = useState<'admin' | 'inventory_manager' | 'customer_support'>('admin');
-
-  // Scanner Controller Ref
-  const lastScanRef = useRef<{ productId: string; time: number } | null>(null);
-  const scannerControllerRef = useRef<ScannerController | null>(null);
-
-  // Check if current user is a staff member
-  const isUserStaff = currentUser && ['admin', 'inventory_manager', 'customer_support', 'super_admin'].includes(currentUser.role);
-
-  // 1. Listen live to scans under this session to show live counter & list
+  // ================= 1. AUTOMATIC USER POS SESSION START / RESTORE =================
   useEffect(() => {
-    if (!sessionId || !isUserStaff) return;
-    const q = query(collection(db, 'pos_sessions', sessionId, 'scans'));
+    let isMounted = true;
+
+    const initUserSession = async () => {
+      if (!isUserStaff || !currentUser?.uid) {
+        setIsLoadingSession(false);
+        return;
+      }
+
+      setIsLoadingSession(true);
+      setSessionError(null);
+
+      try {
+        // Call the user-based session architecture:
+        // Automatically restores existing active session or creates a new one
+        const session = await posService.getOrCreateUserPosSession({
+          userId: currentUser.uid,
+          userName: currentUser.name || 'Store Staff',
+          userRole: currentUser.role,
+          operatorEmail: currentUser.email
+        });
+
+        if (isMounted) {
+          setActiveSession(session);
+          setActiveSessionId(session.id || session.sessionId || '');
+        }
+      } catch (err: any) {
+        console.error('[PosScan] Error starting/restoring user POS session:', err);
+        if (isMounted) {
+          setSessionError(err?.message || 'Failed to initialize mobile POS session.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingSession(false);
+        }
+      }
+    };
+
+    initUserSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.uid, currentUser?.role, currentUser?.name, currentUser?.email, isUserStaff, propSessionId]);
+
+  // ================= 2. ACTIVE SESSION HEARTBEAT & REAL-TIME SYNC =================
+  useEffect(() => {
+    if (!activeSessionId) return;
+
+    // Send immediate heartbeat on session connect
+    const nowIso = new Date().toISOString();
+    const sessionRef = doc(db, 'pos_sessions', activeSessionId);
+    updateDoc(sessionRef, {
+      lastSeenAt: nowIso,
+      updated_at: nowIso
+    }).catch(() => {});
+
+    // Periodic heartbeat every 15 seconds to keep session alive in Firestore
+    const heartbeatTimer = setInterval(() => {
+      const timeIso = new Date().toISOString();
+      updateDoc(sessionRef, {
+        lastSeenAt: timeIso,
+        updated_at: timeIso
+      }).catch(() => {});
+    }, 15000);
+
+    // Real-time listener on active session document
+    const unsub = onSnapshot(sessionRef, (snap) => {
+      if (!snap.exists()) {
+        setSessionError('POS session was closed or removed.');
+        return;
+      }
+      const data = snap.data() as PosSession;
+      if (data.status === 'completed' || data.status === 'closed') {
+        setActiveSession(null);
+        setSessionError('This POS session has been completed and closed.');
+        return;
+      }
+
+      setActiveSession({
+        ...data,
+        id: snap.id,
+        sessionId: data.sessionId || snap.id,
+        items: Array.isArray(data?.items) ? data.items : []
+      });
+    }, (err) => {
+      console.warn('[PosScan] Session sync error:', err);
+    });
+
+    return () => {
+      clearInterval(heartbeatTimer);
+      unsub();
+    };
+  }, [activeSessionId]);
+
+  // ================= 3. SCANS REAL-TIME LISTENER (CART ITEMS) =================
+  useEffect(() => {
+    if (!activeSessionId) {
+      setScansList([]);
+      setScannedItemsCount(0);
+      return;
+    }
+    const q = query(collection(db, 'pos_sessions', activeSessionId, 'scans'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
@@ -273,14 +313,14 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
       setScansList(list);
       setScannedItemsCount(snapshot.size);
     }, (err) => {
-      console.warn('Error listening to session scans:', err);
+      console.warn('[PosScan] Error listening to scans:', err);
     });
     return () => unsubscribe();
-  }, [sessionId, isUserStaff]);
+  }, [activeSessionId]);
 
-  // 2. Initialize ZXing Unified Scanner
+  // ================= 4. CAMERA SCANNER ENGINE =================
   useEffect(() => {
-    if (!isUserStaff || !isCameraActive) {
+    if (!activeSessionId || !isCameraActive) {
       if (scannerControllerRef.current) {
         scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
@@ -297,8 +337,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         scannerControllerRef.current = null;
       }
 
-      // Small delay to ensure DOM node is rendered
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 60));
       if (!active) return;
 
       try {
@@ -340,7 +379,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         scannerControllerRef.current = null;
       }
     };
-  }, [isCameraActive, isUserStaff, useFrontCamera]);
+  }, [isCameraActive, activeSessionId, useFrontCamera]);
 
   const stopScanner = () => {
     if (scannerControllerRef.current) {
@@ -350,63 +389,102 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
     setIsCameraActive(false);
   };
 
-  // 3. Handle a successfully scanned QR code or Barcode
-  const handleScanSuccess = async (rawText: string) => {
-    if (!rawText) return;
+  const handleLiveLensSnapPos = async () => {
+    setIsPhotoScanning(true);
+    setScanStatusMsg({ type: 'success', text: '🔍 Analyzing live camera frame...' });
 
-    // Ensure audio context is ready on user/scanner trigger
+    try {
+      const scannedText = await scanBarcodeFromLiveVideoSnapshot("reader-container");
+      if (scannedText) {
+        await handleScanSuccess(scannedText);
+      } else {
+        setScanStatusMsg({
+          type: 'error',
+          text: 'Could not read barcode from instant frame. Hold camera ~15cm away and tap Lens Scan again.'
+        });
+      }
+    } catch (err) {
+      console.error("POS Live Lens snap error:", err);
+      setScanStatusMsg({ type: 'error', text: 'Error performing live snapshot scan.' });
+    } finally {
+      setIsPhotoScanning(false);
+    }
+  };
+
+  const handlePosZoomChange = async (newZoom: number) => {
+    setPosCameraZoom(newZoom);
+    if (isCameraActive) {
+      await applyCameraTrackConstraints("reader-container", { zoom: newZoom, triggerFocus: true });
+    }
+  };
+
+  const handleGoogleLensPhotoScanPos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsPhotoScanning(true);
+    setScanStatusMsg({ type: 'success', text: '🔍 Analyzing photo barcode...' });
+
+    try {
+      const scannedText = await scanBarcodeFromImageFile(file);
+      if (scannedText) {
+        await handleScanSuccess(scannedText);
+      } else {
+        setScanStatusMsg({
+          type: 'error',
+          text: 'Could not read barcode from photo. Ensure lighting is clear and retry.'
+        });
+      }
+    } catch (err) {
+      console.error("POS Photo scan error:", err);
+      setScanStatusMsg({ type: 'error', text: 'Error analyzing photo barcode.' });
+    } finally {
+      setIsPhotoScanning(false);
+      e.target.value = '';
+    }
+  };
+
+  // ================= 5. BARCODE SUCCESS PROCESSING =================
+  const handleScanSuccess = async (rawText: string) => {
+    if (!rawText || !activeSessionId) return;
+
     getAudioContext();
 
-    // Use unified lookup function
     const allProducts = productService.getProducts();
     const { product, debugInfo: scanDebug } = findProductByScannedCode(allProducts, rawText);
     setDebugInfo(scanDebug);
 
     if (!product) {
-      // Audio alert for unrecognized barcode
-      if (soundEnabled) {
-        playErrorBeep();
-      }
-      if (navigator.vibrate) {
-        navigator.vibrate([120, 60, 120]);
-      }
+      if (soundEnabled) playErrorBeep();
+      if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
       setScanStatusMsg({
         type: 'error',
-        text: `Unrecognized product code: Raw "${scanDebug.rawValue}" -> Normalized "${scanDebug.normalizedValue}"`
+        text: `Unrecognized code "${scanDebug.normalizedValue || scanDebug.rawValue}"`
       });
       return;
     }
 
     const productId = product.id;
 
-    // Check debounce: avoid double scans of the same item within 1200ms
+    // Avoid double scans within 1.2 seconds
     const now = Date.now();
     if (lastScanRef.current && lastScanRef.current.productId === productId && (now - lastScanRef.current.time) < 1200) {
       return;
     }
-
     lastScanRef.current = { productId, time: now };
 
-    // Play instant pleasant audio confirmation chime & haptic feedback
-    if (soundEnabled) {
-      playSuccessBeep();
-    }
-    if (navigator.vibrate) {
-      navigator.vibrate(90);
-    }
+    if (soundEnabled) playSuccessBeep();
+    if (navigator.vibrate) navigator.vibrate(90);
 
-    // Call shared addProductToSession helper
-    const result = await addProductToSession(sessionId, productId);
+    const result = await addProductToSession(activeSessionId, productId);
     if (result.success && result.product) {
       setLastScannedProduct(result.product);
       setScanStatusMsg({
         type: 'success',
-        text: `Added "${result.product.name}"!`
+        text: `✓ Added "${result.product.name}"`
       });
     } else {
-      if (soundEnabled) {
-        playErrorBeep();
-      }
+      if (soundEnabled) playErrorBeep();
       setScanStatusMsg({
         type: 'error',
         text: result.message || `Failed to add product.`
@@ -422,7 +500,6 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualCode.trim()) return;
-
     await handleScanSuccess(manualCode.trim());
     setManualCode('');
   };
@@ -436,8 +513,8 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
     onLoginStaff(emailInput.trim(), roleInput);
   };
 
-  // Grouped cart items for mobile cart view
-  const mobileCartItems = React.useMemo(() => {
+  // Grouped cart items
+  const mobileCartItems = useMemo(() => {
     const counts: { [pId: string]: { count: number; docIds: string[] } } = {};
     scansList.forEach((s) => {
       if (s.product_id) {
@@ -452,7 +529,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
     return Object.keys(counts).map((pId) => {
       const prod = productService.getProductByBarcode(pId) || productService.getProductById(pId);
       return {
-        product: prod || {
+        product: prod || ({
           id: pId,
           name: 'Unknown Product',
           nameBN: 'অজানা পণ্য',
@@ -460,7 +537,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
           price: 1000,
           stock: 0,
           image: 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=150&auto=format&fit=crop'
-        } as Product,
+        } as Product),
         quantity: counts[pId].count,
         docIds: counts[pId].docIds
       };
@@ -468,25 +545,23 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   }, [scansList]);
 
   const handleIncrementMobile = async (productId: string) => {
-    const res = await addProductToSession(sessionId, productId);
-    if (!res.success) {
-      alert(res.message);
-    }
+    if (!activeSessionId) return;
+    const res = await addProductToSession(activeSessionId, productId);
+    if (!res.success) alert(res.message);
   };
 
   const handleDecrementMobile = async (docIds: string[]) => {
-    if (docIds.length === 0) return;
+    if (!activeSessionId || docIds.length === 0) return;
     try {
       const lastDocId = docIds[docIds.length - 1];
-      await deleteDoc(doc(db, 'pos_sessions', sessionId, 'scans', lastDocId));
+      await deleteDoc(doc(db, 'pos_sessions', activeSessionId, 'scans', lastDocId));
     } catch (err) {
       console.error('Error decrementing scan:', err);
     }
   };
 
   const handleSetQuantityMobile = async (productId: string, docIds: string[], maxStock: number, rawValue: string) => {
-    if (!sessionId) return;
-
+    if (!activeSessionId) return;
     setEditingQtyMobile(prev => {
       const next = { ...prev };
       delete next[productId];
@@ -514,7 +589,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
       const batch = writeBatch(db);
       if (targetQty > currentQty) {
         const diff = targetQty - currentQty;
-        const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+        const scansColRef = collection(db, 'pos_sessions', activeSessionId, 'scans');
         for (let i = 0; i < diff; i++) {
           const newDocRef = doc(scansColRef);
           batch.set(newDocRef, {
@@ -526,7 +601,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         const diff = currentQty - targetQty;
         const docsToDelete = docIds.slice(docIds.length - diff);
         for (const dId of docsToDelete) {
-          batch.delete(doc(db, 'pos_sessions', sessionId, 'scans', dId));
+          batch.delete(doc(db, 'pos_sessions', activeSessionId, 'scans', dId));
         }
       }
       await batch.commit();
@@ -536,35 +611,39 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   };
 
   const handleRemoveMobile = async (docIds: string[]) => {
-    if (docIds.length === 0) return;
+    if (!activeSessionId || docIds.length === 0) return;
     try {
       for (const id of docIds) {
-        await deleteDoc(doc(db, 'pos_sessions', sessionId, 'scans', id));
+        await deleteDoc(doc(db, 'pos_sessions', activeSessionId, 'scans', id));
       }
     } catch (err) {
       console.error('Error removing scans:', err);
     }
   };
 
+  // ================= RENDER A: AUTHENTICATION / ACCESS RESTRICTION =================
   if (!isUserStaff) {
-    // UN-AUTHENTICATED BARRIER
     return (
       <div className="max-w-md mx-auto bg-white p-6 rounded-3xl border border-pink-100 shadow-xl space-y-6 text-xs text-center my-6">
         <div className="w-14 h-14 bg-red-50 border border-red-200 text-red-500 rounded-full flex items-center justify-center mx-auto">
           <ShieldAlert size={28} />
         </div>
-        
         <div className="space-y-1.5">
           <h3 className="text-base font-extrabold text-gray-900">Staff Authentication Required</h3>
           <p className="text-gray-500 leading-relaxed font-medium">
-            This live smartphone POS scanner module is restricted exclusively to authorized checkout staff members.
+            This live smartphone POS module is restricted exclusively to authorized checkout staff members (admin, super_admin, inventory_manager).
           </p>
         </div>
 
-        {/* Staff Quick Login Form */}
+        {currentUser && (
+          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-left text-slate-700 text-[11px] space-y-1">
+            <p><span className="font-semibold text-gray-900">Logged-in User:</span> {currentUser.name || currentUser.email}</p>
+            <p><span className="font-semibold text-gray-900">Assigned Role:</span> <span className="font-mono font-bold text-rose-600 uppercase">{currentUser.role || 'customer'}</span></p>
+          </div>
+        )}
+
         <form onSubmit={handleStaffLoginSubmit} className="text-left bg-pink-50/20 p-5 rounded-2xl border border-pink-100/50 space-y-4">
           <span className="text-[10px] uppercase font-bold text-pink-700 tracking-wider block">Staff Quick Login</span>
-          
           <div>
             <label className="block text-gray-500 font-semibold mb-1">Work Email</label>
             <input 
@@ -585,8 +664,8 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
               className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
             >
               <option value="admin">Administrator</option>
-              <option value="inventory_manager">Inventory Supervisor</option>
-              <option value="customer_support">Support Associate</option>
+              <option value="super_admin">Super Administrator</option>
+              <option value="inventory_manager">Inventory Manager</option>
             </select>
           </div>
 
@@ -600,6 +679,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         </form>
 
         <button 
+          type="button"
           onClick={onBack}
           className="text-[#E91E8C] hover:text-[#FF4B91] font-bold text-xs flex items-center justify-center gap-1 mx-auto cursor-pointer"
         >
@@ -610,65 +690,148 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
     );
   }
 
-  return (
-    <div className="max-w-md mx-auto bg-[#FFF5F8] min-h-screen flex flex-col justify-between pb-8">
-      
-      {/* MOBILE SCANNERS HEADER */}
-      <div className="bg-white px-4 py-3 border-b border-pink-100 flex items-center justify-between shadow-sm sticky top-0 z-20">
-        <button 
-          onClick={() => {
-            stopScanner();
-            onBack();
-          }}
-          className="p-1.5 hover:bg-pink-50 text-gray-500 rounded-lg cursor-pointer"
-        >
-          <X size={18} />
-        </button>
-
-        <div className="text-center">
-          <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center justify-center gap-1">
-            <Smartphone size={13} className="text-[#E91E8C]" />
-            <span>Mobile Scanner</span>
-          </h3>
-          <span className="text-[9px] text-pink-600 font-bold font-mono">Session: {sessionId}</span>
+  // ================= RENDER B: LOADING SESSION STATE =================
+  if (isLoadingSession) {
+    return (
+      <div className="max-w-md mx-auto min-h-[60vh] flex flex-col items-center justify-center space-y-4 p-6 text-center">
+        <div className="w-14 h-14 bg-pink-50 border border-pink-200 text-[#E91E8C] rounded-full flex items-center justify-center animate-bounce shadow-md shadow-pink-100">
+          <Loader2 className="animate-spin" size={26} />
         </div>
+        <div className="space-y-1">
+          <h3 className="text-base font-extrabold text-gray-900">Starting POS Live Session</h3>
+          <p className="text-xs text-pink-600 font-medium font-mono animate-pulse">
+            Connecting session for {currentUser?.name || 'Staff'} ({currentUser?.role})...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-        <div className="flex items-center gap-1.5">
-          {/* Audio Beep Feedback Toggle */}
+  // ================= RENDER C: SESSION INITIALIZATION ERROR =================
+  if (sessionError) {
+    return (
+      <div className="max-w-md mx-auto my-12 bg-white border border-rose-200 p-6 rounded-3xl shadow-sm text-center space-y-4">
+        <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+          <AlertCircle size={28} />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-base font-bold text-gray-900">Session Error</h3>
+          <p className="text-xs text-gray-600 leading-relaxed">{sessionError}</p>
+        </div>
+        <div className="flex gap-2 pt-2">
           <button
             type="button"
-            onClick={toggleSound}
-            className={`p-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 shadow-xs ${
-              soundEnabled 
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
-                : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'
-            }`}
-            title={soundEnabled ? 'Audio Feedback ON (Tap to mute)' : 'Audio Feedback MUTED (Tap to enable)'}
+            onClick={() => window.location.reload()}
+            className="flex-1 py-2.5 bg-[#E91E8C] text-white rounded-xl font-bold text-xs hover:bg-[#FF4B91] transition cursor-pointer"
           >
-            {soundEnabled ? <Volume2 size={13} className="text-emerald-600 animate-pulse" /> : <VolumeX size={13} />}
-            <span className="text-[9px] font-black uppercase font-mono">{soundEnabled ? 'BEEP' : 'MUTE'}</span>
+            Retry Connection
           </button>
-
           <button
-            onClick={() => setActiveTab(activeTab === 'cart' ? 'camera' : 'cart')}
-            className="flex items-center gap-1.5 bg-pink-50 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1.5 rounded-xl font-mono shadow-inner cursor-pointer"
+            type="button"
+            onClick={onBack}
+            className="py-2.5 px-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-200 transition cursor-pointer"
           >
-            <ShoppingBag size={12} />
-            <span>{scannedItemsCount}</span>
+            Back
           </button>
         </div>
       </div>
+    );
+  }
+
+  // Format operator display role
+  const formattedRole = (activeSession?.userRole || currentUser?.role || '')
+    .replace('_', ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+
+  // ================= RENDER D: AUTOMATIC LIVE MOBILE POS WORKSTATION =================
+  return (
+    <div className="max-w-md mx-auto bg-[#FFF5F8] min-h-screen flex flex-col justify-between pb-8">
+      {/* 🟢 POS LIVE WORKSTATION HEADER */}
+      <header className="bg-white px-4 py-3 border-b border-pink-100 shadow-xs sticky top-0 z-20 space-y-2">
+        <div className="flex items-center justify-between">
+          <button 
+            type="button"
+            onClick={() => {
+              stopScanner();
+              onBack();
+            }}
+            className="p-1.5 hover:bg-pink-50 text-gray-500 rounded-xl cursor-pointer"
+            title="Back"
+          >
+            <ArrowLeft size={18} />
+          </button>
+
+          <div className="text-center">
+            <div className="flex items-center justify-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full border border-emerald-200 shadow-2xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>POS LIVE</span>
+              </span>
+            </div>
+            <div className="flex items-center justify-center gap-1 text-[11px] text-gray-600 mt-0.5">
+              <span className="font-bold text-gray-900 truncate max-w-[120px]">
+                {activeSession?.userName || currentUser?.name || 'Staff'}
+              </span>
+              <span>&bull;</span>
+              <span className="text-[#E91E8C] font-semibold text-[10px]">
+                {formattedRole}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* Audio Toggle */}
+            <button
+              type="button"
+              onClick={toggleSound}
+              className={`p-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 shadow-2xs ${
+                soundEnabled 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
+                  : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'
+              }`}
+              title={soundEnabled ? 'Audio Feedback ON' : 'Audio Feedback MUTED'}
+            >
+              {soundEnabled ? <Volume2 size={13} className="text-emerald-600" /> : <VolumeX size={13} />}
+            </button>
+
+            {/* Cart Count Button */}
+            <button
+              type="button"
+              onClick={() => setActiveTab(activeTab === 'cart' ? 'camera' : 'cart')}
+              className="flex items-center gap-1.5 bg-pink-50 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1.5 rounded-xl font-mono shadow-inner cursor-pointer"
+            >
+              <ShoppingBag size={12} />
+              <span>{scannedItemsCount}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* User Session & Device Identifier Sub-bar */}
+        <div className="flex items-center justify-between text-[10px] text-gray-500 bg-pink-50/50 px-3 py-1.5 rounded-xl border border-pink-100/60 font-mono">
+          <span className="flex items-center gap-1 text-slate-700 font-bold">
+            <Smartphone size={11} className="text-[#E91E8C]" />
+            <span className="capitalize">{activeSession?.deviceType || 'Mobile'}</span>
+          </span>
+          <span className="text-gray-400 font-semibold truncate max-w-[180px]">
+            Session: <strong className="text-gray-700 font-bold">{activeSessionId}</strong>
+          </span>
+        </div>
+      </header>
 
       {/* MODE TABS (Camera Scan / Manual Entry / Live Cart) */}
-      <div className="bg-white border-b border-pink-100 px-4 py-2 flex items-center justify-around text-xs font-bold">
+      <nav className="bg-white border-b border-pink-100 px-4 py-2 flex items-center justify-around text-xs font-bold" aria-label="Scanner modes">
         <button
+          type="button"
           onClick={() => {
             setActiveTab('camera');
             if (!isCameraActive) setIsCameraActive(true);
           }}
           className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl transition cursor-pointer ${
             activeTab === 'camera'
-              ? 'bg-[#E91E8C] text-white shadow-sm'
+              ? 'bg-[#E91E8C] text-white shadow-xs'
               : 'text-gray-500 hover:text-pink-600'
           }`}
         >
@@ -677,12 +840,11 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         </button>
 
         <button
-          onClick={() => {
-            setActiveTab('manual');
-          }}
+          type="button"
+          onClick={() => setActiveTab('manual')}
           className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl transition cursor-pointer ${
             activeTab === 'manual'
-              ? 'bg-[#E91E8C] text-white shadow-sm'
+              ? 'bg-[#E91E8C] text-white shadow-xs'
               : 'text-gray-500 hover:text-pink-600'
           }`}
         >
@@ -691,24 +853,24 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('cart')}
           className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl transition cursor-pointer ${
             activeTab === 'cart'
-              ? 'bg-[#E91E8C] text-white shadow-sm'
+              ? 'bg-[#E91E8C] text-white shadow-xs'
               : 'text-gray-500 hover:text-pink-600'
           }`}
         >
           <ShoppingBag size={14} />
-          <span>Live Cart ({scannedItemsCount})</span>
+          <span>Cart ({scannedItemsCount})</span>
         </button>
-      </div>
+      </nav>
 
       {/* MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 space-y-4">
-        
-        {/* STATUS BANNER */}
+        {/* STATUS NOTIFICATION BANNER */}
         {scanStatusMsg && (
-          <div className={`w-full max-w-sm p-3 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-md ${
+          <div className={`w-full max-w-sm p-3 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-md animate-scaleIn ${
             scanStatusMsg.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'
           }`}>
             {scanStatusMsg.type === 'success' ? <CheckCircle size={16} className="text-emerald-600 flex-shrink-0" /> : <AlertCircle size={16} className="text-red-600 flex-shrink-0" />}
@@ -719,19 +881,16 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
         {/* TAB 1: CAMERA SCANNER */}
         {activeTab === 'camera' && (
           <div className="w-full max-w-sm flex flex-col items-center space-y-4">
-            
             {isCameraActive ? (
               <div className="w-full aspect-square max-w-[300px] bg-black rounded-3xl overflow-hidden relative border-4 border-[#E91E8C] shadow-2xl">
-                {/* Html5Qrcode mounts directly in this container ID */}
                 <div id="reader-container" className="w-full h-full"></div>
                 
-                {/* Laser scan line animation */}
+                {/* Laser animation */}
                 <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-0.5 bg-red-500 shadow-[0_0_12px_#ef4444] animate-pulse z-10 pointer-events-none"></div>
 
-                {/* Top overlay hint */}
                 <div className="absolute top-2 inset-x-0 text-center z-10">
                   <span className="bg-black/60 text-white text-[9px] font-bold px-3 py-1 rounded-full backdrop-blur-xs">
-                    Align Barcode or QR inside box
+                    Align Barcode or QR in Box
                   </span>
                 </div>
               </div>
@@ -742,9 +901,9 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                 </div>
                 
                 <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Mobile Camera Ready</h4>
+                  <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Camera Scanner Ready</h4>
                   <p className="text-[10px] text-gray-500 leading-relaxed max-w-[220px] mx-auto">
-                    Point camera at product barcodes (1D or QR codes) to sync items to desktop POS register.
+                    Point camera at retail product barcodes to instantly add items into your session cart.
                   </p>
                 </div>
 
@@ -756,16 +915,17 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
 
                 <div className="flex gap-2 flex-wrap justify-center pt-2">
                   <button
+                    type="button"
                     onClick={() => setIsCameraActive(true)}
                     className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-bold px-5 py-2.5 rounded-xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center gap-1.5"
                   >
                     <Camera size={14} />
-                    <span>Live Video Cam</span>
+                    <span>START CAMERA SCANNER</span>
                   </button>
 
-                  <label className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl cursor-pointer transition shadow-md flex items-center gap-1.5">
+                  <label className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow-md flex items-center gap-1.5">
                     <Search size={14} />
-                    <span>{isPhotoScanning ? "Analyzing Photo..." : "🔍 Lens Photo Scan"}</span>
+                    <span>{isPhotoScanning ? "Analyzing..." : "Lens Photo"}</span>
                     <input 
                       type="file" 
                       accept="image/*" 
@@ -779,7 +939,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
               </div>
             )}
 
-            {/* Live Camera Controls & Google Lens Live Snapshot */}
+            {/* Live Camera Controls */}
             {isCameraActive && (
               <div className="flex flex-col items-center gap-2.5 w-full max-w-xs mx-auto mt-2">
                 <div className="flex items-center gap-2 flex-wrap justify-center">
@@ -804,26 +964,28 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                   <button
                     type="button"
                     onClick={() => applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true })}
-                    className="bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 text-[10px] font-bold px-2.5 py-1 rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1"
-                    title="Force camera focus re-calibration"
+                    className="bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 text-[10px] font-bold px-2.5 py-1 rounded-xl transition cursor-pointer shadow-2xs flex items-center gap-1"
+                    title="Force camera focus"
                   >
                     🎯 Refocus
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => setUseFrontCamera(!useFrontCamera)}
-                    className="bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1"
+                    className="bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-2xs flex items-center gap-1"
                   >
                     <RefreshCw size={12} />
                     <span>Cam ({useFrontCamera ? "Front" : "Rear"})</span>
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => {
                       stopScanner();
                       setIsCameraActive(false);
                     }}
-                    className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-xs"
+                    className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-2xs"
                   >
                     Pause
                   </button>
@@ -833,21 +995,17 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                   type="button"
                   onClick={handleLiveLensSnapPos}
                   disabled={isPhotoScanning}
-                  className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs py-2 px-3 rounded-xl shadow-md flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 text-white font-extrabold text-xs py-2 px-3 rounded-xl shadow-md flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
                 >
                   <Search size={14} className={isPhotoScanning ? "animate-spin" : ""} />
-                  <span>{isPhotoScanning ? "Scanning Live HD Frame..." : "📸 Google Lens Live Scan (Instant Snap)"}</span>
+                  <span>{isPhotoScanning ? "Scanning Frame..." : "📸 Instant Lens HD Scan"}</span>
                 </button>
-
-                <p className="text-[10px] text-gray-500 bg-gray-50 p-2 rounded-xl border border-gray-200 text-center leading-relaxed">
-                  💡 <strong>Clear Scan Tip:</strong> Keep camera ~15cm away and use <strong>1.5x or 2.0x Zoom</strong>. Click <strong>"📸 Google Lens Live Scan"</strong> for instant clear decoding!
-                </p>
               </div>
             )}
 
             {/* RECENTLY SCANNED ITEM BANNER */}
             {lastScannedProduct && (
-              <div className="w-full bg-white p-3.5 rounded-2xl border-b-4 border-[#E91E8C] shadow-md flex items-center gap-3 animate-scale-in">
+              <div className="w-full bg-white p-3.5 rounded-2xl border-b-4 border-[#E91E8C] shadow-md flex items-center gap-3 animate-scaleIn">
                 <img 
                   src={lastScannedProduct.image} 
                   alt={lastScannedProduct.name}
@@ -855,29 +1013,28 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                   referrerPolicy="no-referrer"
                 />
                 <div className="flex-1 min-w-0 text-left text-[11px]">
-                  <span className="text-[9px] uppercase font-extrabold text-[#E91E8C] block">Scanned Product</span>
+                  <span className="text-[9px] uppercase font-extrabold text-[#E91E8C] block">Added to Session Cart</span>
                   <h4 className="font-bold text-gray-800 truncate">{lastScannedProduct.name}</h4>
                   <p className="text-gray-500 font-mono mt-0.5">Price: <strong>৳{getRetailPrice(lastScannedProduct)}</strong></p>
                 </div>
               </div>
             )}
 
-            {/* STEP 4: BARCODE DEBUG MODE PANEL */}
-            <div className="w-full bg-slate-900 text-slate-100 p-3.5 rounded-2xl border border-slate-700 shadow-lg text-[10px] space-y-2 text-left font-mono">
+            {/* BARCODE DEBUG MODE PANEL */}
+            <div className="w-full bg-slate-900 text-slate-100 p-3 rounded-2xl border border-slate-700 shadow-lg text-[10px] space-y-2 text-left font-mono">
               <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
                 <span className="font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
                   <Bug size={12} />
-                  <span>Barcode Debug Inspector</span>
+                  <span>Barcode Inspector</span>
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleTestSound}
                     className="bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-bold border border-slate-700 transition cursor-pointer flex items-center gap-1"
-                    title="Play retail scanner test beep"
                   >
                     <Volume2 size={10} />
-                    <span>Test Beep</span>
+                    <span>Beep</span>
                   </button>
                   <button
                     type="button"
@@ -892,46 +1049,25 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
               {showDebugMode && (
                 <div className="space-y-1.5">
                   {debugInfo ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-slate-950 p-2 rounded-xl border border-slate-800">
-                        <div>
-                          <span className="text-slate-500 block text-[9px]">Raw Scanner Value:</span>
-                          <span className="text-pink-300 font-bold truncate block">{JSON.stringify(debugInfo.rawValue)}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[9px]">Normalized Value:</span>
-                          <span className="text-emerald-300 font-bold truncate block">{debugInfo.normalizedValue || '(empty)'}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[9px]">Match Strategy:</span>
-                          <span className="text-sky-300 font-bold block">{debugInfo.matchStrategy}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[9px]">Match Status:</span>
-                          <span className={debugInfo.matchFound ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
-                            {debugInfo.matchFound ? "✅ MATCH FOUND" : "❌ NO MATCH"}
-                          </span>
-                        </div>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-slate-950 p-2 rounded-xl border border-slate-800 text-[9px]">
+                      <div>
+                        <span className="text-slate-500 block">Raw:</span>
+                        <span className="text-pink-300 font-bold truncate block">{JSON.stringify(debugInfo.rawValue)}</span>
                       </div>
-
-                      {debugInfo.matchFound && (
-                        <div className="bg-emerald-950/40 p-2 rounded-xl border border-emerald-800/60 text-emerald-200 space-y-0.5 text-[9px]">
-                          <div><strong>Product:</strong> {debugInfo.matchedProductName}</div>
-                          <div><strong>DB ID:</strong> {debugInfo.matchedProductId}</div>
-                          <div><strong>DB Barcode Raw:</strong> "{debugInfo.matchedProductBarcode}"</div>
-                          <div><strong>DB Barcode Norm:</strong> "{debugInfo.matchedProductNormalizedBarcode}"</div>
-                        </div>
-                      )}
-
-                      {!debugInfo.matchFound && debugInfo.normalizedValue && (
-                        <div className="bg-rose-950/40 p-2 rounded-xl border border-rose-800/60 text-rose-200 text-[9px]">
-                          <strong>Diagnostic Note:</strong> Searched barcodeNormalized, legacy barcode, and Product ID for exact string <code>"{debugInfo.normalizedValue}"</code>. No match found in database catalog.
-                        </div>
-                      )}
-                    </>
+                      <div>
+                        <span className="text-slate-500 block">Norm:</span>
+                        <span className="text-emerald-300 font-bold truncate block">{debugInfo.normalizedValue || '(empty)'}</span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-slate-500">Status: </span>
+                        <span className={debugInfo.matchFound ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                          {debugInfo.matchFound ? `✅ MATCH: ${debugInfo.matchedProductName}` : "❌ NO MATCH"}
+                        </span>
+                      </div>
+                    </div>
                   ) : (
                     <div className="text-slate-400 italic text-[9px]">
-                      Point camera or enter barcode to inspect real-time raw vs normalized values and database match diagnostic details.
+                      Scan barcode to inspect raw vs normalized values.
                     </div>
                   )}
                 </div>
@@ -986,9 +1122,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                   <button
                     key={sample.code}
                     type="button"
-                    onClick={() => {
-                      setManualCode(sample.code);
-                    }}
+                    onClick={() => setManualCode(sample.code)}
                     className="bg-pink-50 hover:bg-pink-100 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1 rounded-xl cursor-pointer transition"
                   >
                     {sample.label}
@@ -1005,7 +1139,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
             <div className="flex justify-between items-center border-b border-pink-50 pb-2">
               <h4 className="font-extrabold text-gray-900 uppercase tracking-wider text-xs flex items-center gap-1.5">
                 <ShoppingBag size={15} className="text-[#E91E8C]" />
-                <span>Scanned Cart Items ({scannedItemsCount})</span>
+                <span>Live Cart Items ({scannedItemsCount})</span>
               </h4>
             </div>
 
@@ -1013,6 +1147,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
               <div className="py-8 text-center text-gray-400 space-y-2">
                 <p className="text-xs">No products scanned yet.</p>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('camera')}
                   className="text-[#E91E8C] font-bold text-xs hover:underline cursor-pointer"
                 >
@@ -1037,6 +1172,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
 
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button
+                        type="button"
                         onClick={() => handleDecrementMobile(item.docIds)}
                         className="p-1 bg-white border border-pink-200 text-pink-700 rounded-lg hover:bg-pink-100 cursor-pointer"
                         title="Decrease quantity"
@@ -1063,6 +1199,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                         className="w-9 text-center font-bold font-mono text-xs text-gray-900 bg-white border border-pink-200 rounded-lg py-0.5 outline-none focus:border-[#E91E8C] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                       <button
+                        type="button"
                         onClick={() => handleIncrementMobile(item.product.id)}
                         className="p-1 bg-[#E91E8C] text-white rounded-lg hover:bg-[#FF4B91] cursor-pointer"
                         title="Increase quantity"
@@ -1070,6 +1207,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                         <Plus size={12} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleRemoveMobile(item.docIds)}
                         className="p-1 text-red-500 hover:bg-red-50 rounded-lg ml-1 cursor-pointer"
                         title="Remove"
@@ -1086,14 +1224,15 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
 
       </div>
 
-      {/* FOOTER AUTHORIZED BADGE */}
-      <div className="px-6 text-center space-y-1.5">
-        <div className="inline-flex items-center gap-1 bg-white border border-pink-100 px-3 py-1 rounded-full shadow-sm">
-          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-          <span className="text-[10px] text-gray-600 font-semibold">Authorized Staff: {currentUser.name}</span>
+      {/* FOOTER BADGE */}
+      <footer className="px-6 text-center space-y-1">
+        <div className="inline-flex items-center gap-1.5 bg-white border border-pink-100 px-3 py-1 rounded-full shadow-xs">
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+          <span className="text-[10px] text-gray-600 font-semibold font-mono">
+            {activeSessionId ? `Session: ${activeSessionId}` : 'POS Live Ready'}
+          </span>
         </div>
-      </div>
-
+      </footer>
     </div>
   );
 }

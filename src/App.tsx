@@ -149,6 +149,7 @@ export default function App() {
             </Route>
 
             {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
+            <Route path="pos/scan" element={<PosScanRouteWrapper />} />
             <Route path="pos/scan/:sessionId" element={<PosScanRouteWrapper />} />
 
             {/* ADMIN DASHBOARD HUB - ADMINS/SUPER_ADMINS ONLY */}

@@ -127,13 +127,84 @@ export interface InventoryLog {
   createdAt: string;
 }
 
+export interface StockReceiptItem {
+  productId: string;
+  productName: string;
+  barcode?: string;
+  brand?: string;
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  importCost?: number;
+}
+
+export interface StockReceipt {
+  id: string;
+  receiptNumber: string;
+  receivedBy: string;
+  supplier?: string;
+  batchNumber?: string;
+  notes?: string;
+  totalQuantity: number;
+  totalItemsCount: number;
+  totalCost?: number;
+  items: StockReceiptItem[];
+  createdAt: string;
+  status: 'completed' | 'cancelled';
+}
+
+export type PosDeviceType = 'mobile' | 'tablet' | 'desktop';
+export type PosAllowedRole = 'admin' | 'super_admin' | 'inventory_manager';
+
+export interface PosSessionNotification {
+  id: string;
+  notificationId: string;
+  type: 'POS_SESSION_STARTED';
+  sessionId: string;
+  userId: string;
+  userName: string;
+  userRole: PosAllowedRole | string;
+  deviceType: PosDeviceType;
+  createdAt: string;
+  read?: boolean;
+  readBy?: string[];
+  dismissedBy?: string[];
+}
+
 export interface PosSession {
   id: string;
+  sessionId?: string;
+  userId?: string;
+  userName?: string;
+  userRole?: PosAllowedRole | string;
+  deviceType?: PosDeviceType;
+  status: 'active' | 'completed' | 'open' | 'closed';
+  startedAt?: string;
+  lastSeenAt?: string;
   name: string;
-  status: 'active' | 'completed';
-  computerJoined: boolean;
-  lastScanTime: string;
-  items: {
+  computerJoined?: boolean;
+  lastScanTime?: string;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string;
+  operatorName?: string;
+  operatorEmail?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  customerArea?: string;
+  scannerConnected?: boolean;
+  mobileScannerId?: string | null;
+  mobileScannerUserId?: string | null;
+  mobileScannerName?: string | null;
+  scannerConnectedAt?: string | null;
+  scannerLastSeenAt?: string | null;
+  pendingScannerRequest?: {
+    mobileScannerId: string;
+    mobileScannerName: string;
+    requestedAt: string;
+  } | null;
+  items?: {
     productId: string;
     name: string;
     price: number;
