@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, doc, setDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, query, deleteDoc, writeBatch } from 'firebase/firestore';
 import { QRCodeSVG } from 'qrcode.react';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
@@ -61,6 +61,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [searchMessage, setSearchMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const searchContainerRef = React.useRef<HTMLDivElement>(null);
+
+  // Direct quantity typing state buffer per product
+  const [editingQty, setEditingQty] = useState<{ [productId: string]: string }>({});
 
   // Filter products by name, brand, or barcode
   const filteredProducts = useMemo(() => {
@@ -262,6 +265,60 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       await deleteDoc(doc(db, 'pos_sessions', sessionId, 'scans', lastDocId));
     } catch (err) {
       console.error('Error decrementing scan:', err);
+    }
+  };
+
+  const handleSetQuantity = async (productId: string, docIds: string[], maxStock: number, rawValue: string) => {
+    if (!sessionId) return;
+
+    // Reset local typing buffer for this product
+    setEditingQty(prev => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+
+    const parsed = parseInt(rawValue.trim(), 10);
+    if (isNaN(parsed) || parsed < 0) {
+      return;
+    }
+
+    if (parsed === 0) {
+      await handleRemove(productId, docIds);
+      return;
+    }
+
+    let targetQty = parsed;
+    if (targetQty > maxStock) {
+      alert(`Available stock for this product is ${maxStock}. Setting quantity to ${maxStock}.`);
+      targetQty = maxStock;
+    }
+
+    const currentQty = docIds.length;
+    if (targetQty === currentQty) return;
+
+    try {
+      const batch = writeBatch(db);
+      if (targetQty > currentQty) {
+        const diff = targetQty - currentQty;
+        const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+        for (let i = 0; i < diff; i++) {
+          const newDocRef = doc(scansColRef);
+          batch.set(newDocRef, {
+            product_id: productId,
+            scanned_at: new Date().toISOString()
+          });
+        }
+      } else {
+        const diff = currentQty - targetQty;
+        const docsToDelete = docIds.slice(docIds.length - diff);
+        for (const dId of docsToDelete) {
+          batch.delete(doc(db, 'pos_sessions', sessionId, 'scans', dId));
+        }
+      }
+      await batch.commit();
+    } catch (err) {
+      console.error('Error updating quantity:', err);
     }
   };
 
@@ -921,27 +978,46 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                             <span className="font-extrabold text-gray-800 text-xs">৳{itemSubtotal}</span>
                           </div>
 
-                          {/* Real-time sync controllers */}
-                          <div className="flex items-center bg-white border border-pink-200 rounded-xl shadow-xs">
+                          {/* Real-time sync controllers with direct typing support */}
+                          <div className="flex items-center bg-white border border-pink-200 rounded-xl shadow-xs overflow-hidden focus-within:border-[#E91E8C] focus-within:ring-2 focus-within:ring-[#E91E8C]/20 transition">
                             <button 
                               type="button"
                               onClick={() => handleDecrement(item.product.id, item.docIds)}
-                              className="p-1.5 hover:bg-pink-50 text-gray-500 hover:text-pink-600 transition cursor-pointer"
-                              title="Decrease quantity"
+                              className="p-1.5 hover:bg-pink-50 text-gray-500 hover:text-pink-600 transition cursor-pointer flex-shrink-0"
+                              title="Decrease quantity (-)"
                             >
                               <Minus size={12} />
                             </button>
-                            <span className="px-2.5 text-gray-900 font-mono font-black text-xs">{item.quantity}</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max={item.product.stock}
+                              value={editingQty[item.product.id] !== undefined ? editingQty[item.product.id] : item.quantity}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setEditingQty(prev => ({ ...prev, [item.product.id]: val }));
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              onBlur={(e) => handleSetQuantity(item.product.id, item.docIds, item.product.stock, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              className="w-12 text-center text-gray-900 font-mono font-black text-xs py-1 px-0.5 border-x border-pink-100 bg-transparent outline-none focus:bg-pink-50/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              title="Type quantity directly or use +/-"
+                            />
                             <button 
                               type="button"
                               onClick={() => handleIncrement(item.product.id)}
                               disabled={isMaxStock}
-                              className={`p-1.5 transition cursor-pointer ${
+                              className={`p-1.5 transition cursor-pointer flex-shrink-0 ${
                                 isMaxStock 
                                   ? 'text-gray-300 cursor-not-allowed' 
                                   : 'hover:bg-pink-50 text-gray-500 hover:text-pink-600'
                               }`}
-                              title={isMaxStock ? 'Stock limit reached' : 'Increase quantity'}
+                              title={isMaxStock ? 'Stock limit reached' : 'Increase quantity (+)'}
                             >
                               <Plus size={12} />
                             </button>

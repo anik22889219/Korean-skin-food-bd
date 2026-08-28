@@ -16,13 +16,12 @@ import {
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
   Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle,
-  Share2, Copy, Sparkles, Send, ExternalLink
+  Share2, Copy, Sparkles, Send, ExternalLink, Plus, Minus, Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductDetailSkeleton } from './Skeletons';
 import { ProductCard } from './ProductCard';
 import { getRetailPrice, getRetailOriginalPrice, hasRetailDiscount, getWholesalePrice } from '../utils/pricing';
-import { Building2 } from 'lucide-react';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +36,68 @@ export const ProductDetail: React.FC = () => {
   const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Quantity State (Default: 1)
+  const [quantity, setQuantity] = useState<number>(1);
+  const [quantityInput, setQuantityInput] = useState<string>('1');
+
+  // Wholesale Tier Selection State ('1-49' default, or '50+')
+  const [selectedWholesaleTier, setSelectedWholesaleTier] = useState<'1-49' | '50+'>('1-49');
+
+  const wholesalePrice1_49 = useMemo(() => getWholesalePrice(product, 1), [product]);
+  const wholesalePrice50Plus = useMemo(() => getWholesalePrice(product, 50), [product]);
+
+  // Quantity Change Handlers
+  const handleQuantityChange = (newQty: number) => {
+    const maxStock = product?.stock && product.stock > 0 ? product.stock : 9999;
+    const clamped = Math.max(1, Math.min(newQty, maxStock));
+    setQuantity(clamped);
+    setQuantityInput(String(clamped));
+    if (clamped >= 50) {
+      setSelectedWholesaleTier('50+');
+    } else if (selectedWholesaleTier === '50+' && clamped < 50) {
+      setSelectedWholesaleTier('1-49');
+    }
+  };
+
+  const handleQuantityInputChange = (val: string) => {
+    setQuantityInput(val);
+    const num = parseInt(val, 10);
+    if (!isNaN(num) && num >= 1) {
+      const maxStock = product?.stock && product.stock > 0 ? product.stock : 9999;
+      const clamped = Math.min(num, maxStock);
+      setQuantity(clamped);
+      if (clamped >= 50) {
+        setSelectedWholesaleTier('50+');
+      } else if (selectedWholesaleTier === '50+' && clamped < 50) {
+        setSelectedWholesaleTier('1-49');
+      }
+    }
+  };
+
+  const handleQuantityInputBlur = () => {
+    const num = parseInt(quantityInput, 10);
+    const maxStock = product?.stock && product.stock > 0 ? product.stock : 9999;
+    if (isNaN(num) || num < 1) {
+      setQuantity(1);
+      setQuantityInput('1');
+      if (selectedWholesaleTier === '50+') {
+        setSelectedWholesaleTier('1-49');
+      }
+    } else {
+      const clamped = Math.min(num, maxStock);
+      setQuantity(clamped);
+      setQuantityInput(String(clamped));
+    }
+  };
+
+  const isWholesaleUser = profile?.wholesaleAccess === true;
+  const currentWholesalePrice = selectedWholesaleTier === '50+' || quantity >= 50 
+    ? wholesalePrice50Plus 
+    : wholesalePrice1_49;
+  const activeUnitPrice = isWholesaleUser 
+    ? currentWholesalePrice 
+    : getRetailPrice(product);
 
   // Subscribe to Global Theme for store logo and branding
   useEffect(() => {
@@ -147,7 +208,8 @@ export const ProductDetail: React.FC = () => {
   const handleWhatsAppOrder = () => {
     if (!product) return;
 
-    const currentPrice = getRetailPrice(product);
+    const unitPrice = isWholesaleUser ? currentWholesalePrice : getRetailPrice(product);
+    const totalAmount = unitPrice * quantity;
     const pageUrl = window.location.href;
 
     const summaryText = 
@@ -155,12 +217,15 @@ export const ProductDetail: React.FC = () => {
       `--------------------------------------\n` +
       `📦 *Product Name:* ${product.name}\n` +
       `🏷️ *Brand:* ${product.brand}\n` +
-      `💰 *Price:* ৳${currentPrice} BDT\n` +
+      `💰 *Unit Price:* ৳${unitPrice.toLocaleString()} BDT\n` +
+      `🔢 *Quantity:* ${quantity} pcs\n` +
+      `💳 *Total Estimated:* ৳${totalAmount.toLocaleString()} BDT\n` +
+      (isWholesaleUser ? `🏢 *Wholesale Tier:* ${selectedWholesaleTier === '50+' || quantity >= 50 ? 'Bulk 50+ pcs' : 'Wholesale 1-49 pcs'}\n` : '') +
       `📁 *Category:* ${product.category}\n` +
       `⚡ *Availability:* ${product.stock > 0 ? 'In Stock' : 'Out of Stock'}\n` +
       `🔗 *Product Link:* ${pageUrl}\n` +
       `--------------------------------------\n` +
-      `Hello! I would like to order this product.`;
+      `Hello! I would like to order ${quantity} unit(s) of this product.`;
 
     const encodedSummary = encodeURIComponent(summaryText);
     const targetNumber = formatWhatsAppNumber(whatsappNumber);
@@ -707,39 +772,118 @@ export const ProductDetail: React.FC = () => {
 
           {/* Pricing Box */}
           {profile?.wholesaleAccess ? (
-            <div className="p-4 bg-gradient-to-br from-amber-50/80 via-white to-amber-50/40 rounded-2xl border-2 border-amber-300 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-500 text-slate-950 uppercase tracking-wider">
-                  <Building2 size={12} /> Wholesale Access Active
+            <div id="product-wholesale-pricing-box" className="p-4 sm:p-5 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/50 rounded-2xl sm:rounded-3xl border-2 border-amber-300 shadow-sm space-y-3.5">
+              {/* Top Header Badge & Stock */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black bg-amber-500 text-slate-950 uppercase tracking-wider shadow-2xs">
+                  <Building2 size={13} /> {language === 'bn' ? 'হোলসেল এক্সেস সক্রিয়' : 'Wholesale Access Active'}
                 </span>
                 <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
                   product.stock > 0 
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
                     : 'bg-red-50 text-red-700 border-red-100'
                 }`}>
-                  {product.stock > 0 ? `Stock: ${product.stock}` : 'Out of Stock'}
+                  {product.stock > 0 ? `${language === 'bn' ? 'স্টক' : 'Stock'}: ${product.stock}` : (language === 'bn' ? 'স্টক শেষ' : 'Out of Stock')}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="p-3 bg-white rounded-xl border border-amber-200">
-                  <span className="text-[10px] text-amber-800 font-bold block uppercase tracking-wider">Wholesale (1–49 units)</span>
-                  <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
-                    ৳{getWholesalePrice(product, 1).toLocaleString()}
+              {/* Prices Side-by-Side: Retail Price (normal user style) + Wholesale Price (1-49 pcs or 50+) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-0.5">
+                {/* Retail Price Column (shown like normal user) */}
+                <div className="p-3 bg-white/95 rounded-xl border border-amber-200/90 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+                      {language === 'bn' ? 'খুচরা মূল্য (Retail)' : 'Regular Retail'}
+                    </span>
+                    {hasRetailDiscount(product) && (
+                      <span className="text-[9px] font-black text-[#E91E8C] bg-pink-50 px-1.5 py-0.2 rounded border border-pink-100 uppercase">
+                        -{discountPercent}% OFF
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-2 font-mono">
+                    <span className="text-xl sm:text-2xl font-black text-slate-800">
+                      ৳{getRetailPrice(product).toLocaleString()}
+                    </span>
+                    {hasRetailDiscount(product) && (
+                      <span className="text-xs text-gray-400 line-through">
+                        ৳{getRetailOriginalPrice(product).toLocaleString()}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <div className="p-3 bg-amber-100/60 rounded-xl border border-amber-300">
-                  <span className="text-[10px] text-amber-900 font-black block uppercase tracking-wider">Bulk Tier (50+ units)</span>
-                  <div className="text-xl font-black text-amber-950 font-mono mt-0.5">
-                    ৳{getWholesalePrice(product, 50).toLocaleString()}
+                {/* Wholesale Price Column (shows 1-49 price by default, or 50+ when selected) */}
+                <div className="p-3 bg-gradient-to-br from-amber-100/90 to-amber-50/90 rounded-xl border-2 border-amber-400 space-y-1 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-amber-950 font-black uppercase tracking-wider flex items-center gap-1">
+                      {language === 'bn' ? 'পাইকারি মূল্য' : 'Wholesale Price'}
+                      <span className="text-amber-800 font-extrabold font-mono">
+                        ({selectedWholesaleTier === '50+' || quantity >= 50 ? '50+ pcs' : '1–49 pcs'})
+                      </span>
+                    </span>
+                    <span className="text-[9px] font-extrabold bg-amber-500/20 text-amber-900 px-1.5 py-0.2 rounded">
+                      {selectedWholesaleTier === '50+' || quantity >= 50 ? 'Tier 2' : 'Tier 1'}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1.5 font-mono">
+                    <span className="text-xl sm:text-2xl font-black text-amber-950">
+                      ৳{(selectedWholesaleTier === '50+' || quantity >= 50 ? wholesalePrice50Plus : wholesalePrice1_49).toLocaleString()}
+                    </span>
+                    <span className="text-[11px] text-amber-800 font-sans font-bold">/ unit</span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-amber-200/60">
-                <span>Standard Retail Reference:</span>
-                <span className="line-through font-mono font-bold">৳{getRetailPrice(product).toLocaleString()}</span>
+              {/* 50+ Price Button to toggle/show 50+ wholesale price */}
+              <div className="pt-0.5 flex items-center gap-2">
+                <button
+                  type="button"
+                  id="btn_toggle_wholesale_50plus"
+                  onClick={() => {
+                    if (selectedWholesaleTier === '50+') {
+                      setSelectedWholesaleTier('1-49');
+                      if (quantity >= 50) {
+                        setQuantity(1);
+                        setQuantityInput('1');
+                      }
+                    } else {
+                      setSelectedWholesaleTier('50+');
+                      if (quantity < 50) {
+                        setQuantity(50);
+                        setQuantityInput('50');
+                      }
+                    }
+                  }}
+                  className={`flex-1 py-2.5 px-3.5 rounded-xl text-xs font-black transition-all duration-200 flex items-center justify-between border cursor-pointer ${
+                    selectedWholesaleTier === '50+' || quantity >= 50
+                      ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm ring-2 ring-amber-400/40'
+                      : 'bg-white hover:bg-amber-100/70 text-amber-950 border-amber-300 shadow-2xs hover:border-amber-400'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles size={14} className={selectedWholesaleTier === '50+' || quantity >= 50 ? 'text-slate-950 fill-current' : 'text-amber-600'} />
+                    <span>{language === 'bn' ? '৫০+ বাল্ক মূল্য (50+ Price)' : '50+ Bulk Tier Price'}</span>
+                  </span>
+                  <span className="font-mono font-black text-sm">
+                    ৳{wholesalePrice50Plus.toLocaleString()}
+                  </span>
+                </button>
+
+                {(selectedWholesaleTier === '50+' || quantity >= 50) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedWholesaleTier('1-49');
+                      setQuantity(1);
+                      setQuantityInput('1');
+                    }}
+                    className="py-2.5 px-3 rounded-xl text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition cursor-pointer shrink-0"
+                    title="Reset to 1-49 Tier"
+                  >
+                    {language === 'bn' ? '১–৪৯ মূল্য' : '1–49 Tier'}
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -808,15 +952,82 @@ export const ProductDetail: React.FC = () => {
             </div>
           </div>
 
+          {/* Quantity Selector Section (Above Add to Basket CTA) */}
+          <div id="product_quantity_selector_section" className="space-y-2 pt-1">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+              <label htmlFor="product-qty-input" className="flex items-center gap-1.5">
+                <span>{language === 'bn' ? 'পরিমাণ (Quantity):' : 'Select Quantity:'}</span>
+              </label>
+              {product.stock > 0 && (
+                <span className="text-[11px] text-slate-400 font-medium font-mono">
+                  {language === 'bn' ? `স্টকে আছে: ${product.stock} টি` : `${product.stock} units available`}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {/* Stepper Controls with Typeable Input */}
+              <div className="inline-flex items-center bg-pink-50/40 border-2 border-pink-100 rounded-2xl p-1 shadow-2xs">
+                <button
+                  type="button"
+                  id="btn_decrement_qty"
+                  onClick={() => handleQuantityChange(quantity - 1)}
+                  disabled={quantity <= 1}
+                  className="w-10 h-10 rounded-xl bg-white hover:bg-[#E91E8C] hover:text-white text-slate-700 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-700 flex items-center justify-center transition-all duration-150 border border-pink-100 shadow-2xs cursor-pointer active:scale-95 disabled:cursor-not-allowed"
+                  aria-label="Decrease quantity"
+                >
+                  <Minus size={16} />
+                </button>
+
+                <input
+                  id="product-qty-input"
+                  type="number"
+                  min={1}
+                  max={product.stock > 0 ? product.stock : 9999}
+                  value={quantityInput}
+                  onChange={(e) => handleQuantityInputChange(e.target.value)}
+                  onBlur={handleQuantityInputBlur}
+                  className="w-16 sm:w-20 text-center font-mono font-black text-base text-slate-900 bg-transparent focus:outline-none focus:ring-0 appearance-none [-moz-appearance:_textfield] [&::-webkit-inner-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+                  aria-label="Quantity"
+                />
+
+                <button
+                  type="button"
+                  id="btn_increment_qty"
+                  onClick={() => handleQuantityChange(quantity + 1)}
+                  disabled={product.stock > 0 && quantity >= product.stock}
+                  className="w-10 h-10 rounded-xl bg-white hover:bg-[#E91E8C] hover:text-white text-slate-700 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-700 flex items-center justify-center transition-all duration-150 border border-pink-100 shadow-2xs cursor-pointer active:scale-95 disabled:cursor-not-allowed"
+                  aria-label="Increase quantity"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+
+              {/* Live Subtotal Display */}
+              <div className="flex-1 bg-gradient-to-r from-pink-50/60 to-white p-2.5 px-3.5 rounded-2xl border border-pink-100 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-gray-500">
+                  {language === 'bn' ? 'মোট আনুমানিক:' : 'Total Subtotal:'}
+                </span>
+                <span className="font-mono font-black text-base sm:text-lg text-[#E91E8C]">
+                  ৳{(activeUnitPrice * quantity).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Add to Basket CTA */}
           <div className="space-y-3 pt-1">
             <button
-              onClick={() => addToCart(product)}
+              onClick={() => addToCart(product, quantity)}
               disabled={product.stock <= 0}
-              className="w-full py-4 bg-[#E91E8C] hover:bg-[#d0177c] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm"
+              className="w-full py-4 bg-[#E91E8C] hover:bg-[#d0177c] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm active:scale-[0.99]"
             >
               <ShoppingBag size={18} />
-              <span>{product.stock > 0 ? "Add to Skincare Basket" : "Restocking soon"}</span>
+              <span>
+                {product.stock > 0 
+                  ? (quantity > 1 ? `Add ${quantity} to Skincare Basket` : "Add to Skincare Basket") 
+                  : "Restocking soon"}
+              </span>
             </button>
 
             {/* Order via WhatsApp CTA */}
@@ -826,7 +1037,7 @@ export const ProductDetail: React.FC = () => {
               className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-emerald-100 flex items-center justify-center gap-2.5 text-sm"
             >
               <MessageCircle size={19} className="fill-white" />
-              <span>Order via WhatsApp</span>
+              <span>Order via WhatsApp ({quantity} pcs)</span>
             </button>
           </div>
 

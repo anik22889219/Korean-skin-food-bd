@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, doc, setDoc, onSnapshot, query, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, query, addDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
@@ -248,6 +248,7 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
   
   // Live scans list for mobile cart view
   const [scansList, setScansList] = useState<any[]>([]);
+  const [editingQtyMobile, setEditingQtyMobile] = useState<{ [productId: string]: string }>({});
 
   // Login form for unauthenticated staff
   const [emailInput, setEmailInput] = useState('');
@@ -480,6 +481,57 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
       await deleteDoc(doc(db, 'pos_sessions', sessionId, 'scans', lastDocId));
     } catch (err) {
       console.error('Error decrementing scan:', err);
+    }
+  };
+
+  const handleSetQuantityMobile = async (productId: string, docIds: string[], maxStock: number, rawValue: string) => {
+    if (!sessionId) return;
+
+    setEditingQtyMobile(prev => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+
+    const parsed = parseInt(rawValue.trim(), 10);
+    if (isNaN(parsed) || parsed < 0) return;
+
+    if (parsed === 0) {
+      await handleRemoveMobile(docIds);
+      return;
+    }
+
+    let targetQty = parsed;
+    if (targetQty > maxStock) {
+      alert(`Available stock is ${maxStock}. Setting quantity to ${maxStock}.`);
+      targetQty = maxStock;
+    }
+
+    const currentQty = docIds.length;
+    if (targetQty === currentQty) return;
+
+    try {
+      const batch = writeBatch(db);
+      if (targetQty > currentQty) {
+        const diff = targetQty - currentQty;
+        const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+        for (let i = 0; i < diff; i++) {
+          const newDocRef = doc(scansColRef);
+          batch.set(newDocRef, {
+            product_id: productId,
+            scanned_at: new Date().toISOString()
+          });
+        }
+      } else {
+        const diff = currentQty - targetQty;
+        const docsToDelete = docIds.slice(docIds.length - diff);
+        for (const dId of docsToDelete) {
+          batch.delete(doc(db, 'pos_sessions', sessionId, 'scans', dId));
+        }
+      }
+      await batch.commit();
+    } catch (err) {
+      console.error('Error setting quantity in mobile scanner:', err);
     }
   };
 
@@ -987,13 +1039,33 @@ export default function PosScan({ sessionId, onBack, currentUser, onLoginStaff }
                       <button
                         onClick={() => handleDecrementMobile(item.docIds)}
                         className="p-1 bg-white border border-pink-200 text-pink-700 rounded-lg hover:bg-pink-100 cursor-pointer"
+                        title="Decrease quantity"
                       >
                         <Minus size={12} />
                       </button>
-                      <span className="font-bold font-mono px-1.5 text-xs text-gray-900">{item.quantity}</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max={item.product.stock}
+                        value={editingQtyMobile[item.product.id] !== undefined ? editingQtyMobile[item.product.id] : item.quantity}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditingQtyMobile(prev => ({ ...prev, [item.product.id]: val }));
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        onBlur={(e) => handleSetQuantityMobile(item.product.id, item.docIds, item.product.stock, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="w-9 text-center font-bold font-mono text-xs text-gray-900 bg-white border border-pink-200 rounded-lg py-0.5 outline-none focus:border-[#E91E8C] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
                       <button
                         onClick={() => handleIncrementMobile(item.product.id)}
                         className="p-1 bg-[#E91E8C] text-white rounded-lg hover:bg-[#FF4B91] cursor-pointer"
+                        title="Increase quantity"
                       >
                         <Plus size={12} />
                       </button>

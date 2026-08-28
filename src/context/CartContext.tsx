@@ -15,7 +15,7 @@ interface CartItem {
 
 interface CartContextType {
   cart: CartItem[];
-  addToCart: (product: Product) => void;
+  addToCart: (product: Product, quantity?: number) => void;
   removeFromCart: (productId: string) => void;
   updateCartQty: (productId: string, delta: number) => void;
   clearCart: () => void;
@@ -255,20 +255,21 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return Math.floor(total / 10);
   };
 
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, quantity: number = 1) => {
+    const validQty = Math.max(1, Number(quantity) || 1);
     setCart((prev) => {
       const existingIdx = prev.findIndex((item) => item.product.id === product.id);
       if (existingIdx !== -1) {
         const updated = [...prev];
-        updated[existingIdx].quantity += 1;
+        updated[existingIdx].quantity += validQty;
         return updated;
       }
-      return [...prev, { product, quantity: 1 }];
+      return [...prev, { product, quantity: validQty }];
     });
     setIsCartOpen(true);
     setCheckoutStep('cart');
     // Track Add To Cart
-    analytics.trackAddToCart(product, 1);
+    analytics.trackAddToCart(product, validQty);
   };
 
   const removeFromCart = (productId: string) => {
