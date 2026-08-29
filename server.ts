@@ -2232,6 +2232,190 @@ app.post("/api/functions/placeOrder", async (req, res) => {
   }
 });
 
+// 1B. posCheckout Endpoint (Atomic POS in-store checkout)
+app.post("/api/functions/posCheckout", async (req, res) => {
+  const { sessionId, userId, userRole, operatorName, customerName, customerPhone, customerAddress, deliveryArea, pricingMode, items, idempotencyKey } = req.body;
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "Cart cannot be empty" });
+  }
+
+  if (!sessionId || !userId) {
+    return res.status(400).json({ error: "Missing sessionId or userId" });
+  }
+
+  if (!db) {
+    return res.status(500).json({ error: "Database not initialized" });
+  }
+
+  const orderId = req.body.orderId || ("POS-" + Math.floor(100000 + Math.random() * 900000));
+  const effectiveIdempotencyKey = idempotencyKey || orderId;
+
+  try {
+    const committedOrder = await runTransaction(db, async (transaction) => {
+      // 1. Session verification & ownership
+      const sessionRef = doc(db, "pos_sessions", sessionId);
+      const sessionDoc = await transaction.get(sessionRef);
+      if (!sessionDoc.exists()) {
+        throw new Error(`POS session "${sessionId}" not found`);
+      }
+      const sessionData = sessionDoc.data();
+      if (sessionData.userId !== userId) {
+        throw new Error("Unauthorized POS session ownership");
+      }
+
+      // 2. Idempotency Check
+      const orderRef = doc(db, "orders", orderId);
+      const existingOrderDoc = await transaction.get(orderRef);
+      if (existingOrderDoc.exists()) {
+        return existingOrderDoc.data();
+      }
+
+      // 3. Read products and re-verify stock
+      const validatedProducts: Array<{
+        ref: any;
+        data: any;
+        currentStock: number;
+        newStock: number;
+        quantity: number;
+        unitPrice: number;
+        barcode?: string;
+      }> = [];
+
+      for (const item of items) {
+        const prodRef = doc(db, "products", item.productId);
+        const prodDoc = await transaction.get(prodRef);
+
+        if (!prodDoc.exists()) {
+          throw new Error(`Product "${item.name || item.productId}" does not exist.`);
+        }
+
+        const prodData: any = { id: prodDoc.id, ...prodDoc.data() };
+        const currentStock = Number(prodData.stock ?? 0);
+
+        if (currentStock < item.quantity) {
+          throw new Error(`Insufficient stock for "${prodData.name}". Available: ${currentStock}, Requested: ${item.quantity}`);
+        }
+
+        // Authoritative price calculation
+        let unitPrice = Number(prodData.retailPrice ?? prodData.price ?? 0);
+        if (prodData.discountRetailPrice && Number(prodData.discountRetailPrice) > 0 && Number(prodData.discountRetailPrice) < unitPrice) {
+          unitPrice = Number(prodData.discountRetailPrice);
+        }
+        if (pricingMode === 'wholesale') {
+          if (item.quantity >= 50 && prodData.wholesalePrice50Plus) {
+            unitPrice = Number(prodData.wholesalePrice50Plus);
+          } else if (prodData.wholesalePrice) {
+            unitPrice = Number(prodData.wholesalePrice);
+          }
+        }
+
+        validatedProducts.push({
+          ref: prodRef,
+          data: prodData,
+          currentStock,
+          newStock: currentStock - item.quantity,
+          quantity: item.quantity,
+          unitPrice,
+          barcode: item.barcode || prodData.barcode
+        });
+      }
+
+      // 4. Calculate final totals
+      const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
+      const deliveryCharge = deliveryArea === "inside" ? 60 : deliveryArea === "outside" ? 120 : 0;
+      const totalAmount = itemsSubtotal + (validatedProducts.length > 0 ? deliveryCharge : 0);
+      const nowIso = new Date().toISOString();
+
+      // 5. Construct POS Order
+      const newOrder = {
+        id: orderId,
+        customerName: (customerName || "").trim() || "In-Person Customer",
+        customerPhone: (customerPhone || "").trim() || "Walk-In",
+        address: (customerAddress || "").trim()
+          ? `${customerAddress.trim()} (${deliveryArea === "inside" ? "Inside Dhaka" : deliveryArea === "outside" ? "Outside Dhaka" : "In-Store Checkout"})`
+          : "In-Store Checkout Counter",
+        items: validatedProducts.map((p) => ({
+          productId: p.data.id,
+          name: p.data.name,
+          price: p.unitPrice,
+          quantity: p.quantity,
+          scannedQuantity: p.quantity,
+          barcode: p.barcode
+        })),
+        totalAmount,
+        status: "delivered",
+        order_source: "POS",
+        stock_deducted: true,
+        createdAt: nowIso,
+        paymentMethod: "POS_In_Person",
+        sessionType: "POS",
+        isPaid: true
+      };
+
+      // 6. Write Order
+      transaction.set(orderRef, newOrder);
+
+      // 7. Deduct stock & create logs/movements
+      for (const p of validatedProducts) {
+        transaction.update(p.ref, {
+          stock: p.newStock,
+          updated_at: nowIso
+        });
+
+        const logRef = doc(collection(db, "inventory_logs"));
+        transaction.set(logRef, {
+          id: logRef.id,
+          productId: p.data.id,
+          productName: p.data.name,
+          type: "sale",
+          quantity: p.newStock,
+          change: -p.quantity,
+          prevStock: p.currentStock,
+          newStock: p.newStock,
+          note: `POS Checkout - Order #${orderId}`,
+          source: "POS",
+          orderId,
+          sessionId,
+          userId,
+          performedBy: operatorName || "POS Operator",
+          timestamp: nowIso,
+          createdAt: nowIso
+        });
+
+        const movementRef = doc(collection(db, "stock_movements"));
+        transaction.set(movementRef, {
+          id: movementRef.id,
+          productId: p.data.id,
+          productName: p.data.name,
+          orderId,
+          quantity: -p.quantity,
+          type: "sale",
+          source: "POS",
+          performedBy: operatorName || "POS Operator",
+          previousStock: p.currentStock,
+          newStock: p.newStock,
+          reason: "POS In-Store Checkout",
+          sessionId,
+          timestamp: nowIso,
+          createdAt: nowIso
+        });
+      }
+
+      return newOrder;
+    });
+
+    res.json({
+      success: true,
+      order: committedOrder,
+      orderId,
+      message: `POS order ${orderId} completed successfully`
+    });
+  } catch (error: any) {
+    console.error("posCheckout transaction failed:", error);
+    res.status(400).json({ error: error.message || "Transaction aborted" });
+  }
+});
+
 // 2. inventoryWatch Endpoint (mirrors Firebase Scheduled Cloud Function)
 app.post("/api/functions/inventoryWatch", async (req, res) => {
   if (!db) {

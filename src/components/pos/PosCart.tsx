@@ -1,6 +1,6 @@
 import React from 'react';
 import { CartItem, PricingMode, DeliveryArea } from './types';
-import { ShoppingBag, Trash2, Plus, Minus, User, Phone, MapPin, Truck, Receipt, CheckCircle, Loader2 } from 'lucide-react';
+import { ShoppingBag, Trash2, Plus, Minus, User, Phone, MapPin, Truck, Receipt, CheckCircle, Loader2, ScanLine } from 'lucide-react';
 import { getProductUnitPrice } from '../../utils/pricing';
 
 interface PosCartProps {
@@ -12,6 +12,7 @@ interface PosCartProps {
   onSetQuantity: (productId: string, docIds: string[], maxStock: number, rawValue: string) => void;
   onRemove: (productId: string, docIds: string[]) => void;
   onClearCart?: () => void;
+  onOpenScanner?: () => void;
   editingQty: Record<string, string>;
   setEditingQty: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   customerName: string;
@@ -35,6 +36,7 @@ export const PosCart: React.FC<PosCartProps> = ({
   onSetQuantity,
   onRemove,
   onClearCart,
+  onOpenScanner,
   editingQty,
   setEditingQty,
   customerName,
@@ -99,6 +101,17 @@ export const PosCart: React.FC<PosCartProps> = ({
                 <span className="text-[9px] bg-purple-200/50 text-purple-900 px-1 py-0.2 rounded font-mono">1-49 / 50+</span>
               </button>
             </div>
+
+            {onOpenScanner && (
+              <button
+                type="button"
+                onClick={onOpenScanner}
+                className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs shadow-pink-200"
+              >
+                <ScanLine size={14} />
+                <span>Scan Barcode</span>
+              </button>
+            )}
 
             <span className="bg-pink-50 border border-pink-100 text-[#E91E8C] font-extrabold text-xs px-3 py-1 rounded-full font-mono shadow-xs">
               {totalItemsCount} pcs

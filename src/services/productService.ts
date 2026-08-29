@@ -1,6 +1,6 @@
 import { Product, InventoryLog, StockMovement, StockReceipt, StockReceiptItem } from '../types';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch, runTransaction, getDoc } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
 import { getCanonicalBrandName } from '../data/brands';
@@ -339,127 +339,194 @@ export const productService = {
     batchNumber?: string;
     notes?: string;
     receivedBy: string;
+    receiptId?: string;
   }): Promise<{ success: boolean; message: string; receipt?: StockReceipt }> {
-    if (!payload.items || payload.items.length === 0) {
+    if (!payload.items || !Array.isArray(payload.items) || payload.items.length === 0) {
       return { success: false, message: 'No items in stock-in queue.' };
     }
 
-    const validItems = payload.items.filter(it => it.quantity > 0);
+    // Strict validation of incoming items
+    const validItems: { productId: string; canonicalId: string; quantity: number; importCost?: number }[] = [];
+    for (const rawItem of payload.items) {
+      if (!rawItem || !rawItem.productId) continue;
+      const rawQty = rawItem.quantity;
+      const quantity = Number(rawQty);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return {
+          success: false,
+          message: `Invalid quantity "${rawQty}" for product ID "${rawItem.productId}". Quantity must be a positive number.`
+        };
+      }
+
+      // Resolve canonical product ID
+      const resolved = this.getProductById(rawItem.productId) || this.getProductByBarcode(rawItem.productId);
+      const canonicalId = resolved ? resolved.id : rawItem.productId.trim();
+
+      const importCost = rawItem.importCost !== undefined && Number.isFinite(Number(rawItem.importCost)) && Number(rawItem.importCost) > 0
+        ? Number(rawItem.importCost)
+        : undefined;
+
+      validItems.push({
+        productId: rawItem.productId.trim(),
+        canonicalId,
+        quantity: Math.round(quantity),
+        importCost
+      });
+    }
+
     if (validItems.length === 0) {
       return { success: false, message: 'All items must have quantity greater than zero.' };
     }
 
-    const receiptId = 'rcpt-' + Math.random().toString(36).substring(2, 11);
+    const receiptId = payload.receiptId || ('rcpt-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 7));
     const receiptNumber = 'SR-' + Math.floor(100000 + Math.random() * 900000);
-    const receiptItems: StockReceiptItem[] = [];
-    let totalQuantity = 0;
-    let totalCost = 0;
-
-    const batch = writeBatch(db);
-
-    for (const item of validItems) {
-      const prod = this.getProductById(item.productId);
-      if (!prod) continue;
-
-      const prevStock = prod.stock;
-      const newStock = prevStock + item.quantity;
-      totalQuantity += item.quantity;
-
-      const itemCost = item.importCost !== undefined && item.importCost > 0 ? item.importCost : (prod.importPrice || 0);
-      if (itemCost > 0) {
-        totalCost += itemCost * item.quantity;
-      }
-
-      receiptItems.push({
-        productId: prod.id,
-        productName: prod.name,
-        barcode: prod.barcode,
-        brand: prod.brand,
-        quantity: item.quantity,
-        previousStock: prevStock,
-        newStock,
-        importCost: itemCost > 0 ? itemCost : undefined
-      });
-
-      // Update product object
-      const updatedProd: Product = {
-        ...prod,
-        stock: newStock,
-        ...(item.importCost && item.importCost > 0 ? { importPrice: item.importCost } : {})
-      };
-
-      // Update local product cache
-      productsCache = productsCache.map(p => p.id === prod.id ? updatedProd : p);
-
-      // Add product update to batch
-      batch.set(doc(db, 'products', prod.id), sanitizeForFirestore(updatedProd), { merge: true });
-
-      // Inventory Log
-      const logId = 'log-' + Math.random().toString(36).substring(2, 11);
-      const newLog: InventoryLog = {
-        id: logId,
-        productId: prod.id,
-        productName: prod.name,
-        type: 'stock_in',
-        quantity: item.quantity,
-        previousStock: prevStock,
-        newStock,
-        reason: `Stock In Receipt #${receiptNumber} - ${payload.supplier || 'Warehouse Intake'}`,
-        performedBy: payload.receivedBy || 'Staff Member',
-        createdAt: new Date().toISOString()
-      };
-      inventoryLogsCache = [newLog, ...inventoryLogsCache];
-      batch.set(doc(db, 'inventory_logs', logId), sanitizeForFirestore(newLog));
-
-      // Stock Movement Log
-      const movementId = 'sm-' + Math.random().toString(36).substring(2, 11);
-      const newMovement: StockMovement = {
-        id: movementId,
-        productId: prod.id,
-        productName: prod.name,
-        quantity: item.quantity,
-        type: 'stock_in',
-        source: 'MANUAL',
-        performedBy: payload.receivedBy || 'Staff Member',
-        previousStock: prevStock,
-        newStock,
-        reason: `Stock In #${receiptNumber} (${payload.supplier || 'Receiving'})`,
-        createdAt: new Date().toISOString()
-      };
-      stockMovementsCache = [newMovement, ...stockMovementsCache];
-      batch.set(doc(db, 'stock_movements', movementId), sanitizeForFirestore(newMovement));
-    }
-
-    if (receiptItems.length === 0) {
-      return { success: false, message: 'None of the requested products were found in catalog.' };
-    }
-
-    const receipt: StockReceipt = {
-      id: receiptId,
-      receiptNumber,
-      receivedBy: payload.receivedBy || 'Staff Member',
-      supplier: payload.supplier?.trim() || undefined,
-      batchNumber: payload.batchNumber?.trim() || undefined,
-      notes: payload.notes?.trim() || undefined,
-      totalQuantity,
-      totalItemsCount: receiptItems.length,
-      totalCost: totalCost > 0 ? totalCost : undefined,
-      items: receiptItems,
-      createdAt: new Date().toISOString(),
-      status: 'completed'
-    };
-
-    stockReceiptsCache = [receipt, ...stockReceiptsCache];
-    batch.set(doc(db, 'stock_receipts', receiptId), sanitizeForFirestore(receipt));
+    const nowIso = new Date().toISOString();
 
     try {
-      await batch.commit();
+      const committedReceipt = await runTransaction(db, async (transaction) => {
+        // Idempotency check: if receipt already exists, return existing receipt
+        const receiptRef = doc(db, 'stock_receipts', receiptId);
+        const existingReceiptDoc = await transaction.get(receiptRef);
+        if (existingReceiptDoc.exists()) {
+          return existingReceiptDoc.data() as StockReceipt;
+        }
+
+        // ================= 1. READ PHASE (All reads must precede writes) =================
+        const readResults: {
+          item: typeof validItems[0];
+          prodRef: any;
+          prodData: Product;
+          currentStock: number;
+          newStock: number;
+          itemCost?: number;
+        }[] = [];
+
+        for (const item of validItems) {
+          const prodRef = doc(db, 'products', item.canonicalId);
+          const prodDoc = await transaction.get(prodRef);
+
+          if (!prodDoc.exists()) {
+            throw new Error(`Product ID "${item.canonicalId}" not found in database.`);
+          }
+
+          const rawData = prodDoc.data() as Product;
+          const prodData = normalizeProductPricing(rawData);
+          const currentStock = typeof prodData.stock === 'number' && Number.isFinite(prodData.stock) ? prodData.stock : 0;
+          const newStock = currentStock + item.quantity;
+          const itemCost = item.importCost !== undefined ? item.importCost : (prodData.importPrice || 0);
+
+          readResults.push({
+            item,
+            prodRef,
+            prodData,
+            currentStock,
+            newStock,
+            itemCost: itemCost > 0 ? itemCost : undefined
+          });
+        }
+
+        // ================= 2. WRITE PHASE =================
+        const receiptItems: StockReceiptItem[] = [];
+        let totalQuantity = 0;
+        let totalCost = 0;
+
+        for (const entry of readResults) {
+          const { item, prodRef, prodData, currentStock, newStock, itemCost } = entry;
+          totalQuantity += item.quantity;
+          if (itemCost && itemCost > 0) {
+            totalCost += itemCost * item.quantity;
+          }
+
+          receiptItems.push({
+            productId: prodData.id || item.canonicalId,
+            productName: prodData.name || 'Product',
+            barcode: prodData.barcode,
+            brand: prodData.brand,
+            quantity: item.quantity,
+            previousStock: currentStock,
+            newStock,
+            importCost: itemCost
+          });
+
+          // 1. Update Product Document
+          const productUpdate: Record<string, any> = {
+            stock: newStock,
+            updated_at: nowIso
+          };
+          if (item.importCost !== undefined && item.importCost > 0) {
+            productUpdate.importPrice = item.importCost;
+          }
+          transaction.update(prodRef, productUpdate);
+
+          // 2. Write Inventory Log
+          const logRef = doc(collection(db, 'inventory_logs'));
+          const newLog: InventoryLog = {
+            id: logRef.id,
+            productId: prodData.id || item.canonicalId,
+            productName: prodData.name || 'Product',
+            type: 'stock_in',
+            quantity: item.quantity,
+            previousStock: currentStock,
+            newStock,
+            reason: `Stock In Receipt #${receiptNumber} - ${payload.supplier || 'Warehouse Intake'}`,
+            performedBy: payload.receivedBy || 'Staff Member',
+            createdAt: nowIso
+          };
+          transaction.set(logRef, sanitizeForFirestore(newLog));
+
+          // 3. Write Stock Movement
+          const movementRef = doc(collection(db, 'stock_movements'));
+          const newMovement: StockMovement = {
+            id: movementRef.id,
+            productId: prodData.id || item.canonicalId,
+            productName: prodData.name || 'Product',
+            quantity: item.quantity, // POSITIVE for stock additions
+            type: 'stock_in',
+            source: 'MANUAL',
+            performedBy: payload.receivedBy || 'Staff Member',
+            previousStock: currentStock,
+            newStock,
+            reason: `Stock In #${receiptNumber} (${payload.supplier || 'Receiving'})`,
+            createdAt: nowIso
+          };
+          transaction.set(movementRef, sanitizeForFirestore(newMovement));
+        }
+
+        // 4. Write Stock Receipt Voucher
+        const receiptData: StockReceipt = {
+          id: receiptId,
+          receiptNumber,
+          receivedBy: payload.receivedBy || 'Staff Member',
+          supplier: payload.supplier?.trim() || undefined,
+          batchNumber: payload.batchNumber?.trim() || undefined,
+          notes: payload.notes?.trim() || undefined,
+          totalQuantity,
+          totalItemsCount: receiptItems.length,
+          totalCost: totalCost > 0 ? totalCost : undefined,
+          items: receiptItems,
+          createdAt: nowIso,
+          status: 'completed'
+        };
+        transaction.set(receiptRef, sanitizeForFirestore(receiptData));
+
+        return receiptData;
+      });
+
+      // Synchronize local memory cache after successful commit
+      committedReceipt.items.forEach(ri => {
+        const cached = productsCache.find(p => p.id === ri.productId);
+        if (cached) {
+          cached.stock = ri.newStock;
+          if (ri.importCost) cached.importPrice = ri.importCost;
+        }
+      });
+      stockReceiptsCache = [committedReceipt, ...stockReceiptsCache.filter(r => r.id !== committedReceipt.id)];
       notifySubscribers();
       notifyReceiptSubscribers();
 
-      // Trigger Slack notification for restock
+      // Trigger Slack notification asynchronously
       import('./slackNotificationService').then(({ slackNotificationService }) => {
-        receiptItems.forEach(ri => {
+        committedReceipt.items.forEach(ri => {
           const prod = this.getProductById(ri.productId);
           if (prod) {
             slackNotificationService.notifyStockAlert(prod, 'inventory_updated', ri.previousStock).catch(console.warn);
@@ -469,12 +536,15 @@ export const productService = {
 
       return {
         success: true,
-        message: `Successfully received ${totalQuantity} units across ${receiptItems.length} products (Receipt #${receiptNumber}).`,
-        receipt
+        message: `Successfully received ${committedReceipt.totalQuantity} units across ${committedReceipt.totalItemsCount} products (Receipt #${committedReceipt.receiptNumber}).`,
+        receipt: committedReceipt
       };
     } catch (err: any) {
-      console.error('Failed to commit stock-in batch:', err);
-      return { success: false, message: 'Failed to save stock-in to database.' };
+      console.error('[ProductService] Failed to commit stock-in transaction:', err);
+      return {
+        success: false,
+        message: err?.message || 'Failed to save stock-in to database.'
+      };
     }
   }
 };

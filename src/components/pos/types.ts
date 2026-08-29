@@ -1,6 +1,8 @@
 import { Product } from '../../types';
 
-export type PosTab = 'sale' | 'scan' | 'search' | 'stock_in' | 'history';
+export type PosTab = 'sale' | 'search' | 'stock_in' | 'history';
+
+export type ScannerContext = 'SALE' | 'STOCK_IN';
 
 export type PricingMode = 'retail' | 'wholesale';
 

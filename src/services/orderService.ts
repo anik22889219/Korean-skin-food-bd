@@ -10,6 +10,10 @@ export const orderService = {
     return posService.createOnlineOrder(order);
   },
 
+  processPosCheckout(params: Parameters<typeof posService.processPosCheckout>[0]) {
+    return posService.processPosCheckout(params);
+  },
+
   updateOrderStatus(orderId: string, status: Order['status']): Order | undefined {
     return posService.updateOrderStatus(orderId, status);
   },

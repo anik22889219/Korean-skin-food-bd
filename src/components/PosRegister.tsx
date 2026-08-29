@@ -88,6 +88,16 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
   // Navigation tabs: 'sale' | 'scan' | 'search' | 'stock_in' | 'history'
   const [activeTab, setActiveTab] = useState<PosTab>('sale');
+  const [scannerContext, setScannerContext] = useState<'SALE' | 'STOCK_IN'>('SALE');
+
+  const handleTabChange = (tab: PosTab) => {
+    setActiveTab(tab);
+    if (tab === 'stock_in') {
+      setScannerContext('STOCK_IN');
+    } else if (tab === 'sale' || tab === 'search') {
+      setScannerContext('SALE');
+    }
+  };
 
   // React Router search params & location for direct "View Live POS" deep-links
   const [searchParams, setSearchParams] = useSearchParams();
@@ -520,7 +530,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     }
   };
 
-  // Checkout Handler
+  // Checkout Handler (Atomic Firestore Transaction with Stock & Idempotency Guards)
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cartItems.length === 0) {
@@ -528,96 +538,52 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       return;
     }
 
+    if (!user?.uid || !sessionId) {
+      alert('Active POS session not found or user not authenticated. Please restart the session.');
+      return;
+    }
+
+    // Pre-flight client stock check (for immediate UI UX, while server/transaction strictly re-validates from Firestore)
     for (const item of cartItems) {
       if (item.product.stock < item.quantity) {
-        alert(`Insufficient stock for "${item.product.name}". Available: ${item.product.stock}`);
+        alert(`Insufficient stock for "${item.product.name}". Available: ${item.product.stock}, In Cart: ${item.quantity}`);
         return;
       }
     }
 
     setIsSubmitting(true);
     try {
-      const orderId = 'POS-' + Math.floor(100000 + Math.random() * 900000);
-      const subtotal = cartItems.reduce((sum, item) => {
-        const price = getProductUnitPrice(item.product, pricingMode, item.quantity);
-        return sum + price * item.quantity;
-      }, 0);
-      const deliveryCharge = deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0;
-      const grandTotal = subtotal + (cartItems.length > 0 ? deliveryCharge : 0);
+      const checkoutItems = cartItems.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        barcode: item.product.barcode,
+        name: item.product.name,
+        price: getProductUnitPrice(item.product, pricingMode, item.quantity)
+      }));
 
-      const newOrder: Order = {
-        id: orderId,
-        customerName: customerName.trim() || 'In-Person Customer',
-        customerPhone: customerPhone.trim() || 'Walk-In',
-        address: customerAddress.trim()
-          ? `${customerAddress.trim()} (${deliveryArea === 'inside' ? 'Inside Dhaka' : deliveryArea === 'outside' ? 'Outside Dhaka' : 'In-Store Checkout'})`
-          : 'In-Store Checkout Counter',
-        items: cartItems.map((item) => ({
-          productId: item.product.id,
-          name: item.product.name,
-          price: getProductUnitPrice(item.product, pricingMode, item.quantity),
-          quantity: item.quantity,
-          scannedQuantity: item.quantity,
-          barcode: item.product.barcode
-        })),
-        totalAmount: grandTotal,
-        status: 'delivered',
-        order_source: 'POS',
-        stock_deducted: true,
-        createdAt: new Date().toISOString(),
-        paymentMethod: 'POS_In_Person',
-        sessionType: 'POS',
-        isPaid: true
-      };
+      const result = await posService.processPosCheckout({
+        sessionId,
+        userId: user.uid,
+        userRole: userRole || undefined,
+        operatorName,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        customerAddress: customerAddress.trim(),
+        deliveryArea,
+        pricingMode,
+        items: checkoutItems
+      });
 
-      // Set main order document in Firestore
-      await setDoc(doc(db, 'orders', orderId), newOrder);
-
-      // Decrement stock & create audit logs
-      for (const item of cartItems) {
-        const prod = productService.getProductById(item.product.id);
-        if (prod) {
-          const prevStock = prod.stock;
-          const updatedProd = {
-            ...prod,
-            stock: Math.max(0, prod.stock - item.quantity)
-          };
-          productService.updateProduct(updatedProd);
-          productService.logInventory(
-            prod.id,
-            'sale',
-            item.quantity,
-            prevStock,
-            updatedProd.stock,
-            `POS Checkout - Order #${orderId}`
-          );
-          productService.logStockMovement({
-            productId: prod.id,
-            productName: prod.name,
-            orderId,
-            quantity: -item.quantity,
-            type: 'sale',
-            source: 'POS',
-            performedBy: operatorName,
-            previousStock: prevStock,
-            newStock: updatedProd.stock,
-            reason: 'POS In-Store Checkout'
-          });
-        }
+      if (!result.success || !result.order) {
+        alert(result.message || 'Checkout failed. Please try again.');
+        return;
       }
 
-      // Clear the session scans subcollection for the next customer
-      const batch = writeBatch(db);
-      for (const s of scans) {
-        batch.delete(doc(db, 'pos_sessions', sessionId, 'scans', s.id));
-      }
-      await batch.commit();
-
-      setInvoiceOrder(newOrder);
+      setInvoiceOrder(result.order);
       if (soundEnabled) playSuccessBeep(0.3);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error during POS checkout:', err);
-      alert('Checkout failed. Please try again.');
+      alert(err?.message || 'Checkout failed. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -754,9 +720,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           <div className="bg-gray-100 p-1 rounded-2xl border border-gray-200 text-xs font-bold flex items-center">
             <button
               type="button"
-              onClick={() => setActiveTab('sale')}
+              onClick={() => handleTabChange('sale')}
               className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
-                activeTab === 'sale' || activeTab === 'search'
+                activeTab === 'sale' || activeTab === 'search' || (activeTab === 'scan' && scannerContext === 'SALE')
                   ? 'bg-[#E91E8C] text-white shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -766,21 +732,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('scan')}
+              onClick={() => handleTabChange('stock_in')}
               className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
-                activeTab === 'scan'
-                  ? 'bg-[#E91E8C] text-white shadow-xs'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              <ScanLine size={14} />
-              <span>Live Scanner</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('stock_in')}
-              className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
-                activeTab === 'stock_in'
+                activeTab === 'stock_in' || (activeTab === 'scan' && scannerContext === 'STOCK_IN')
                   ? 'bg-[#1E293B] text-white shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -796,7 +750,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             <button
               type="button"
               id="btn-pos-tab-records"
-              onClick={() => setActiveTab('history')}
+              onClick={() => handleTabChange('history')}
               className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'history'
                   ? 'bg-purple-600 text-white shadow-xs'
@@ -922,7 +876,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 products={products}
                 queue={stockInQueue}
                 setQueue={setStockInQueue}
-                onOpenScanner={() => setActiveTab('scan')}
+                onOpenScanner={() => {
+                  setScannerContext('STOCK_IN');
+                  setActiveTab('scan');
+                }}
                 onOpenSearch={() => setActiveTab('search')}
                 staffName={operatorName}
               />
@@ -934,24 +891,28 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   <div>
                     <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
                       <ScanLine size={16} className="text-[#E91E8C]" />
-                      <span>Desktop Barcode Scanner & Camera View</span>
+                      <span>
+                        {scannerContext === 'STOCK_IN' ? 'Stock Receiving Barcode Scanner' : 'Desktop Barcode Scanner & Camera View'}
+                      </span>
                     </h3>
                     <p className="text-xs text-gray-500">
-                      Use connected webcam or wireless mobile phone to scan products directly into cart.
+                      {scannerContext === 'STOCK_IN' 
+                        ? 'Scan products to quickly add quantities to the stock-in receiving queue.'
+                        : 'Use connected webcam or wireless mobile phone to scan products directly into cart.'}
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('sale')}
+                    onClick={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
                     className="bg-[#E91E8C] text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-[#FF4B91] transition cursor-pointer shadow-xs"
                   >
-                    View Cart ({totalCartCount})
+                    {scannerContext === 'STOCK_IN' ? `View Stock Queue (${stockInQueue.length})` : `View Cart (${totalCartCount})`}
                   </button>
                 </div>
 
                 <PosScan
                   sessionId={sessionId}
-                  onBack={() => setActiveTab('sale')}
+                  onBack={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
                   currentUser={{
                     uid: user?.uid || 'staff-pos',
                     email: operatorEmail,
@@ -959,6 +920,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                     name: operatorName
                   }}
                   onLoginStaff={() => {}}
+                  context={scannerContext}
+                  onAddToCart={handleAddToCart}
+                  onAddToStockIn={handleAddToStockIn}
+                  stockInQueue={stockInQueue}
                 />
               </div>
             ) : (
@@ -968,8 +933,14 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   <PosProductSearch
                     products={products}
                     onAddToCart={handleAddToCart}
-                    mode="sale"
+                    onAddToStockIn={handleAddToStockIn}
+                    onOpenScanner={() => {
+                      setScannerContext('SALE');
+                      setActiveTab('scan');
+                    }}
+                    mode={scannerContext === 'STOCK_IN' || activeTab === 'stock_in' ? 'stock_in' : 'sale'}
                     cartQuantities={cartQuantitiesMap}
+                    stockInQuantities={stockInQuantitiesMap}
                   />
                 </div>
 
@@ -984,6 +955,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                     onSetQuantity={handleSetQuantity}
                     onRemove={handleRemove}
                     onClearCart={handleClearCart}
+                    onOpenScanner={() => {
+                      setScannerContext('SALE');
+                      setActiveTab('scan');
+                    }}
                     editingQty={editingQty}
                     setEditingQty={setEditingQty}
                     customerName={customerName}
@@ -1014,6 +989,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 onSetQuantity={handleSetQuantity}
                 onRemove={handleRemove}
                 onClearCart={handleClearCart}
+                onOpenScanner={() => {
+                  setScannerContext('SALE');
+                  setActiveTab('scan');
+                }}
                 editingQty={editingQty}
                 setEditingQty={setEditingQty}
                 customerName={customerName}
@@ -1032,7 +1011,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             {activeTab === 'scan' && (
               <PosScan
                 sessionId={sessionId}
-                onBack={() => setActiveTab('sale')}
+                onBack={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
                 currentUser={{
                   uid: user?.uid || 'staff-pos',
                   email: operatorEmail,
@@ -1040,6 +1019,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   name: operatorName
                 }}
                 onLoginStaff={() => {}}
+                context={scannerContext}
+                onAddToCart={handleAddToCart}
+                onAddToStockIn={handleAddToStockIn}
+                stockInQueue={stockInQueue}
               />
             )}
 
@@ -1054,7 +1037,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   handleAddToStockIn(p);
                   setActiveTab('stock_in');
                 }}
-                mode={stockInQueue.length > 0 ? 'stock_in' : 'sale'}
+                mode={scannerContext === 'STOCK_IN' || activeTab === 'stock_in' ? 'stock_in' : 'sale'}
                 cartQuantities={cartQuantitiesMap}
                 stockInQuantities={stockInQuantitiesMap}
               />
@@ -1065,7 +1048,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 products={products}
                 queue={stockInQueue}
                 setQueue={setStockInQueue}
-                onOpenScanner={() => setActiveTab('scan')}
+                onOpenScanner={() => {
+                  setScannerContext('STOCK_IN');
+                  setActiveTab('scan');
+                }}
                 onOpenSearch={() => setActiveTab('search')}
                 staffName={operatorName}
               />
@@ -1093,7 +1079,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       {/* ================= MOBILE BOTTOM NAVIGATION ================= */}
       <PosMobileNav
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         cartCount={totalCartCount}
         stockInCount={stockInQueue.length}
         liveCount={isAdminOrSuperAdmin ? liveSessionsCount : 0}

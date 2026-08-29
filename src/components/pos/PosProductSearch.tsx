@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Product } from '../../types';
-import { Search, X, Plus, Package, Check, Sparkles, Filter } from 'lucide-react';
+import { Search, X, Plus, Package, Check, Sparkles, Filter, ScanLine } from 'lucide-react';
 import { getRetailPrice } from '../../utils/pricing';
 
 interface PosProductSearchProps {
   products: Product[];
   onAddToCart?: (product: Product) => void;
   onAddToStockIn?: (product: Product) => void;
+  onOpenScanner?: () => void;
   mode?: 'sale' | 'stock_in';
   cartQuantities?: Record<string, number>;
   stockInQuantities?: Record<string, number>;
@@ -16,6 +17,7 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
   products,
   onAddToCart,
   onAddToStockIn,
+  onOpenScanner,
   mode = 'sale',
   cartQuantities = {},
   stockInQuantities = {}
@@ -78,9 +80,26 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
           </p>
         </div>
 
-        <span className="text-[11px] font-bold text-pink-700 bg-pink-50 border border-pink-100 px-3 py-1 rounded-full font-mono">
-          {filteredProducts.length} product(s)
-        </span>
+        <div className="flex items-center gap-2">
+          {onOpenScanner && (
+            <button
+              type="button"
+              onClick={onOpenScanner}
+              className={`px-3 py-1.5 rounded-2xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                mode === 'stock_in'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200'
+                  : 'bg-[#E91E8C] hover:bg-[#FF4B91] text-white shadow-pink-200'
+              }`}
+            >
+              <ScanLine size={14} />
+              <span>Scan Barcode</span>
+            </button>
+          )}
+
+          <span className="text-[11px] font-bold text-pink-700 bg-pink-50 border border-pink-100 px-3 py-1 rounded-full font-mono">
+            {filteredProducts.length} product(s)
+          </span>
+        </div>
       </div>
 
       {/* Search Input Box */}

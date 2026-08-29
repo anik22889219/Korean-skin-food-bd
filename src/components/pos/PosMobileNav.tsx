@@ -25,11 +25,6 @@ export const PosMobileNav: React.FC<PosMobileNavProps> = ({
       badge: cartCount
     },
     {
-      id: 'scan',
-      label: 'Scanner',
-      icon: <ScanLine size={20} />
-    },
-    {
       id: 'search',
       label: 'Search',
       icon: <Search size={20} />

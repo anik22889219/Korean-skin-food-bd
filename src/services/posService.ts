@@ -1,10 +1,42 @@
 import { PosSession, Order, Product, PosAllowedRole, PosDeviceType, PosSessionNotification } from '../types';
 import { productService } from './productService';
 import { auth, db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, addDoc, getDocs, getDoc, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, addDoc, getDocs, getDoc, arrayUnion, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
+import { getProductUnitPrice } from '../utils/pricing';
 
 export const ALLOWED_POS_ROLES: PosAllowedRole[] = ['admin', 'super_admin', 'inventory_manager'];
+
+export interface PosCheckoutItemInput {
+  productId: string;
+  quantity: number;
+  barcode?: string;
+  name?: string;
+  price?: number;
+}
+
+export interface PosCheckoutParams {
+  sessionId: string;
+  userId: string;
+  userRole?: string;
+  operatorName: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  deliveryArea?: 'inside' | 'outside' | 'pickup' | 'none';
+  pricingMode?: 'retail' | 'wholesale';
+  items: PosCheckoutItemInput[];
+  orderId?: string;
+  idempotencyKey?: string;
+}
+
+export interface PosCheckoutResult {
+  success: boolean;
+  order?: Order;
+  message: string;
+  orderId?: string;
+  code?: 'INSUFFICIENT_STOCK' | 'PERMISSION_DENIED' | 'INVALID_SESSION' | 'EMPTY_CART' | 'PRODUCT_NOT_FOUND' | 'TRANSACTION_FAILED' | 'DUPLICATE_RESOLVED';
+}
 
 export function isAllowedPosRole(role?: string | null): boolean {
   if (!role) return false;
@@ -769,97 +801,300 @@ export const posService = {
     return null;
   },
 
-  checkoutSession(sessionId: string, customerName: string, customerPhone: string): { success: boolean; order?: Order; message: string } {
+  /**
+   * Process POS Checkout using an Atomic Firestore Transaction.
+   * Ensures stock re-validation, idempotent order creation, atomic stock deduction,
+   * single inventory log, single stock movement, and post-commit cart finalization.
+   */
+  async processPosCheckout(params: PosCheckoutParams): Promise<PosCheckoutResult> {
+    const {
+      sessionId,
+      userId,
+      userRole,
+      operatorName,
+      customerName,
+      customerPhone,
+      customerAddress,
+      deliveryArea = 'none',
+      pricingMode = 'retail',
+      items,
+      idempotencyKey
+    } = params;
+
+    // 1. Basic validation
+    if (!sessionId) {
+      return { success: false, message: 'POS session ID is required.', code: 'INVALID_SESSION' };
+    }
+    if (!userId) {
+      return { success: false, message: 'Authenticated user ID is required.', code: 'PERMISSION_DENIED' };
+    }
+    if (!items || items.length === 0) {
+      return { success: false, message: 'Cart cannot be empty for checkout.', code: 'EMPTY_CART' };
+    }
+
+    // Role validation
+    if (userRole && !isAllowedPosRole(userRole)) {
+      return { success: false, message: 'User does not possess an authorized POS checkout role.', code: 'PERMISSION_DENIED' };
+    }
+
+    // Deterministic or stable Order ID
+    const orderId = params.orderId || ('POS-' + Math.floor(100000 + Math.random() * 900000));
+    const effectiveIdempotencyKey = idempotencyKey || orderId;
+
+    try {
+      // 2. Execute Atomic Firestore Transaction
+      const committedOrder = await runTransaction(db, async (transaction) => {
+        // --- STEP A: READS (Must occur before ANY writes in Firestore transactions) ---
+        
+        // A.1 Verify Session & Ownership
+        const sessionRef = doc(db, 'pos_sessions', sessionId);
+        const sessionDoc = await transaction.get(sessionRef);
+        if (!sessionDoc.exists()) {
+          throw new Error(`POS session "${sessionId}" not found.`);
+        }
+        const sessionData = sessionDoc.data();
+        if (sessionData.userId !== userId) {
+          throw new Error('Unauthorized: POS session does not belong to the authenticated user.');
+        }
+
+        // A.2 Idempotency Check (Check if order already committed)
+        const orderRef = doc(db, 'orders', orderId);
+        const existingOrderDoc = await transaction.get(orderRef);
+        if (existingOrderDoc.exists()) {
+          // Idempotent safe return of already processed order
+          return existingOrderDoc.data() as Order;
+        }
+
+        // A.3 Fetch and Validate all Products & Current Stocks from Firestore
+        interface ValidatedProductSnapshot {
+          ref: any;
+          data: Product;
+          currentStock: number;
+          newStock: number;
+          quantity: number;
+          unitPrice: number;
+          barcode?: string;
+        }
+
+        const validatedProducts: ValidatedProductSnapshot[] = [];
+
+        for (const item of items) {
+          if (!item.productId) {
+            throw new Error('Invalid cart item: missing product ID.');
+          }
+          if (!item.quantity || item.quantity <= 0) {
+            throw new Error(`Invalid item quantity (${item.quantity}) for product "${item.name || item.productId}".`);
+          }
+
+          const prodRef = doc(db, 'products', item.productId);
+          const prodDoc = await transaction.get(prodRef);
+
+          if (!prodDoc.exists()) {
+            throw new Error(`Product "${item.name || item.productId}" does not exist in store catalog.`);
+          }
+
+          const prodData = { id: prodDoc.id, ...prodDoc.data() } as Product;
+          const currentStock = Number(prodData.stock ?? 0);
+
+          // Atomic stock ceiling guard
+          if (currentStock < item.quantity) {
+            throw new Error(
+              `Insufficient stock for "${prodData.name}". Available in stock: ${currentStock}, Requested: ${item.quantity}.`
+            );
+          }
+
+          // Authoritative price calculation
+          const unitPrice = getProductUnitPrice(prodData, pricingMode, item.quantity);
+
+          validatedProducts.push({
+            ref: prodRef,
+            data: prodData,
+            currentStock,
+            newStock: currentStock - item.quantity,
+            quantity: item.quantity,
+            unitPrice,
+            barcode: item.barcode || prodData.barcode
+          });
+        }
+
+        // --- STEP B: WRITES (Atomic commit of order, stock deductions, and audit logs) ---
+        
+        // B.1 Calculate final billing totals
+        const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
+        const deliveryCharge = deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0;
+        const totalAmount = itemsSubtotal + (validatedProducts.length > 0 ? deliveryCharge : 0);
+        const nowIso = new Date().toISOString();
+
+        // B.2 Construct Authoritative Order
+        const newOrder: Order = {
+          id: orderId,
+          customerName: (customerName || '').trim() || 'In-Person Customer',
+          customerPhone: (customerPhone || '').trim() || 'Walk-In',
+          address: (customerAddress || '').trim()
+            ? `${customerAddress!.trim()} (${deliveryArea === 'inside' ? 'Inside Dhaka' : deliveryArea === 'outside' ? 'Outside Dhaka' : 'In-Store Checkout'})`
+            : 'In-Store Checkout Counter',
+          items: validatedProducts.map((p) => ({
+            productId: p.data.id,
+            name: p.data.name,
+            price: p.unitPrice,
+            quantity: p.quantity,
+            scannedQuantity: p.quantity,
+            barcode: p.barcode
+          })),
+          totalAmount,
+          status: 'delivered',
+          order_source: 'POS',
+          stock_deducted: true,
+          createdAt: nowIso,
+          paymentMethod: 'POS_In_Person',
+          sessionType: 'POS',
+          isPaid: true
+        };
+
+        // B.3 Commit Order Document
+        transaction.set(orderRef, sanitizeForFirestore(newOrder));
+
+        // B.4 Commit Stock Deductions, Inventory Logs, and Stock Movements
+        for (const p of validatedProducts) {
+          // 1. Decrement product stock in Firestore
+          transaction.update(p.ref, {
+            stock: p.newStock,
+            updated_at: nowIso
+          });
+
+          // 2. Add inventory log document
+          const logRef = doc(collection(db, 'inventory_logs'));
+          transaction.set(logRef, sanitizeForFirestore({
+            id: logRef.id,
+            productId: p.data.id,
+            productName: p.data.name,
+            type: 'sale',
+            quantity: p.newStock,
+            change: -p.quantity,
+            prevStock: p.currentStock,
+            newStock: p.newStock,
+            note: `POS Checkout - Order #${orderId}`,
+            source: 'POS',
+            orderId,
+            sessionId,
+            userId,
+            performedBy: operatorName,
+            timestamp: nowIso,
+            createdAt: nowIso
+          }));
+
+          // 3. Add stock movement document
+          const movementRef = doc(collection(db, 'stock_movements'));
+          transaction.set(movementRef, sanitizeForFirestore({
+            id: movementRef.id,
+            productId: p.data.id,
+            productName: p.data.name,
+            orderId,
+            quantity: -p.quantity,
+            type: 'sale',
+            source: 'POS',
+            performedBy: operatorName,
+            previousStock: p.currentStock,
+            newStock: p.newStock,
+            reason: 'POS In-Store Checkout',
+            sessionId,
+            timestamp: nowIso,
+            createdAt: nowIso
+          }));
+        }
+
+        return newOrder;
+      });
+
+      // 3. Post-Transaction Cart Cleanup & Local Cache Update
+      try {
+        // Clear scans subcollection for this POS session in Firestore
+        const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+        const scansSnapshot = await getDocs(scansColRef);
+        if (!scansSnapshot.empty) {
+          const batch = writeBatch(db);
+          scansSnapshot.forEach((docSnap) => {
+            batch.delete(docSnap.ref);
+          });
+          await batch.commit();
+        }
+      } catch (cleanupErr) {
+        console.warn('[posService] Non-critical warning clearing session scans after checkout:', cleanupErr);
+      }
+
+      // Update local orders cache
+      if (!ordersCache.some(o => o.id === committedOrder.id)) {
+        ordersCache = [committedOrder, ...ordersCache];
+        notifyOrderSubscribers();
+      }
+
+      // Trigger Slack notification asynchronously
+      import('./slackNotificationService').then(({ slackNotificationService }) => {
+        slackNotificationService.notifyNewOrder(committedOrder).catch(console.warn);
+      }).catch(() => {});
+
+      return {
+        success: true,
+        order: committedOrder,
+        orderId: committedOrder.id,
+        message: `Order #${committedOrder.id} completed successfully!`
+      };
+    } catch (err: any) {
+      console.error('[posService] processPosCheckout transaction failed:', err);
+      const errMsg = err?.message || 'Checkout failed due to transaction conflict or error.';
+      let code: PosCheckoutResult['code'] = 'TRANSACTION_FAILED';
+      if (errMsg.includes('Insufficient stock')) {
+        code = 'INSUFFICIENT_STOCK';
+      } else if (errMsg.includes('Unauthorized') || errMsg.includes('permission')) {
+        code = 'PERMISSION_DENIED';
+      } else if (errMsg.includes('not found') || errMsg.includes('does not exist')) {
+        code = 'PRODUCT_NOT_FOUND';
+      } else if (errMsg.includes('session')) {
+        code = 'INVALID_SESSION';
+      }
+
+      return {
+        success: false,
+        message: errMsg,
+        code
+      };
+    }
+  },
+
+  /**
+   * Backwards-compatible session checkout wrapper
+   */
+  async checkoutSession(sessionId: string, customerName: string, customerPhone: string): Promise<{ success: boolean; order?: Order; message: string }> {
     const sIdx = sessionsCache.findIndex(s => s.id === sessionId);
     if (sIdx === -1) {
       return { success: false, message: 'POS session not found' };
     }
-
     const session = sessionsCache[sIdx];
     const sessionItems = Array.isArray(session?.items) ? session.items : [];
     if (sessionItems.length === 0) {
       return { success: false, message: 'Cart is empty' };
     }
 
-    // Verify and decrement stock
-    const products = productService.getProducts();
-    for (const item of sessionItems) {
-      const prod = products.find(p => p.id === item.productId);
-      if (!prod) {
-        return { success: false, message: `Product ${item.name} not found in inventory` };
-      }
-      if (prod.stock < item.quantity) {
-        return { success: false, message: `Insufficient stock for ${prod.name}. Available: ${prod.stock}` };
-      }
-    }
+    const res = await this.processPosCheckout({
+      sessionId,
+      userId: session.userId || auth.currentUser?.uid || '',
+      userRole: session.userRole,
+      operatorName: session.userName || 'POS Operator',
+      customerName,
+      customerPhone,
+      items: sessionItems.map(it => ({
+        productId: it.productId,
+        quantity: it.quantity,
+        name: it.name,
+        price: it.price
+      }))
+    });
 
-    // Decrement stock & log inventory & stock movement
-    for (const item of sessionItems) {
-      const prod = products.find(p => p.id === item.productId)!;
-      const prevStock = prod.stock;
-      prod.stock -= item.quantity;
-      productService.updateProduct(prod);
-      
-      productService.logInventory(
-        prod.id,
-        'sale',
-        item.quantity,
-        prevStock,
-        prod.stock,
-        `POS Sale - Session ${session.id}`
-      );
-      productService.logStockMovement({
-        productId: prod.id,
-        productName: prod.name,
-        quantity: -item.quantity,
-        type: 'sale',
-        source: 'POS',
-        performedBy: session.userName || 'POS Operator',
-        previousStock: prevStock,
-        newStock: prod.stock,
-        reason: `POS Sale - User Session Checkout`
-      });
-    }
-
-    // Create Order
-    const totalAmount = sessionItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const orderId = 'POS-' + Math.floor(100000 + Math.random() * 900000);
-    const nowIso = new Date().toISOString();
-    const newOrder: Order = {
-      id: orderId,
-      customerName: customerName || 'In-Person Customer',
-      customerPhone: customerPhone || 'Walk-In',
-      address: 'In-Store Checkout',
-      items: sessionItems.map(item => ({
-        ...item,
-        scannedQuantity: item.quantity
-      })),
-      totalAmount,
-      status: 'delivered',
-      order_source: 'POS',
-      stock_deducted: true,
-      createdAt: nowIso,
-      paymentMethod: 'POS_In_Person',
-      sessionType: 'POS',
-      isPaid: true
+    return {
+      success: res.success,
+      order: res.order,
+      message: res.message
     };
-
-    // Update cache and Firestore
-    ordersCache = [newOrder, ...ordersCache];
-    setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(newOrder)).catch(console.error);
-
-    // Clear session cart
-    const updatedSession = { 
-      ...session, 
-      items: [],
-      lastScanTime: nowIso,
-      lastSeenAt: nowIso,
-      updated_at: nowIso
-    };
-    sessionsCache[sIdx] = updatedSession;
-    this.saveSessions(sessionsCache);
-
-    return { success: true, order: newOrder, message: 'POS Sale checkout complete!' };
   },
 
   getOrders(): Order[] {

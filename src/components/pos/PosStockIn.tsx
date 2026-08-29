@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Product, StockReceipt } from '../../types';
 import { StockInQueueItem } from './types';
 import { productService } from '../../services/productService';
 import { StockReceiptSlip } from './StockReceiptSlip';
+import { findProductByScannedCode } from '../../utils/barcode';
+import { playSuccessBeep, playErrorBeep } from '../PosScan';
 import { 
   PackagePlus, 
   Trash2, 
@@ -15,7 +17,10 @@ import {
   CheckCircle2, 
   Loader2, 
   AlertCircle,
-  PackageCheck
+  PackageCheck,
+  Search,
+  Check,
+  Sparkles
 } from 'lucide-react';
 
 interface PosStockInProps {
@@ -42,6 +47,64 @@ export const PosStockIn: React.FC<PosStockInProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [completedReceipt, setCompletedReceipt] = useState<StockReceipt | null>(null);
+
+  // Inline Quick Product / Barcode Search
+  const [quickQuery, setQuickQuery] = useState('');
+  const [quickFeedback, setQuickFeedback] = useState<string | null>(null);
+  const quickInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter products for quick search
+  const searchResults = useMemo(() => {
+    const term = quickQuery.trim().toLowerCase();
+    if (!term) return [];
+    return products.filter((p) => {
+      const matchName = p.name?.toLowerCase().includes(term);
+      const matchBrand = p.brand?.toLowerCase().includes(term);
+      const matchBarcode = p.barcode?.toLowerCase().includes(term);
+      const matchId = p.id?.toLowerCase().includes(term);
+      return matchName || matchBrand || matchBarcode || matchId;
+    }).slice(0, 8);
+  }, [products, quickQuery]);
+
+  const handleAddProductToQueue = (product: Product, addQty: number = 1) => {
+    setQueue((prev) => {
+      const existing = prev.find((it) => it.product.id === product.id);
+      if (existing) {
+        return prev.map((it) =>
+          it.product.id === product.id ? { ...it, quantity: it.quantity + addQty } : it
+        );
+      }
+      return [{ product, quantity: addQty }, ...prev];
+    });
+    playSuccessBeep(0.2);
+    setQuickFeedback(`✓ Added "${product.name}"`);
+    setTimeout(() => setQuickFeedback(null), 3000);
+  };
+
+  const handleQuickSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = quickQuery.trim();
+    if (!code) return;
+
+    // Check barcode match first
+    const { product } = findProductByScannedCode(products, code);
+    if (product) {
+      handleAddProductToQueue(product, 1);
+      setQuickQuery('');
+      return;
+    }
+
+    // Check if first search result exists
+    if (searchResults.length > 0) {
+      handleAddProductToQueue(searchResults[0], 1);
+      setQuickQuery('');
+      return;
+    }
+
+    playErrorBeep();
+    setQuickFeedback(`Product or barcode "${code}" not found.`);
+    setTimeout(() => setQuickFeedback(null), 3500);
+  };
 
   // Quick quantity modifier
   const handleModifyQty = (productId: string, delta: number) => {
@@ -129,9 +192,9 @@ export const PosStockIn: React.FC<PosStockInProps> = ({
       } else {
         setErrorMessage(res.message || 'Failed to process stock intake.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Stock in submission error:', err);
-      setErrorMessage('Unexpected error during stock receiving.');
+      setErrorMessage(err?.message || 'Unexpected error during stock receiving.');
     } finally {
       setIsSubmitting(false);
     }
@@ -184,7 +247,7 @@ export const PosStockIn: React.FC<PosStockInProps> = ({
               className="flex-1 sm:flex-none bg-white/10 hover:bg-white/20 text-white px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Plus size={15} />
-              <span>Add From Catalog</span>
+              <span>Catalog Browser</span>
             </button>
           )}
         </div>
@@ -196,6 +259,97 @@ export const PosStockIn: React.FC<PosStockInProps> = ({
           <span>{errorMessage}</span>
         </div>
       )}
+
+      {/* Inline Quick Search & Barcode Intake Bar */}
+      <div className="bg-white p-4 sm:p-5 rounded-[28px] border border-gray-200 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
+            <Search size={15} className="text-emerald-600" />
+            <span>Fast Product Lookup / USB Barcode Scanner</span>
+          </label>
+          <span className="text-[11px] text-gray-500">Scan barcode or type name & press Enter</span>
+        </div>
+
+        <div className="relative">
+          <Barcode size={18} className="text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            ref={quickInputRef}
+            type="text"
+            value={quickQuery}
+            onChange={(e) => setQuickQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleQuickSubmit(e);
+              }
+            }}
+            placeholder="Scan barcode (e.g. 8809...) or type product name/brand..."
+            className="w-full bg-gray-50 text-gray-900 text-xs sm:text-sm pl-11 pr-24 py-3 rounded-2xl border border-gray-300 outline-none focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/10 transition font-medium"
+          />
+          <button
+            type="button"
+            onClick={handleQuickSubmit}
+            disabled={!quickQuery.trim()}
+            className="absolute right-2 top-1/2 -translate-y-1/2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer"
+          >
+            + Add Item
+          </button>
+        </div>
+
+        {quickFeedback && (
+          <div className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 animate-fadeIn">
+            {quickFeedback}
+          </div>
+        )}
+
+        {/* Live Search Suggestions Dropdown */}
+        {searchResults.length > 0 && quickQuery.trim() && (
+          <div className="border border-gray-200 rounded-2xl overflow-hidden divide-y divide-gray-100 shadow-sm max-h-56 overflow-y-auto">
+            {searchResults.map((p) => {
+              const inQueue = queue.find((it) => it.product.id === p.id);
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => {
+                    handleAddProductToQueue(p, 1);
+                    setQuickQuery('');
+                  }}
+                  className="p-2.5 hover:bg-emerald-50/50 cursor-pointer flex items-center justify-between gap-3 transition"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <img
+                      src={p.image}
+                      alt={p.name}
+                      className="w-9 h-9 object-cover rounded-lg border border-gray-200 shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0 text-xs">
+                      <span className="text-[10px] font-bold text-pink-600 block uppercase truncate">{p.brand}</span>
+                      <h5 className="font-bold text-gray-900 truncate">{p.name}</h5>
+                      <span className="text-[11px] text-gray-500 font-mono">Stock: {p.stock} {p.barcode ? `| #${p.barcode}` : ''}</span>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center gap-1.5">
+                    {inQueue && (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md font-mono">
+                        +{inQueue.quantity} in queue
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white p-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
+                      title="Add to intake queue"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Main Receiving Queue Card */}
       <div className="bg-white p-5 sm:p-6 rounded-[32px] border border-gray-200/80 shadow-xs space-y-5">

@@ -5,6 +5,7 @@ import { productService } from '../services/productService';
 import { addProductToSession, posService, isAllowedPosRole, detectDeviceType } from '../services/posService';
 import { Product, UserProfile, PosSession } from '../types';
 import { getRetailPrice } from '../utils/pricing';
+import { StockInQueueItem, ScannerContext } from './pos/types';
 import { 
   findProductByScannedCode, 
   scanBarcodeFromImageFile, 
@@ -19,27 +20,36 @@ import {
   Smartphone, 
   ShieldAlert, 
   CheckCircle, 
-  ArrowLeft,
-  X,
-  UserCheck,
-  Search,
-  Plus,
-  Minus,
-  Trash2,
-  AlertCircle,
-  RefreshCw,
-  ShoppingBag,
-  Volume2,
-  VolumeX,
-  Bug,
-  Loader2
+  ArrowLeft, 
+  UserCheck, 
+  Search, 
+  Plus, 
+  Minus, 
+  Trash2, 
+  AlertCircle, 
+  RefreshCw, 
+  ShoppingBag, 
+  Volume2, 
+  VolumeX, 
+  Bug, 
+  Loader2, 
+  PackagePlus, 
+  Package 
 } from 'lucide-react';
+
+export { type ScannerContext };
 
 interface PosScanProps {
   sessionId?: string;
   onBack: () => void;
   currentUser: UserProfile | null;
-  onLoginStaff: (email: string, role: any) => void;
+  onLoginStaff?: (email: string, role: any) => void;
+  context?: ScannerContext;
+  onAddToStockIn?: (product: Product) => void;
+  stockInQueue?: StockInQueueItem[];
+  onRemoveFromStockIn?: (productId: string) => void;
+  onUpdateStockInQty?: (productId: string, quantity: number) => void;
+  onAddToCart?: (product: Product) => void;
 }
 
 // Resilient Web Audio API synthesizer for retail barcode scanning chime
@@ -126,14 +136,25 @@ export function playErrorBeep(volume: number = 0.2) {
   } catch (e) {}
 }
 
-export default function PosScan({ sessionId: propSessionId, onBack, currentUser, onLoginStaff }: PosScanProps) {
+export default function PosScan({ 
+  sessionId: propSessionId, 
+  onBack, 
+  currentUser, 
+  onLoginStaff,
+  context = 'SALE',
+  onAddToStockIn,
+  stockInQueue = [],
+  onRemoveFromStockIn,
+  onUpdateStockInQty,
+  onAddToCart
+}: PosScanProps) {
   // Check if current user is authorized staff (Only admin, super_admin, inventory_manager)
   const isUserStaff = Boolean(currentUser && isAllowedPosRole(currentUser.role));
 
   // Active user-based session state
   const [activeSession, setActiveSession] = useState<PosSession | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string>(propSessionId || '');
-  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(true);
+  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(context === 'SALE');
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Scanner & Cart states
@@ -155,13 +176,38 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
   const [debugInfo, setDebugInfo] = useState<BarcodeDebugInfo | null>(null);
 
   // Camera & tab states
-  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
   const [isPhotoScanning, setIsPhotoScanning] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [useFrontCamera, setUseFrontCamera] = useState<boolean>(false);
   const [posCameraZoom, setPosCameraZoom] = useState<number>(1.5);
   const [manualCode, setManualCode] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'cart'>('camera');
+
+  // Hidden barcode input state & ref for physical USB/Bluetooth/keyboard-wedge barcode scanners (BARCODE + ENTER)
+  const [hiddenBarcode, setHiddenBarcode] = useState<string>('');
+  const hiddenBarcodeRef = useRef<HTMLInputElement>(null);
+
+  // Keep hidden input focused for physical barcode scanners
+  useEffect(() => {
+    const focusInterval = setInterval(() => {
+      if (hiddenBarcodeRef.current && document.activeElement !== hiddenBarcodeRef.current) {
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+          hiddenBarcodeRef.current.focus();
+        }
+      }
+    }, 400);
+    return () => clearInterval(focusInterval);
+  }, []);
+
+  const handleHiddenBarcodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = hiddenBarcode.trim();
+    if (!code) return;
+    setHiddenBarcode('');
+    await handleScanSuccess(code);
+  };
   
   // Live cart
   const [scansList, setScansList] = useState<any[]>([]);
@@ -211,6 +257,11 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
         return;
       }
 
+      if (context === 'STOCK_IN' && !propSessionId) {
+        setIsLoadingSession(false);
+        return;
+      }
+
       setIsLoadingSession(true);
       setSessionError(null);
 
@@ -227,15 +278,17 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
         if (isMounted) {
           setActiveSession(session);
           setActiveSessionId(session.id || session.sessionId || '');
+          setIsLoadingSession(false);
         }
       } catch (err: any) {
         console.error('[PosScan] Error starting/restoring user POS session:', err);
         if (isMounted) {
-          setSessionError(err?.message || 'Failed to initialize mobile POS session.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingSession(false);
+          if (context === 'STOCK_IN') {
+            setIsLoadingSession(false);
+          } else {
+            setSessionError(err?.message || 'Failed to initialize mobile POS session.');
+            setIsLoadingSession(false);
+          }
         }
       }
     };
@@ -245,7 +298,7 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.uid, currentUser?.role, currentUser?.name, currentUser?.email, isUserStaff, propSessionId]);
+  }, [currentUser?.uid, currentUser?.role, currentUser?.name, currentUser?.email, isUserStaff, propSessionId, context]);
 
   // ================= 2. ACTIVE SESSION HEARTBEAT & REAL-TIME SYNC =================
   useEffect(() => {
@@ -271,13 +324,17 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
     // Real-time listener on active session document
     const unsub = onSnapshot(sessionRef, (snap) => {
       if (!snap.exists()) {
-        setSessionError('POS session was closed or removed.');
+        if (context === 'SALE') {
+          setSessionError('POS session was closed or removed.');
+        }
         return;
       }
       const data = snap.data() as PosSession;
       if (data.status === 'completed' || data.status === 'closed') {
-        setActiveSession(null);
-        setSessionError('This POS session has been completed and closed.');
+        if (context === 'SALE') {
+          setActiveSession(null);
+          setSessionError('This POS session has been completed and closed.');
+        }
         return;
       }
 
@@ -295,11 +352,11 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
       clearInterval(heartbeatTimer);
       unsub();
     };
-  }, [activeSessionId]);
+  }, [activeSessionId, context]);
 
   // ================= 3. SCANS REAL-TIME LISTENER (CART ITEMS) =================
   useEffect(() => {
-    if (!activeSessionId) {
+    if (!activeSessionId || context === 'STOCK_IN') {
       setScansList([]);
       setScannedItemsCount(0);
       return;
@@ -316,11 +373,11 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
       console.warn('[PosScan] Error listening to scans:', err);
     });
     return () => unsubscribe();
-  }, [activeSessionId]);
+  }, [activeSessionId, context]);
 
   // ================= 4. CAMERA SCANNER ENGINE =================
   useEffect(() => {
-    if (!activeSessionId || !isCameraActive) {
+    if (!isCameraActive) {
       if (scannerControllerRef.current) {
         scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
@@ -337,8 +394,23 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
         scannerControllerRef.current = null;
       }
 
-      await new Promise(r => setTimeout(r, 60));
+      // Wait until #reader-container is mounted in the DOM
+      let attempts = 0;
+      while (active && !document.getElementById("reader-container") && attempts < 15) {
+        await new Promise(r => setTimeout(r, 50));
+        attempts++;
+      }
+
       if (!active) return;
+
+      const containerCheck = document.getElementById("reader-container");
+      if (!containerCheck) {
+        if (active) {
+          setCameraError("Camera view container not found.");
+          setIsCameraActive(false);
+        }
+        return;
+      }
 
       try {
         const controller = await startUnifiedCameraScanner({
@@ -379,7 +451,7 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
         scannerControllerRef.current = null;
       }
     };
-  }, [isCameraActive, activeSessionId, useFrontCamera]);
+  }, [isCameraActive, useFrontCamera]);
 
   const stopScanner = () => {
     if (scannerControllerRef.current) {
@@ -446,7 +518,7 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
 
   // ================= 5. BARCODE SUCCESS PROCESSING =================
   const handleScanSuccess = async (rawText: string) => {
-    if (!rawText || !activeSessionId) return;
+    if (!rawText) return;
 
     getAudioContext();
 
@@ -455,6 +527,7 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
     setDebugInfo(scanDebug);
 
     if (!product) {
+      // Unknown barcode: show error, keep scanner open, do NOT add product, do NOT play success sound
       if (soundEnabled) playErrorBeep();
       if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
       setScanStatusMsg({
@@ -466,7 +539,7 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
 
     const productId = product.id;
 
-    // Avoid double scans within 1.2 seconds
+    // Avoid double scans within 1.2 seconds / prevent duplicate Enter/rapid scan submissions
     const now = Date.now();
     if (lastScanRef.current && lastScanRef.current.productId === productId && (now - lastScanRef.current.time) < 1200) {
       return;
@@ -476,24 +549,31 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
     if (soundEnabled) playSuccessBeep();
     if (navigator.vibrate) navigator.vibrate(90);
 
-    const result = await addProductToSession(activeSessionId, productId);
-    if (result.success && result.product) {
-      setLastScannedProduct(result.product);
-      setScanStatusMsg({
-        type: 'success',
-        text: `✓ Added "${result.product.name}"`
-      });
+    if (context === 'STOCK_IN') {
+      // CONTEXT-AWARE: STOCK RECEIVING FLOW
+      if (onAddToStockIn) {
+        onAddToStockIn(product);
+      }
     } else {
-      if (soundEnabled) playErrorBeep();
-      setScanStatusMsg({
-        type: 'error',
-        text: result.message || `Failed to add product.`
-      });
+      // CONTEXT-AWARE: SALE REGISTER FLOW
+      if (activeSessionId) {
+        const result = await addProductToSession(activeSessionId, productId);
+        if (!result.success) {
+          if (soundEnabled) playErrorBeep();
+          setScanStatusMsg({
+            type: 'error',
+            text: result.message || `Failed to add product.`
+          });
+          return;
+        }
+      } else if (onAddToCart) {
+        onAddToCart(product);
+      }
     }
 
-    setTimeout(() => {
-      setScanStatusMsg(null);
-    }, 3500);
+    // Successful scan: stop camera/media tracks, close scanner, return to originating POS section/card
+    stopScanner();
+    onBack();
   };
 
   // Manual code submission
@@ -510,7 +590,9 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
       alert("Please enter work email.");
       return;
     }
-    onLoginStaff(emailInput.trim(), roleInput);
+    if (onLoginStaff) {
+      onLoginStaff(emailInput.trim(), roleInput);
+    }
   };
 
   // Grouped cart items
@@ -620,6 +702,13 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
       console.error('Error removing scans:', err);
     }
   };
+
+  // Effective count based on context
+  const totalStockInItemsCount = useMemo(() => {
+    return stockInQueue.reduce((acc, item) => acc + (item.quantity || 0), 0);
+  }, [stockInQueue]);
+
+  const effectiveItemCount = context === 'STOCK_IN' ? totalStockInItemsCount : scannedItemsCount;
 
   // ================= RENDER A: AUTHENTICATION / ACCESS RESTRICTION =================
   if (!isUserStaff) {
@@ -746,6 +835,19 @@ export default function PosScan({ sessionId: propSessionId, onBack, currentUser,
   // ================= RENDER D: AUTOMATIC LIVE MOBILE POS WORKSTATION =================
   return (
     <div className="max-w-md mx-auto bg-[#FFF5F8] min-h-screen flex flex-col justify-between pb-8">
+      {/* Hidden focusable input for USB/Bluetooth/keyboard-wedge physical barcode scanners */}
+      <form onSubmit={handleHiddenBarcodeSubmit} className="sr-only opacity-0 absolute w-0 h-0 overflow-hidden pointer-events-none">
+        <input
+          ref={hiddenBarcodeRef}
+          type="text"
+          value={hiddenBarcode}
+          onChange={(e) => setHiddenBarcode(e.target.value)}
+          placeholder="Hidden Barcode Scanner Input"
+          tabIndex={-1}
+          aria-label="Hidden Barcode Scanner Input"
+        />
+      </form>
+
       {/* 🟢 POS LIVE WORKSTATION HEADER */}
       <header className="bg-white px-4 py-3 border-b border-pink-100 shadow-xs sticky top-0 z-20 space-y-2">
         <div className="flex items-center justify-between">

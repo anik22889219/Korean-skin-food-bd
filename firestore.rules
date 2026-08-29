@@ -234,12 +234,52 @@ service cloud.firestore {
     // - admin & super_admin can monitor all active sessions and cart scans (read-only monitoring)
     // - operators (admin, super_admin, inventory_manager) create, maintain, and scan to their own session
     match /pos_sessions/{sessionId} {
-      allow read: if isStaff() || true;
-      allow write: if isStaff() || true;
+      // READ:
+      // - Admin & Super Admin can read all sessions (for Live POS monitoring & session history)
+      // - Other staff (e.g. inventory_manager) can only read their own session
+      allow read: if isAdminOrSuperAdmin() || (isStaff() && resource.data.userId == request.auth.uid);
 
+      // CREATE:
+      // - Staff only
+      // - Must set userId to their own auth.uid (prevents userId spoofing)
+      // - Non-admin staff cannot elevate userRole to admin/super_admin
+      allow create: if isStaff() &&
+        request.resource.data.userId == request.auth.uid &&
+        (isAdminOrSuperAdmin() || !('userRole' in request.resource.data) || request.resource.data.userRole == 'inventory_manager' || request.resource.data.userRole == 'staff');
+
+      // UPDATE:
+      // - Staff only
+      // - Cannot modify userId (immutable identity)
+      // - Non-admins cannot alter another user's session
+      // - Non-admins cannot escalate userRole to admin/super_admin
+      allow update: if isStaff() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId &&
+        (isAdminOrSuperAdmin() || !('userRole' in request.resource.data) || request.resource.data.userRole == resource.data.userRole || request.resource.data.userRole == 'inventory_manager' || request.resource.data.userRole == 'staff');
+
+      // DELETE:
+      // - Staff can only delete their own session (or admin if required)
+      allow delete: if isStaff() && (isAdminOrSuperAdmin() || resource.data.userId == request.auth.uid);
+
+      // Subcollection for scans (cart items)
       match /scans/{scanId} {
-        allow read: if isStaff() || true;
-        allow write: if isStaff() || true;
+        // READ:
+        // - Admin/Super Admin can read scans for live cart inspection
+        // - Operators can only read scans belonging to their own session
+        allow read: if isAdminOrSuperAdmin() || (
+          isStaff() && (
+            sessionId == 'pos_sess_' + request.auth.uid ||
+            get(/databases/$(database)/documents/pos_sessions/$(sessionId)).data.userId == request.auth.uid
+          )
+        );
+
+        // WRITE (create, update, delete):
+        // - Only the owner/operator of the session can add, modify, or delete scans
+        // - Monitoring admins CANNOT write to another user's cart
+        allow write: if isStaff() && (
+          sessionId == 'pos_sess_' + request.auth.uid ||
+          get(/databases/$(database)/documents/pos_sessions/$(sessionId)).data.userId == request.auth.uid
+        );
       }
     }
 
