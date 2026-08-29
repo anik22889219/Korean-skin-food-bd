@@ -10,10 +10,23 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
 import { AdminNotificationBell } from './AdminNotificationBell';
+import { posService } from '../services/posService';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
+  const isAdminOrSuperAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  
+  // Real-time active POS sessions count for sidebar badge
+  const [activePosCount, setActivePosCount] = useState<number>(0);
+
+  useEffect(() => {
+    if (!isAdminOrSuperAdmin) return;
+    const unsub = posService.subscribeActiveSessions((sessions) => {
+      setActivePosCount(sessions.length);
+    });
+    return () => unsub();
+  }, [isAdminOrSuperAdmin]);
   
   // Mobile drawer state
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -86,7 +99,13 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
     { to: '/admin/orders', label: 'Order Fulfillment', badge: 'Orders', icon: Package },
     { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
-    { to: '/admin/pos', label: 'POS Register', badge: 'Terminal', icon: CreditCard },
+    { 
+      to: '/admin/pos', 
+      label: 'POS Register', 
+      badge: isAdminOrSuperAdmin && activePosCount > 0 ? `${activePosCount} Live` : 'Terminal', 
+      icon: CreditCard,
+      highlight: isAdminOrSuperAdmin && activePosCount > 0
+    },
     { to: '/admin/products', label: 'Skincare Catalog', badge: 'Stock', icon: Boxes },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
@@ -234,7 +253,9 @@ export const AdminLayout: React.FC = () => {
                           ${isCollapsed ? 'lg:hidden' : ''}
                           ${isActive 
                             ? 'bg-white/25 text-white border border-white/30' 
-                            : 'bg-slate-800 text-pink-400/90 group-hover:bg-slate-700 group-hover:text-white'}
+                            : item.highlight
+                              ? 'bg-emerald-900/80 text-emerald-300 border border-emerald-500/40 animate-pulse'
+                              : 'bg-slate-800 text-pink-400/90 group-hover:bg-slate-700 group-hover:text-white'}
                         `}>
                           {item.badge}
                         </span>

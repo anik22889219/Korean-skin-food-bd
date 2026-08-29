@@ -11,6 +11,36 @@ export function isAllowedPosRole(role?: string | null): boolean {
   return (ALLOWED_POS_ROLES as readonly string[]).includes(role);
 }
 
+/**
+ * Check if a POS session is considered stale (e.g. heartbeat > 90 seconds)
+ */
+export function isSessionStale(lastSeenAt?: string, thresholdSeconds: number = 90): boolean {
+  if (!lastSeenAt) return true;
+  const lastTime = new Date(lastSeenAt).getTime();
+  if (isNaN(lastTime)) return true;
+  const diffSeconds = (Date.now() - lastTime) / 1000;
+  return diffSeconds > thresholdSeconds;
+}
+
+/**
+ * Format relative session activity time (e.g., "Just now", "20 seconds ago", "4 minutes ago")
+ */
+export function formatSessionActivityTime(timestamp?: string): string {
+  if (!timestamp) return 'No activity yet';
+  const time = new Date(timestamp).getTime();
+  if (isNaN(time)) return 'Recently';
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (diffSeconds < 10) return 'Just now';
+  if (diffSeconds < 60) return `${diffSeconds} seconds ago`;
+  const mins = Math.floor(diffSeconds / 60);
+  if (mins === 1) return '1 minute ago';
+  if (mins < 60) return `${mins} minutes ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours === 1) return '1 hour ago';
+  if (hours < 24) return `${hours} hours ago`;
+  return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export function detectDeviceType(): PosDeviceType {
   if (typeof window === 'undefined') return 'desktop';
   const ua = navigator.userAgent;
@@ -454,6 +484,120 @@ export const posService = {
       }, (err) => {
         if (onError) onError(err);
         else console.warn('[posService] Realtime admin notifications notice:', err);
+      });
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  },
+
+  /**
+   * Realtime subscription to all active/open POS sessions (For admin and super_admin monitoring)
+   */
+  subscribeActiveSessions(
+    callback: (sessions: PosSession[]) => void,
+    onError?: (err: any) => void
+  ): () => void {
+    try {
+      const q = query(
+        collection(db, 'pos_sessions'),
+        where('status', 'in', ['active', 'open'])
+      );
+      return onSnapshot(q, (snapshot) => {
+        const live: PosSession[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as PosSession;
+          if (data.status === 'active' || data.status === 'open') {
+            live.push({
+              ...data,
+              id: docSnap.id,
+              sessionId: data.sessionId || docSnap.id,
+              items: Array.isArray(data.items) ? data.items : []
+            });
+          }
+        });
+        // Sort descending: newest activity / lastSeenAt first
+        live.sort((a, b) => {
+          const timeA = new Date(a.lastSeenAt || a.updated_at || a.startedAt || 0).getTime();
+          const timeB = new Date(b.lastSeenAt || b.updated_at || b.startedAt || 0).getTime();
+          return timeB - timeA;
+        });
+        callback(live);
+      }, (err) => {
+        if (onError) onError(err);
+        else console.warn('[posService] Active sessions subscription note:', err);
+      });
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  },
+
+  /**
+   * Realtime subscription to a single POS session document by ID
+   */
+  subscribeSession(
+    sessionId: string,
+    callback: (session: PosSession | null) => void,
+    onError?: (err: any) => void
+  ): () => void {
+    if (!sessionId) {
+      callback(null);
+      return () => {};
+    }
+    try {
+      const sessionRef = doc(db, 'pos_sessions', sessionId);
+      return onSnapshot(sessionRef, (docSnap) => {
+        if (!docSnap.exists()) {
+          callback(null);
+          return;
+        }
+        const data = docSnap.data() as PosSession;
+        callback({
+          ...data,
+          id: docSnap.id,
+          sessionId: data.sessionId || docSnap.id,
+          items: Array.isArray(data.items) ? data.items : []
+        });
+      }, (err) => {
+        if (onError) onError(err);
+        else console.warn(`[posService] Session ${sessionId} subscription note:`, err);
+      });
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  },
+
+  /**
+   * Realtime subscription to the scans subcollection for a given session
+   */
+  subscribeSessionScans(
+    sessionId: string,
+    callback: (scans: any[]) => void,
+    onError?: (err: any) => void
+  ): () => void {
+    if (!sessionId) {
+      callback([]);
+      return () => {};
+    }
+    try {
+      const scansRef = collection(db, 'pos_sessions', sessionId, 'scans');
+      return onSnapshot(scansRef, (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach(docSnap => {
+          list.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        // Sort descending by scanned_at
+        list.sort((a, b) => {
+          const timeA = new Date(a.scanned_at || 0).getTime();
+          const timeB = new Date(b.scanned_at || 0).getTime();
+          return timeB - timeA;
+        });
+        callback(list);
+      }, (err) => {
+        if (onError) onError(err);
+        else console.warn(`[posService] Scans subscription note for session ${sessionId}:`, err);
       });
     } catch (err) {
       if (onError) onError(err);

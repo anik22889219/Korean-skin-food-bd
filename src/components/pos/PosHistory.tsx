@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Order, StockReceipt } from '../../types';
 import { productService } from '../../services/productService';
+import { posService } from '../../services/posService';
 import { InvoiceDocument } from '../InvoiceDocument';
 import { StockReceiptSlip } from './StockReceiptSlip';
+import { PosLiveRecords } from './PosLiveRecords';
+import { PosLiveDetail } from './PosLiveDetail';
 import { printInvoice, downloadInvoicePDF } from '../../utils/invoicePdf';
 import { 
   ShoppingBag, 
@@ -22,14 +25,44 @@ import {
 
 interface PosHistoryProps {
   orders: Order[];
+  userRole?: string;
+  initialSelectedLiveSessionId?: string | null;
+  onClearSelectedLiveSession?: () => void;
 }
 
-export const PosHistory: React.FC<PosHistoryProps> = ({ orders }) => {
-  const [historyTab, setHistoryTab] = useState<'sales' | 'stock_in'>('sales');
+export const PosHistory: React.FC<PosHistoryProps> = ({ 
+  orders,
+  userRole,
+  initialSelectedLiveSessionId = null,
+  onClearSelectedLiveSession
+}) => {
+  const isAdminOrSuperAdmin = userRole === 'admin' || userRole === 'super_admin';
+  const [historyTab, setHistoryTab] = useState<'live' | 'sales' | 'stock_in'>(
+    initialSelectedLiveSessionId && isAdminOrSuperAdmin ? 'live' : 'sales'
+  );
+  const [selectedLiveSessionId, setSelectedLiveSessionId] = useState<string | null>(initialSelectedLiveSessionId);
+  const [liveSessionsCount, setLiveSessionsCount] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [receipts, setReceipts] = useState<StockReceipt[]>(productService.getStockReceipts());
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<StockReceipt | null>(null);
+
+  // Synchronize when initialSelectedLiveSessionId changes from outside
+  useEffect(() => {
+    if (initialSelectedLiveSessionId && isAdminOrSuperAdmin) {
+      setSelectedLiveSessionId(initialSelectedLiveSessionId);
+      setHistoryTab('live');
+    }
+  }, [initialSelectedLiveSessionId, isAdminOrSuperAdmin]);
+
+  // Subscribe to live sessions count in real-time
+  useEffect(() => {
+    if (!isAdminOrSuperAdmin) return;
+    const unsub = posService.subscribeActiveSessions((sessions) => {
+      setLiveSessionsCount(sessions.length);
+    });
+    return () => unsub();
+  }, [isAdminOrSuperAdmin]);
 
   useEffect(() => {
     const unsub = productService.subscribeStockReceipts((newReceipts) => {
@@ -37,6 +70,17 @@ export const PosHistory: React.FC<PosHistoryProps> = ({ orders }) => {
     });
     return () => unsub();
   }, []);
+
+  const handleSelectLiveSession = (sId: string) => {
+    setSelectedLiveSessionId(sId);
+  };
+
+  const handleBackFromLiveDetail = () => {
+    setSelectedLiveSessionId(null);
+    if (onClearSelectedLiveSession) {
+      onClearSelectedLiveSession();
+    }
+  };
 
   // Filter POS sales only
   const posOrders = orders.filter((o) => o.order_source === 'POS' || o.sessionType === 'POS');
@@ -72,18 +116,45 @@ export const PosHistory: React.FC<PosHistoryProps> = ({ orders }) => {
           <div>
             <h3 className="text-sm sm:text-base font-extrabold text-gray-900 uppercase tracking-wider flex items-center gap-2">
               <Receipt size={18} className="text-[#E91E8C]" />
-              <span>POS Sales & Stock Intake Audit Records</span>
+              <span>POS Records, Live Monitoring & Invoices</span>
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Review past transactions, reprint cash invoices, and audit warehouse receiving receipts
+              {isAdminOrSuperAdmin
+                ? 'Monitor live staff registers, review sales records, reprint cash invoices, and audit intake vouchers'
+                : 'Review past transactions, reprint cash invoices, and audit warehouse receiving receipts'}
             </p>
           </div>
 
           {/* Tab Selector */}
-          <div className="flex items-center bg-gray-100 p-1 rounded-2xl border border-gray-200 text-xs font-bold w-full sm:w-auto">
+          <div className="flex items-center bg-gray-100 p-1 rounded-2xl border border-gray-200 text-xs font-bold w-full sm:w-auto flex-wrap gap-1">
+            {isAdminOrSuperAdmin && (
+              <button
+                type="button"
+                id="tab-history-live-pos"
+                onClick={() => {
+                  setHistoryTab('live');
+                }}
+                className={`flex-1 sm:flex-none px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  historyTab === 'live'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                </span>
+                <span>Live POS ({liveSessionsCount})</span>
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={() => setHistoryTab('sales')}
+              id="tab-history-sales"
+              onClick={() => {
+                setHistoryTab('sales');
+                setSelectedLiveSessionId(null);
+              }}
               className={`flex-1 sm:flex-none px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 historyTab === 'sales'
                   ? 'bg-[#E91E8C] text-white shadow-xs'
@@ -93,9 +164,14 @@ export const PosHistory: React.FC<PosHistoryProps> = ({ orders }) => {
               <ShoppingBag size={14} />
               <span>POS Sales ({posOrders.length})</span>
             </button>
+
             <button
               type="button"
-              onClick={() => setHistoryTab('stock_in')}
+              id="tab-history-stock-in"
+              onClick={() => {
+                setHistoryTab('stock_in');
+                setSelectedLiveSessionId(null);
+              }}
               className={`flex-1 sm:flex-none px-4 py-2 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 historyTab === 'stock_in'
                   ? 'bg-[#1E293B] text-white shadow-xs'
@@ -108,31 +184,50 @@ export const PosHistory: React.FC<PosHistoryProps> = ({ orders }) => {
           </div>
         </div>
 
-        {/* Search Bar */}
-        <div className="relative">
-          <Search size={16} className="text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={
-              historyTab === 'sales'
-                ? 'Search by Order ID (e.g. POS-123456), customer name, phone...'
-                : 'Search by Receipt # (e.g. SR-123456), supplier, receiver...'
-            }
-            className="w-full bg-gray-50/70 text-gray-800 text-xs pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-[#E91E8C] focus:bg-white transition"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-            >
-              <X size={14} />
-            </button>
+        {/* Search Bar (Only for sales and stock_in tabs) */}
+        {historyTab !== 'live' && (
+          <div className="relative">
+            <Search size={16} className="text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={
+                historyTab === 'sales'
+                  ? 'Search by Order ID (e.g. POS-123456), customer name, phone...'
+                  : 'Search by Receipt # (e.g. SR-123456), supplier, receiver...'
+              }
+              className="w-full bg-gray-50/70 text-gray-800 text-xs pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-[#E91E8C] focus:bg-white transition"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* LIVE POS MONITORING TAB */}
+      {historyTab === 'live' && isAdminOrSuperAdmin && (
+        <div>
+          {selectedLiveSessionId ? (
+            <PosLiveDetail
+              sessionId={selectedLiveSessionId}
+              onBack={handleBackFromLiveDetail}
+            />
+          ) : (
+            <PosLiveRecords
+              onSelectSession={handleSelectLiveSession}
+              currentUserRole={userRole}
+            />
           )}
         </div>
-      </div>
+      )}
 
       {/* SALES HISTORY TAB */}
       {historyTab === 'sales' && (

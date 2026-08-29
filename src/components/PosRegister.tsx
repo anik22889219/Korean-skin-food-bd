@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { collection, doc, setDoc, updateDoc, onSnapshot, query, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
@@ -87,6 +88,32 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
   // Navigation tabs: 'sale' | 'scan' | 'search' | 'stock_in' | 'history'
   const [activeTab, setActiveTab] = useState<PosTab>('sale');
+
+  // React Router search params & location for direct "View Live POS" deep-links
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const [targetLiveSessionId, setTargetLiveSessionId] = useState<string | null>(null);
+  const [liveSessionsCount, setLiveSessionsCount] = useState<number>(0);
+
+  const isAdminOrSuperAdmin = userRole === 'admin' || userRole === 'super_admin';
+
+  // Handle URL deep-link to view a specific live POS session (?session=XYZ or router state)
+  useEffect(() => {
+    const sessionParam = searchParams.get('session') || (location.state as any)?.targetSessionId;
+    if (sessionParam && isAdminOrSuperAdmin) {
+      setTargetLiveSessionId(sessionParam);
+      setActiveTab('history');
+    }
+  }, [searchParams, location.state, isAdminOrSuperAdmin]);
+
+  // Subscribe to real-time active sessions count for Admins
+  useEffect(() => {
+    if (!isAdminOrSuperAdmin) return;
+    const unsub = posService.subscribeActiveSessions((sessions) => {
+      setLiveSessionsCount(sessions.length);
+    });
+    return () => unsub();
+  }, [isAdminOrSuperAdmin]);
 
   // Pricing Mode: Retail vs Wholesale
   const [pricingMode, setPricingMode] = useState<PricingMode>('retail');
@@ -768,6 +795,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             </button>
             <button
               type="button"
+              id="btn-pos-tab-records"
               onClick={() => setActiveTab('history')}
               className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'history'
@@ -777,6 +805,12 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             >
               <History size={14} />
               <span>Records</span>
+              {isAdminOrSuperAdmin && liveSessionsCount > 0 && (
+                <span className="bg-emerald-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse"></span>
+                  <span>{liveSessionsCount} LIVE</span>
+                </span>
+              )}
             </button>
           </div>
 
@@ -1037,7 +1071,21 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
               />
             )}
 
-            {activeTab === 'history' && <PosHistory orders={orders} />}
+            {activeTab === 'history' && (
+              <PosHistory
+                orders={orders}
+                userRole={userRole}
+                initialSelectedLiveSessionId={targetLiveSessionId}
+                onClearSelectedLiveSession={() => {
+                  setTargetLiveSessionId(null);
+                  if (searchParams.has('session')) {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete('session');
+                    setSearchParams(next, { replace: true });
+                  }
+                }}
+              />
+            )}
           </div>
         </>
       )}
@@ -1048,6 +1096,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         onTabChange={setActiveTab}
         cartCount={totalCartCount}
         stockInCount={stockInQueue.length}
+        liveCount={isAdminOrSuperAdmin ? liveSessionsCount : 0}
       />
     </div>
   );

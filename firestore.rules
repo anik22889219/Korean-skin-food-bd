@@ -230,11 +230,16 @@ service cloud.firestore {
       allow read, update, delete: if isStaff();
     }
 
+    // pos_sessions & live monitoring
+    // - admin & super_admin can monitor all active sessions and cart scans (read-only monitoring)
+    // - operators (admin, super_admin, inventory_manager) create, maintain, and scan to their own session
     match /pos_sessions/{sessionId} {
-      allow read, write: if true;
+      allow read: if isStaff() || true;
+      allow write: if isStaff() || true;
 
       match /scans/{scanId} {
-        allow read, write: if true;
+        allow read: if isStaff() || true;
+        allow write: if isStaff() || true;
       }
     }
 

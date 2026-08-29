@@ -7,15 +7,17 @@ interface PosMobileNavProps {
   onTabChange: (tab: PosTab) => void;
   cartCount: number;
   stockInCount: number;
+  liveCount?: number;
 }
 
 export const PosMobileNav: React.FC<PosMobileNavProps> = ({
   activeTab,
   onTabChange,
   cartCount,
-  stockInCount
+  stockInCount,
+  liveCount = 0
 }) => {
-  const tabs: { id: PosTab; label: string; icon: React.ReactNode; badge?: number }[] = [
+  const tabs: { id: PosTab; label: string; icon: React.ReactNode; badge?: number; badgeColor?: string }[] = [
     {
       id: 'sale',
       label: 'Register',
@@ -40,8 +42,10 @@ export const PosMobileNav: React.FC<PosMobileNavProps> = ({
     },
     {
       id: 'history',
-      label: 'History',
-      icon: <History size={20} />
+      label: 'Records',
+      icon: <History size={20} />,
+      badge: liveCount > 0 ? liveCount : undefined,
+      badgeColor: 'bg-emerald-600'
     }
   ];
 
@@ -84,7 +88,7 @@ export const PosMobileNav: React.FC<PosMobileNavProps> = ({
               </div>
 
               {Boolean(tab.badge && tab.badge > 0) && (
-                <span className="absolute -top-1 -right-1.5 bg-[#E91E8C] text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white shadow-xs animate-scaleIn">
+                <span className={`absolute -top-1 -right-1.5 ${tab.badgeColor || 'bg-[#E91E8C]'} text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-white shadow-xs animate-scaleIn`}>
                   {tab.badge! > 99 ? '99+' : tab.badge}
                 </span>
               )}
