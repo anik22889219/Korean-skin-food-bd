@@ -5,7 +5,7 @@ import {
   BarChart3, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
-  PanelLeftClose, PanelLeftOpen
+  PanelLeftClose, PanelLeftOpen, FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -94,6 +94,7 @@ export const AdminLayout: React.FC = () => {
 
   const navItems = [
     { to: '/admin', label: 'Dashboard Overview', badge: 'Live', icon: BarChart3, end: true },
+    { to: '/admin/reports', label: 'All Reports & Analytics', badge: 'Reports', icon: FileText },
     { to: '/admin/creators', label: 'Creators Hub', badge: 'Hub', icon: Sparkles },
     { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
     { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },

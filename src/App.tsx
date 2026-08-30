@@ -22,6 +22,7 @@ import { AdminSlackSettings } from './components/AdminSlackSettings';
 import { AdminAIAgents } from './components/AdminAIAgents';
 import { UserManagement } from './components/UserManagement';
 import { AdminCreators } from './components/AdminCreators';
+import { AdminReportsPage } from './components/AdminReportsPage';
 import { CreatorRoute } from './components/CreatorRoute';
 import { CreatorLayout } from './components/CreatorLayout';
 import { CreatorDashboard } from './components/CreatorDashboard';
@@ -156,6 +157,7 @@ export default function App() {
             <Route element={<AdminRoute />}>
               <Route path="admin" element={<AdminLayout />}>
                 <Route index element={<AdminDashboardHome />} />
+                <Route path="reports" element={<AdminReportsPage />} />
                 <Route path="creators" element={<AdminCreators />} />
                 <Route path="users" element={<UserManagement />} />
                 <Route path="orders" element={<AdminOrders />} />

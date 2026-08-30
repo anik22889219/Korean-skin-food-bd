@@ -576,12 +576,94 @@ export default function PosScan({
     onBack();
   };
 
+  // Products list for manual search
+  const [productsList, setProductsList] = useState<Product[]>(() => productService.getProducts());
+  useEffect(() => {
+    return productService.subscribe((prods) => {
+      setProductsList(prods);
+    });
+  }, []);
+
+  const filteredManualProducts = useMemo(() => {
+    const q = manualCode.trim().toLowerCase();
+    if (!q) return [];
+    return productsList.filter(p => {
+      const nameMatch = p.name?.toLowerCase().includes(q);
+      const brandMatch = p.brand?.toLowerCase().includes(q);
+      const barcodeMatch = p.barcode?.toLowerCase().includes(q);
+      const idMatch = p.id?.toLowerCase().includes(q);
+      const catMatch = p.category?.toLowerCase().includes(q);
+      return nameMatch || brandMatch || barcodeMatch || idMatch || catMatch;
+    }).slice(0, 15);
+  }, [productsList, manualCode]);
+
+  const handleSelectManualProduct = async (product: Product) => {
+    if (!product) return;
+    getAudioContext();
+    const productId = product.id;
+
+    if (soundEnabled) playSuccessBeep();
+    if (navigator.vibrate) navigator.vibrate(90);
+
+    setLastScannedProduct(product);
+
+    if (context === 'STOCK_IN') {
+      if (onAddToStockIn) {
+        onAddToStockIn(product);
+      }
+    } else {
+      if (activeSessionId) {
+        const result = await addProductToSession(activeSessionId, productId);
+        if (!result.success) {
+          if (soundEnabled) playErrorBeep();
+          setScanStatusMsg({
+            type: 'error',
+            text: result.message || `Failed to add product.`
+          });
+          return;
+        }
+      } else if (onAddToCart) {
+        onAddToCart(product);
+      }
+    }
+
+    setScanStatusMsg({
+      type: 'success',
+      text: `Added "${product.name}" to cart!`
+    });
+
+    setManualCode('');
+    stopScanner();
+    onBack();
+  };
+
   // Manual code submission
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualCode.trim()) return;
-    await handleScanSuccess(manualCode.trim());
-    setManualCode('');
+    const q = manualCode.trim();
+    if (!q) return;
+
+    const { product } = findProductByScannedCode(productsList, q);
+    if (product) {
+      await handleSelectManualProduct(product);
+      return;
+    }
+
+    const matches = productsList.filter(p => 
+      p.name?.toLowerCase().includes(q.toLowerCase()) || 
+      p.brand?.toLowerCase().includes(q.toLowerCase())
+    );
+
+    if (matches.length === 1) {
+      await handleSelectManualProduct(matches[0]);
+    } else if (matches.length > 1) {
+      setScanStatusMsg({
+        type: 'error',
+        text: `Multiple products matched "${q}". Please select from the list below.`
+      });
+    } else {
+      await handleScanSuccess(q);
+    }
   };
 
   const handleStaffLoginSubmit = (e: React.FormEvent) => {
@@ -1184,23 +1266,54 @@ export default function PosScan({
           <div className="w-full max-w-sm bg-white p-5 rounded-3xl border border-pink-100 shadow-sm space-y-4 text-xs">
             <div className="space-y-1 text-center">
               <h4 className="font-extrabold text-gray-900 uppercase tracking-wider text-xs">
-                Manual Barcode / Product Entry
+                Search & Add Product By Name/Barcode
               </h4>
               <p className="text-[10px] text-gray-500">
-                Type product barcode (e.g., 8809598450123) or product ID directly.
+                Type product name, brand, barcode, or ID to add to cart instantly.
               </p>
             </div>
 
             <form onSubmit={handleManualSubmit} className="space-y-3">
               <div className="relative">
+                <Search size={15} className="text-pink-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
-                  placeholder="Enter barcode or ID..."
-                  className="w-full bg-pink-50/20 text-gray-800 text-xs px-4 py-3 rounded-2xl border border-pink-200 outline-none focus:border-[#E91E8C] focus:bg-white font-mono font-bold"
+                  placeholder="Type product name or barcode..."
+                  className="w-full bg-pink-50/20 text-gray-800 text-xs pl-10 pr-3 py-3 rounded-2xl border border-pink-200 outline-none focus:border-[#E91E8C] focus:bg-white font-medium"
+                  autoFocus
                 />
               </div>
+
+              {filteredManualProducts.length > 0 && (
+                <div className="bg-pink-50/50 border border-pink-100 rounded-2xl p-2 space-y-1.5 max-h-56 overflow-y-auto">
+                  <span className="text-[9px] font-bold text-gray-400 uppercase px-1">Matching Products ({filteredManualProducts.length}):</span>
+                  {filteredManualProducts.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleSelectManualProduct(p)}
+                      className="w-full bg-white hover:bg-pink-100/60 p-2 rounded-xl border border-pink-100 text-left flex items-center justify-between gap-2 transition cursor-pointer"
+                    >
+                      <img 
+                        src={p.image} 
+                        alt={p.name}
+                        className="w-8 h-8 object-cover rounded-lg border border-pink-100 flex-shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[8px] font-bold text-[#E91E8C] uppercase block truncate">{p.brand}</span>
+                        <h5 className="font-bold text-gray-900 text-[11px] truncate">{p.name}</h5>
+                        <span className="font-mono text-[9px] text-gray-400">৳{getRetailPrice(p)} &bull; Stock: {p.stock}</span>
+                      </div>
+                      <span className="bg-[#E91E8C] text-white text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 flex items-center gap-0.5">
+                        <Plus size={10} /> Add
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -1208,26 +1321,22 @@ export default function PosScan({
                 className="w-full bg-[#E91E8C] hover:bg-[#FF4B91] disabled:opacity-50 text-white py-3 rounded-2xl font-bold transition cursor-pointer shadow-md shadow-pink-100 flex items-center justify-center gap-1.5"
               >
                 <Plus size={15} />
-                <span>Add Product To Cart</span>
+                <span>Add Product By Code/Name</span>
               </button>
             </form>
 
             <div className="pt-3 border-t border-pink-50 space-y-2">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Quick Sample Barcodes:</span>
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Quick Popular Products:</span>
               <div className="flex flex-wrap gap-1.5">
-                {[
-                  { label: 'Cosrx Essence', code: '8809598450123' },
-                  { label: 'Felicia Foam', code: '880980010101' },
-                  { label: 'SKIN1004 Ampoule', code: '8809530040101' },
-                  { label: 'Lebelage Suncream', code: '880940040101' }
-                ].map((sample) => (
+                {productsList.slice(0, 6).map((prod) => (
                   <button
-                    key={sample.code}
+                    key={prod.id}
                     type="button"
-                    onClick={() => setManualCode(sample.code)}
-                    className="bg-pink-50 hover:bg-pink-100 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1 rounded-xl cursor-pointer transition"
+                    onClick={() => handleSelectManualProduct(prod)}
+                    className="bg-pink-50 hover:bg-pink-100 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1 rounded-xl cursor-pointer transition truncate max-w-[150px]"
+                    title={prod.name}
                   >
-                    {sample.label}
+                    {prod.name}
                   </button>
                 ))}
               </div>

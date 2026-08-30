@@ -1,12 +1,13 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store } from 'lucide-react';
+import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store, FileText } from 'lucide-react';
 
 interface AdminNavCard { title: string; description: string; to: string; icon: React.ElementType; tone: string; iconTone: string; badge?: string; }
 
 const navCards: AdminNavCard[] = [
   { title: 'Command Overview', description: 'Sales, inventory, AI and operations at a glance.', to: '/admin', icon: BarChart3, tone: 'from-violet-50 to-indigo-50 border-violet-100', iconTone: 'bg-violet-100 text-violet-600', badge: 'LIVE' },
+  { title: 'All Reports & Analytics', description: 'Consolidated financial reports, inventory valuation and channel stats.', to: '/admin/reports', icon: FileText, tone: 'from-rose-50 to-pink-50 border-rose-100', iconTone: 'bg-rose-100 text-rose-600', badge: 'REPORTS' },
   { title: 'Creator Hub', description: 'Approve creators, moderate reels, manage points, tiers & leaderboard.', to: '/admin/creators', icon: Sparkles, tone: 'from-pink-50 to-rose-50 border-pink-100', iconTone: 'bg-pink-100 text-pink-600', badge: 'CREATORS' },
   { title: 'User Management', description: 'Super Admin & HR user accounts and access control.', to: '/admin/users', icon: Users, tone: 'from-indigo-50 to-purple-50 border-indigo-100', iconTone: 'bg-indigo-100 text-indigo-600', badge: 'HR' },
   { title: 'AI Agent Manager', description: 'Manage AI agents, permissions, quotas and activity.', to: '/admin/ai-agents', icon: Bot, tone: 'from-purple-50 to-indigo-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'AI' },
