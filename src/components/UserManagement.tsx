@@ -36,8 +36,8 @@ export const UserManagement: React.FC = () => {
   const [selectedWholesaleFilter, setSelectedWholesaleFilter] = useState<'all' | 'wholesale' | 'retail'>('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Strictly check if current user is Super Admin or HR
-  const isAuthorized = profile?.role === 'super_admin' || profile?.role === 'hr';
+  // Strictly check if current user is Super Admin
+  const isAuthorized = profile?.role === 'super_admin';
 
   // Show auto-clearing toast
   const showToast = (type: 'success' | 'error', message: string) => {

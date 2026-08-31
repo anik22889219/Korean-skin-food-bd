@@ -1,60 +1,253 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper to check if user has a staff role
-    function isStaff() {
+
+    // Global helper: Check if user is Super Admin
+    function isSuperAdmin() {
       return request.auth != null && (
-        (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email in ['koreanskinfood.bd@gmail.com', 'admin@koreanskinfood.bd', 'inventory@koreanskinfood.bd']) ||
+        (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email == 'koreanskinfood.bd@gmail.com') ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'inventory_manager', 'customer_support', 'super_admin', 'hr'])
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')
       );
     }
 
-    // Helper to check if user is admin or super_admin (excluding inventory_manager and other staff)
-    function isAdminOrSuperAdmin() {
+    // Global helper: Check if user is Business Admin or Super Admin
+    function isAdmin() {
       return request.auth != null && (
-        (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email in ['koreanskinfood.bd@gmail.com', 'admin@koreanskinfood.bd']) ||
+        isSuperAdmin() ||
+        (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email in ['admin@koreanskinfood.bd', 'koreanskinfood.bd@gmail.com']) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'])
       );
     }
 
-    // users
+    // Global helper: Check if user is Inventory Manager
+    function isInventoryManager() {
+      return request.auth != null && (
+        (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email == 'inventory@koreanskinfood.bd') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'inventory_manager')
+      );
+    }
+
+    // Global helper: Check if user is Customer Support
+    function isCustomerSupport() {
+      return request.auth != null && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'customer_support'
+      );
+    }
+
+    // Global helper: Check if user is HR
+    function isHR() {
+      return request.auth != null && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'hr'
+      );
+    }
+
+    // Global helper: Staff handling products and inventory
+    function isInventoryStaff() {
+      return isAdmin() || isInventoryManager();
+    }
+
+    // Global helper: Any verified staff member with operational access
+    function isStaff() {
+      return isAdmin() || isInventoryManager() || isCustomerSupport();
+    }
+
+    // ====================================================
+    // USER PROFILES & ACCESS
+    // ====================================================
     match /users/{userId} {
-      allow read: if isStaff() || (request.auth != null && request.auth.uid == userId);
-      allow create: if isStaff() || (
+      // Super admins can view all accounts; users can view their own profile
+      allow read: if isSuperAdmin() || (request.auth != null && request.auth.uid == userId);
+      
+      // Users can register themselves as customer or creator (never admin/staff)
+      allow create: if isSuperAdmin() || (
         request.auth != null && 
         request.auth.uid == userId && 
         (!('role' in request.resource.data) || request.resource.data.role in ['customer', 'creator']) &&
         (!('wholesaleAccess' in request.resource.data) || request.resource.data.wholesaleAccess == false)
       );
-      allow update: if isStaff() || (
+      
+      // Super admin can edit any user profile; regular user can edit profile info, but CANNOT elevate role, wholesaleAccess, or status
+      allow update: if isSuperAdmin() || (
         request.auth != null && 
         request.auth.uid == userId && 
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'wholesaleAccess'])
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'wholesaleAccess', 'status'])
       );
-      allow delete: if isStaff() || (request.auth != null && request.auth.uid == userId);
+      
+      // Only super admins can permanently delete user records
+      allow delete: if isSuperAdmin();
     }
 
-    // public_creators (Public read-safe collection for leaderboard, containing NO private personal info)
-    match /public_creators/{creatorId} {
+    // ====================================================
+    // FINANCIAL LEDGER & BUSINESS BANKING (ADMIN ONLY)
+    // ====================================================
+    match /financial_transactions/{txId} {
+      allow read: if isAdmin();
+      allow create: if isSuperAdmin() || (
+        isAdmin() && 
+        !(request.resource.data.category in ['OWNER_EQUITY', 'CAPITAL_IN', 'WITHDRAWAL', 'CAPITAL_OUT'])
+      );
+      allow update: if false; // Immutable financial ledger
+      allow delete: if isSuperAdmin(); // Highly restricted
+    }
+
+    match /finance_wallets/{walletId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /finance_ledger/{ledgerId} {
+      allow read, create: if isAdmin();
+      allow update: if false; // Immutable ledger
+      allow delete: if isSuperAdmin();
+    }
+
+    match /business_expenses/{expenseId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /capital_transactions/{capId} {
+      allow read, create, update, delete: if isSuperAdmin();
+    }
+
+    match /payment_transactions/{txId} {
+      // Payment transactions readable by admins and customers for their own orders
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          resource.data.customer_uid == request.auth.uid ||
+          resource.data.customerEmail == request.auth.token.email
+        )
+      );
+      allow create: if isInventoryStaff() || request.auth != null || true; // Website checkout or POS cashier
+      allow update: if false; // Immutable payment history
+      allow delete: if false; // Immutable payment history
+    }
+
+    match /payment_idempotency/{keyId} {
+      allow read, write: if isStaff() || true;
+    }
+
+    match /customer_dues/{dueId} {
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          resource.data.customerId == request.auth.uid ||
+          resource.data.customer_uid == request.auth.uid ||
+          resource.data.customerEmail == request.auth.token.email
+        )
+      );
+      allow write: if isAdmin();
+    }
+
+    match /wholesale_customers/{customerId} {
+      allow read: if isAdmin() || (
+        request.auth != null && (
+          request.auth.uid == customerId ||
+          (resource != null && resource.data.email == request.auth.token.email)
+        )
+      );
+      allow write: if isAdmin();
+    }
+
+    match /inventory_cost_layers/{layerId} {
+      allow read, write: if isInventoryStaff();
+    }
+
+    // ====================================================
+    // PRODUCTS, INVENTORY & CATALOG
+    // ====================================================
+    match /products/{productId} {
+      allow read: if true; // Public catalog
+      allow write: if isInventoryStaff();
+    }
+
+    match /stock_movements/{movementId} {
+      allow read, write: if isInventoryStaff();
+    }
+
+    match /stock_receipts/{receiptId} {
+      allow read, write: if isInventoryStaff();
+    }
+
+    match /inventory_logs/{logId} {
+      allow read, write: if isInventoryStaff();
+    }
+
+    match /product_imports/{importId} {
+      allow create: if isInventoryStaff();
+      allow read, update, delete: if isInventoryStaff();
+    }
+
+    match /cloudinary_images/{imageId} {
       allow read: if true;
-      allow write: if isStaff() || (
+      allow write: if isInventoryStaff();
+    }
+
+    // ====================================================
+    // ORDERS & FULFILLMENT
+    // ====================================================
+    match /orders/{orderId} {
+      allow create: if true; // Customer online checkout, POS checkout
+      allow read: if isStaff() || (
+        request.auth != null && (
+          resource.data.customer_uid == request.auth.uid ||
+          (resource.data.customerEmail != null && resource.data.customerEmail == request.auth.token.email)
+        )
+      );
+      allow update: if isStaff() || (
+        request.auth != null && 
+        resource.data.customer_uid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cancelReason', 'status']) &&
+        request.resource.data.status == 'cancelled' &&
+        resource.data.status == 'pending'
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /draft_orders/{draftId} {
+      allow read, write: if isStaff();
+    }
+
+    // ====================================================
+    // POS SESSIONS & REAL-TIME CART SCANNING
+    // ====================================================
+    match /pos_sessions/{sessionId} {
+      allow read, write: if isInventoryStaff();
+
+      match /scans/{scanId} {
+        allow read, write: if true; // Mobile scanner camera sync
+      }
+    }
+
+    match /admin_notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if isInventoryStaff();
+      allow update, delete: if isAdmin();
+    }
+
+    // ====================================================
+    // CREATOR PROGRAM & REELS
+    // ====================================================
+    match /public_creators/{creatorId} {
+      allow read: if true; // Public leaderboard
+      allow write: if isAdmin() || (
         request.auth != null && (request.auth.uid == creatorId || request.auth.uid == request.resource.data.creatorId)
       );
     }
 
-    // creators (Private Creator Profile - only visible to staff or the creator themselves)
     match /creators/{creatorId} {
-      allow read: if isStaff() || (
+      allow read: if isAdmin() || (
         request.auth != null && (
           request.auth.uid == creatorId ||
           (resource != null && resource.data.userId == request.auth.uid)
         )
       );
 
-      allow create: if isStaff() || (
+      allow create: if isAdmin() || (
         request.auth != null &&
         request.resource.data.userId == request.auth.uid &&
         request.resource.data.status == 'pending' &&
@@ -68,9 +261,7 @@ service cloud.firestore {
         request.resource.data.levelProgress == 0
       );
 
-      // Creator can only update non-sensitive personal fields.
-      // Modifying points, views, likes, comments, level, levelProgress, status, or role is strictly forbidden for creators.
-      allow update: if isStaff() || (
+      allow update: if isAdmin() || (
         request.auth != null &&
         resource.data.userId == request.auth.uid &&
         resource.data.status != 'suspended' &&
@@ -89,18 +280,16 @@ service cloud.firestore {
         ])
       );
 
-      allow delete: if isStaff();
+      allow delete: if isAdmin();
     }
 
-    // creator_reels
     match /creator_reels/{creatorReelId} {
-      allow read: if isStaff() || (
-        // Public can read approved/published reels, creators can read their own submissions
+      allow read: if isAdmin() || (
         resource.data.status in ['approved', 'published'] ||
         (request.auth != null && (resource.data.creatorUserId == request.auth.uid || resource.data.creatorId == request.auth.uid))
       );
 
-      allow create: if isStaff() || (
+      allow create: if isAdmin() || (
         request.auth != null &&
         request.resource.data.creatorUserId == request.auth.uid &&
         request.resource.data.status == 'pending' &&
@@ -111,8 +300,7 @@ service cloud.firestore {
         get(/databases/$(database)/documents/creators/$(request.auth.uid)).data.status == 'approved'
       );
 
-      // Creator cannot approve themselves or alter performance metrics/points
-      allow update: if isStaff() || (
+      allow update: if isAdmin() || (
         request.auth != null &&
         resource.data.creatorUserId == request.auth.uid &&
         get(/databases/$(database)/documents/creators/$(request.auth.uid)).data.status == 'approved' &&
@@ -124,97 +312,23 @@ service cloud.firestore {
         ])
       );
 
-      allow delete: if isStaff() || (
+      allow delete: if isAdmin() || (
         request.auth != null &&
         resource.data.creatorUserId == request.auth.uid &&
         resource.data.status in ['pending', 'rejected']
       );
     }
 
-    // products
-    match /products/{productId} {
-      allow read, write: if true;
+    match /reel_metric_audits/{auditId} {
+      allow read, write: if isAdmin();
     }
 
-    // orders
-    match /orders/{orderId} {
-      allow read, create, update: if true;
-      allow delete: if isStaff();
-    }
-
-    // product_reviews
-    match /product_reviews/{reviewId} {
-      allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if isStaff();
-    }
-
-    // chat_leads
+    // ====================================================
+    // CRM, SUPPORT & REVIEWS
+    // ====================================================
     match /chat_leads/{leadId} {
       allow create: if true;
-      allow read, update, delete: if isStaff();
-    }
-
-    // Staff-only collections
-    match /inventory_logs/{logId} {
-      allow read, write: if true;
-    }
-
-    match /ad_performance/{perfId} {
-      allow read, write: if isStaff();
-    }
-
-    match /agent_runs/{runId} {
-      allow read, write: if isStaff();
-    }
-
-    match /ai_agent_runs/{runId} {
-      allow read, write: if isStaff();
-    }
-
-    match /site_settings/{settingId} {
-      allow read: if true;
-      allow write: if isStaff();
-    }
-
-    match /settings/{settingId} {
-      allow read: if true;
-      allow write: if isStaff();
-    }
-
-    match /reel_metric_audits/{auditId} {
-      allow read, write: if isStaff();
-    }
-
-    match /draft_orders/{draftId} {
-      allow read, write: if isStaff();
-    }
-
-    match /cloudinary_images/{imageId} {
-      allow read, write: if isStaff();
-    }
-
-    match /stock_movements/{movementId} {
-      allow read, write: if true;
-    }
-
-    match /stock_receipts/{receiptId} {
-      allow read, write: if true;
-    }
-
-    match /slack_users/{slackUserId} {
-      allow read: if true;
-      allow write: if isStaff();
-    }
-
-    match /product_imports/{importId} {
-      allow create: if true;
-      allow read, update, delete: if isStaff();
-    }
-
-    match /audit_logs/{logId} {
-      allow create: if true;
-      allow read, update, delete: if isStaff();
+      allow read, update, delete: if isAdmin() || isCustomerSupport();
     }
 
     match /support_tickets/{ticketId} {
@@ -223,54 +337,49 @@ service cloud.firestore {
       allow update, delete: if isStaff();
     }
 
+    match /product_reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // ====================================================
+    // MARKETING, AI & SYSTEM SETTINGS
+    // ====================================================
+    match /ad_performance/{perfId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /agent_runs/{runId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /ai_agent_runs/{runId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /site_settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /slack_users/{slackUserId} {
+      allow read, write: if isSuperAdmin();
+    }
+
     match /slack_error_logs/{logId} {
       allow create: if true;
-      allow read, update, delete: if isStaff();
+      allow read, update, delete: if isAdmin();
     }
 
-    // pos_sessions & live monitoring
-    // - admin & super_admin can monitor all active sessions and cart scans (read-only monitoring)
-    // - operators (admin, super_admin, inventory_manager) create, maintain, and scan to their own session
-    match /pos_sessions/{sessionId} {
-      allow read, write: if true;
-
-      // Subcollection for scans (cart items)
-      match /scans/{scanId} {
-        allow read, write: if true;
-      }
-    }
-
-    // admin_notifications (Only admin and super_admin can read, staff can create on new session start)
-    match /admin_notifications/{notificationId} {
-      allow read, write: if true;
-    }
-
-    // payment_idempotency (Stores idempotency tokens for financial and due collection operations)
-    match /payment_idempotency/{keyId} {
-      allow read, write: if true;
-    }
-
-    // payment_transactions (Ledger of all payment transactions - immutable history, no deletion)
-    match /payment_transactions/{txId} {
-      allow read, create: if true;
-      allow update: if isStaff();
-      allow delete: if false; // Never delete historical payment records
-    }
-
-    // financial_transactions (Ledger of business cashflow, money in/out, expenses)
-    match /financial_transactions/{txId} {
-      allow read, create: if true;
-      allow update, delete: if isStaff();
-    }
-
-    // inventory_cost_layers (COGS cost layer batches)
-    match /inventory_cost_layers/{layerId} {
-      allow read, write: if true;
-    }
-
-    // wholesale_customers (Wholesale customer profiles and credit limits)
-    match /wholesale_customers/{customerId} {
-      allow read, write: if true;
+    match /audit_logs/{logId} {
+      allow create: if isStaff() || true;
+      allow read, update, delete: if isAdmin();
     }
   }
 }

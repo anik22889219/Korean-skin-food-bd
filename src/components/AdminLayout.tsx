@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
 import { AdminNotificationBell } from './AdminNotificationBell';
 import { posService } from '../services/posService';
+import { canAccessAdminRoute } from '../utils/permissions';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
@@ -116,6 +117,8 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
   ];
 
+  const visibleNavItems = navItems.filter(item => canAccessAdminRoute(profile?.role, item.to));
+
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -212,12 +215,12 @@ export const AdminLayout: React.FC = () => {
               Navigation
             </span>
             <span className="text-[9px] font-bold text-slate-600">
-              {navItems.length} modules
+              {visibleNavItems.length} modules
             </span>
           </div>
 
           <nav className="space-y-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               return (
                 <div key={item.to} className="relative group">

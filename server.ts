@@ -166,7 +166,7 @@ app.get("/api/slack/status", (req, res) => {
   });
 });
 
-app.get("/api/slack/users", async (req, res) => {
+app.get("/api/slack/users", verifySuperAdminAuth, async (req, res) => {
   try {
     const users = await slackService.getAllSlackUsers();
     res.json({ success: true, count: users.length, users });
@@ -175,7 +175,7 @@ app.get("/api/slack/users", async (req, res) => {
   }
 });
 
-app.post("/api/slack/link-user", async (req, res) => {
+app.post("/api/slack/link-user", verifySuperAdminAuth, async (req, res) => {
   const { slackUserId, firestoreUserId, email, role, permissions, name, slackUsername } = req.body;
 
   if (!slackUserId || !email || !role) {
@@ -206,7 +206,7 @@ app.post("/api/slack/link-user", async (req, res) => {
   }
 });
 
-app.post("/api/slack/unlink-user", async (req, res) => {
+app.post("/api/slack/unlink-user", verifySuperAdminAuth, async (req, res) => {
   const { slackUserId } = req.body;
   if (!slackUserId) {
     return res.status(400).json({ success: false, error: "slackUserId is required" });
@@ -996,8 +996,70 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     const userDocRef = doc(db, "users", verifiedUser.uid);
     const userSnap = await getDoc(userDocRef);
 
-    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'customer_support', 'hr'];
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
+    const adminRoles = ['admin', 'super_admin'];
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
+
+    if (isSuperAdminEmail || (userRole && adminRoles.includes(userRole))) {
+      (req as any).user = {
+        uid: verifiedUser.uid,
+        email: verifiedUser.email,
+        role: userRole || 'super_admin'
+      };
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: "Access Denied. Insufficient permissions. Verified administrator account required."
+    });
+  } catch (err: any) {
+    console.error("Error verifying admin role in Firestore:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error verifying authorization credentials."
+    });
+  }
+}
+
+async function verifyStaffAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Missing Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Empty Bearer token."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase ID token."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      error: "Database not initialized on server."
+    });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'customer_support'];
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
     const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
 
     if (isSuperAdminEmail || (userRole && staffRoles.includes(userRole))) {
@@ -1011,16 +1073,300 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
 
     return res.status(403).json({
       success: false,
-      error: "Access Denied. Insufficient permissions. Verified staff or admin account required."
+      error: "Access Denied. Insufficient permissions. Verified staff account required."
     });
   } catch (err: any) {
-    console.error("Error verifying admin role in Firestore:", err);
+    console.error("Error verifying staff role:", err);
     return res.status(500).json({
       success: false,
       error: "Internal server error verifying authorization credentials."
     });
   }
 }
+
+async function verifyInventoryAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Missing Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Empty Bearer token."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase ID token."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      error: "Database not initialized on server."
+    });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const inventoryRoles = ['admin', 'super_admin', 'inventory_manager'];
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
+
+    if (isSuperAdminEmail || (userRole && inventoryRoles.includes(userRole))) {
+      (req as any).user = {
+        uid: verifiedUser.uid,
+        email: verifiedUser.email,
+        role: userRole || 'super_admin'
+      };
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: "Access Denied. Insufficient permissions. Inventory management privileges required."
+    });
+  } catch (err: any) {
+    console.error("Error verifying inventory role:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error verifying authorization credentials."
+    });
+  }
+}
+
+async function verifySuperAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Missing Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Empty Bearer token."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase ID token."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      error: "Database not initialized on server."
+    });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
+
+    if (isSuperAdminEmail || userRole === 'super_admin') {
+      (req as any).user = {
+        uid: verifiedUser.uid,
+        email: verifiedUser.email,
+        role: 'super_admin'
+      };
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: "Access Denied. Super Administrator privileges required."
+    });
+  } catch (err: any) {
+    console.error("Error verifying super_admin role:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error verifying authorization credentials."
+    });
+  }
+}
+
+// ================= SERVER-SIDE ROUTE AUTHORIZATION VERIFICATION =================
+app.post("/api/auth/verify-route", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      authorized: false,
+      error: "Authentication required. Missing Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      authorized: false,
+      error: "Authentication required. Empty Bearer token."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      authorized: false,
+      error: "Invalid or expired Firebase ID token."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      authorized: false,
+      error: "Database not initialized on server."
+    });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
+    const userRole = userSnap.exists() ? (userSnap.data()?.role || 'customer') : (isSuperAdminEmail ? 'super_admin' : 'customer');
+    const effectiveRole = isSuperAdminEmail ? 'super_admin' : userRole;
+
+    const { pathname, requiredPermission } = req.body || {};
+
+    // Check staff status
+    const isStaff = ['super_admin', 'admin', 'inventory_manager', 'customer_support'].includes(effectiveRole);
+    if (!isStaff) {
+      return res.status(403).json({
+        success: true,
+        authorized: false,
+        role: effectiveRole,
+        error: "Access Denied: User role is not authorized for administrative operations.",
+        redirectUrl: "/"
+      });
+    }
+
+    // Role permissions mapping
+    const serverRolePermissions: Record<string, string[]> = {
+      super_admin: [
+        'VIEW_ADMIN_DASHBOARD', 'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES',
+        'VIEW_REPORTS', 'MANAGE_CREATORS', 'MANAGE_USERS', 'MANAGE_ORDERS', 'USE_POS',
+        'VIEW_POS_MONITOR', 'MANAGE_PRODUCTS', 'MANAGE_INVENTORY', 'MANAGE_SEO',
+        'MANAGE_MARKETING', 'VIEW_LEADS', 'MANAGE_SETTINGS', 'MANAGE_AI_AGENTS', 'MANAGE_SLACK'
+      ],
+      admin: [
+        'VIEW_ADMIN_DASHBOARD', 'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES',
+        'VIEW_REPORTS', 'MANAGE_CREATORS', 'MANAGE_ORDERS', 'USE_POS',
+        'VIEW_POS_MONITOR', 'MANAGE_PRODUCTS', 'MANAGE_INVENTORY', 'MANAGE_SEO',
+        'MANAGE_MARKETING', 'VIEW_LEADS', 'MANAGE_SETTINGS', 'MANAGE_AI_AGENTS'
+      ],
+      inventory_manager: [
+        'VIEW_ADMIN_DASHBOARD', 'MANAGE_ORDERS', 'MANAGE_PRODUCTS', 'MANAGE_INVENTORY',
+        'USE_POS', 'VIEW_POS_MONITOR', 'VIEW_REPORTS'
+      ],
+      customer_support: [
+        'VIEW_LEADS', 'MANAGE_ORDERS'
+      ],
+      hr: [],
+      creator: [],
+      wholesale_customer: [],
+      customer: []
+    };
+
+    const serverRoutePermissionMap: Record<string, string> = {
+      '/admin': 'VIEW_ADMIN_DASHBOARD',
+      '/admin/business-finance': 'VIEW_FINANCE',
+      '/admin/finance': 'VIEW_FINANCE',
+      '/admin/payments-due': 'VIEW_DUES',
+      '/admin/dues': 'VIEW_DUES',
+      '/admin/reports': 'VIEW_REPORTS',
+      '/admin/creators': 'MANAGE_CREATORS',
+      '/admin/users': 'MANAGE_USERS',
+      '/admin/orders': 'MANAGE_ORDERS',
+      '/admin/theme-editor': 'MANAGE_SETTINGS',
+      '/admin/pos': 'USE_POS',
+      '/admin/products': 'MANAGE_PRODUCTS',
+      '/admin/seo': 'MANAGE_SEO',
+      '/admin/social': 'MANAGE_MARKETING',
+      '/admin/chat-leads': 'VIEW_LEADS',
+      '/admin/slack': 'MANAGE_SLACK',
+      '/admin/ai-agents': 'MANAGE_AI_AGENTS'
+    };
+
+    const userPermissions = serverRolePermissions[effectiveRole] || [];
+
+    // Check specific required permission if requested
+    if (requiredPermission && !userPermissions.includes(requiredPermission)) {
+      let fallback = "/";
+      if (userPermissions.includes('VIEW_ADMIN_DASHBOARD')) fallback = "/admin";
+      else if (userPermissions.includes('USE_POS')) fallback = "/admin/pos";
+      return res.status(403).json({
+        success: true,
+        authorized: false,
+        role: effectiveRole,
+        error: `Access Denied: Missing required permission [${requiredPermission}].`,
+        redirectUrl: fallback
+      });
+    }
+
+    // Check pathname
+    if (pathname) {
+      const cleanPath = pathname.endsWith('/') && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
+      const neededPerm = serverRoutePermissionMap[cleanPath] || (cleanPath.startsWith('/admin') ? 'VIEW_ADMIN_DASHBOARD' : null);
+      
+      if (neededPerm && !userPermissions.includes(neededPerm)) {
+        let fallback = "/";
+        if (userPermissions.includes('VIEW_ADMIN_DASHBOARD') && cleanPath !== '/admin') fallback = "/admin";
+        else if (userPermissions.includes('USE_POS') && cleanPath !== '/admin/pos') fallback = "/admin/pos";
+        else if (userPermissions.includes('MANAGE_PRODUCTS') && cleanPath !== '/admin/products') fallback = "/admin/products";
+        
+        return res.status(403).json({
+          success: true,
+          authorized: false,
+          role: effectiveRole,
+          error: `Access Denied: Role [${effectiveRole}] cannot access [${cleanPath}].`,
+          redirectUrl: fallback
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      authorized: true,
+      uid: verifiedUser.uid,
+      email: verifiedUser.email,
+      role: effectiveRole,
+      permissions: userPermissions
+    });
+  } catch (err: any) {
+    console.error("Error verifying admin route authorization:", err);
+    return res.status(500).json({
+      success: false,
+      authorized: false,
+      error: "Internal server error verifying authorization credentials."
+    });
+  }
+});
 
 // ================= CREATOR NETWORK ADMIN & PUBLIC API ENDPOINTS =================
 
@@ -1809,7 +2155,7 @@ app.get("/api/creators", verifyAdminAuth, async (req, res) => {
 });
 
 // SLACK NOTIFICATION LOGS, AUDIT LOGS & INTERACTIVE ACTION HANDLERS
-app.get("/api/slack/notification-logs", async (req, res) => {
+app.get("/api/slack/notification-logs", verifySuperAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -1817,7 +2163,7 @@ app.get("/api/slack/notification-logs", async (req, res) => {
   });
 });
 
-app.get("/api/slack/audit-logs", async (req, res) => {
+app.get("/api/slack/audit-logs", verifySuperAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -1825,7 +2171,7 @@ app.get("/api/slack/audit-logs", async (req, res) => {
   });
 });
 
-app.get("/api/slack/product-imports", async (req, res) => {
+app.get("/api/slack/product-imports", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -1833,7 +2179,7 @@ app.get("/api/slack/product-imports", async (req, res) => {
   });
 });
 
-app.get("/api/slack/channels", async (req, res) => {
+app.get("/api/slack/channels", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -1841,7 +2187,7 @@ app.get("/api/slack/channels", async (req, res) => {
   });
 });
 
-app.get("/api/slack/support-tickets", async (req, res) => {
+app.get("/api/slack/support-tickets", verifyStaffAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -1967,7 +2313,7 @@ app.get("/api/slack/summary", async (req, res) => {
   }
 });
 
-app.post("/api/slack/retry-queue", async (req, res) => {
+app.post("/api/slack/retry-queue", verifySuperAdminAuth, async (req, res) => {
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
     const result = await slackNotificationService.retryFailedQueue();
@@ -1977,7 +2323,7 @@ app.post("/api/slack/retry-queue", async (req, res) => {
   }
 });
 
-app.post("/api/slack/test-notification", async (req, res) => {
+app.post("/api/slack/test-notification", verifySuperAdminAuth, async (req, res) => {
   const { channel } = req.body;
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
@@ -2592,8 +2938,8 @@ app.post("/api/functions/posCheckout", async (req, res) => {
   }
 });
 
-// 1C. Finance Collect Due Endpoint
-app.post("/api/finance/collect-due", async (req, res) => {
+// 1C. Finance Collect Due Endpoint (Admins and Super Admins Only)
+app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
   const { orderId, amount, method = "CASH", accountCode, note, receivedBy = "Store Staff", source = "POS", idempotencyKey } = req.body;
 
   if (!orderId || !amount || Number(amount) <= 0) {
@@ -2652,7 +2998,7 @@ app.post("/api/finance/collect-due", async (req, res) => {
         method,
         amount: paymentToApply,
         note: note || `Due collection of ৳${paymentToApply} for Order #${orderId}`,
-        receivedBy,
+        receivedBy: (req as any).user?.email || receivedBy,
         receivedAt: nowIso,
         source,
         idempotencyKey: effectiveIdempotencyKey,
@@ -2669,7 +3015,7 @@ app.post("/api/finance/collect-due", async (req, res) => {
         date: nowIso.split("T")[0],
         accountCode: effectiveAccount,
         description: `Due Collection ৳${paymentToApply} for Order #${orderId} (${method})`,
-        performedBy: receivedBy,
+        performedBy: (req as any).user?.email || receivedBy,
         referenceType: "ORDER",
         referenceId: orderId,
         createdAt: nowIso
@@ -2711,8 +3057,8 @@ app.post("/api/finance/collect-due", async (req, res) => {
   }
 });
 
-// 1D. Finance Wallet Transfer Endpoint
-app.post("/api/finance/transfer", async (req, res) => {
+// 1D. Finance Wallet Transfer Endpoint (Admins Only)
+app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
   const { fromAccount, toAccount, amount, description, performedBy = "Store Admin" } = req.body;
 
   if (!fromAccount || !toAccount || !amount || Number(amount) <= 0) {
@@ -2738,7 +3084,7 @@ app.post("/api/finance/transfer", async (req, res) => {
     accountCode: fromAccount,
     targetAccountCode: toAccount,
     description: description || `Wallet Transfer: ${fromAccount} → ${toAccount}`,
-    performedBy,
+    performedBy: (req as any).user?.email || performedBy,
     referenceType: "TRANSFER",
     referenceId: txId,
     createdAt: nowIso
@@ -2753,11 +3099,22 @@ app.post("/api/finance/transfer", async (req, res) => {
 });
 
 // 1E. Finance Record Transaction Endpoint (Expenses, Capital, Withdrawals)
-app.post("/api/finance/transaction", async (req, res) => {
+app.post("/api/finance/transaction", verifyAdminAuth, async (req, res) => {
   const { transactionType, category, amount, accountCode, description, performedBy, referenceType, referenceId, receiptUrl } = req.body;
 
   if (!amount || Number(amount) <= 0 || !accountCode) {
     return res.status(400).json({ error: "Valid amount and accountCode are required" });
+  }
+
+  // Security guard: Owner Capital / Equity / Withdrawals strictly reserved for super_admin
+  const ownerCategories = ['CAPITAL_IN', 'WITHDRAWAL', 'OWNER_EQUITY', 'CAPITAL_OUT'];
+  if (category && ownerCategories.includes(category)) {
+    if ((req as any).user?.role !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        error: "Access Denied. Only Super Administrators are authorized to record Owner Capital or Withdrawals."
+      });
+    }
   }
 
   if (!db) {
@@ -2775,7 +3132,7 @@ app.post("/api/finance/transaction", async (req, res) => {
     date: nowIso.split("T")[0],
     accountCode,
     description: description || "Financial Transaction",
-    performedBy: performedBy || "Store Admin",
+    performedBy: (req as any).user?.email || performedBy || "Store Admin",
     referenceType: referenceType || "MANUAL",
     referenceId: referenceId || txId,
     receiptUrl: receiptUrl || "",
@@ -2791,7 +3148,7 @@ app.post("/api/finance/transaction", async (req, res) => {
 });
 
 // 2. inventoryWatch Endpoint (mirrors Firebase Scheduled Cloud Function)
-app.post("/api/functions/inventoryWatch", async (req, res) => {
+app.post("/api/functions/inventoryWatch", verifyInventoryAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ error: "Database not initialized" });
   }

@@ -9,6 +9,7 @@ import {
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../services/firebase';
 import { UserProfile, CreatorProfile, CreatorStatus } from '../types';
+import { Permission, hasPermission as checkPermission, isStaffRole } from '../utils/permissions';
 
 interface AuthContextType {
   user: User | null;
@@ -18,9 +19,11 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
+  isStaff: boolean;
   isCreator: boolean;
   isApprovedCreator: boolean;
   creatorStatus: CreatorStatus | null;
+  hasPermission: (permission: Permission) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -150,8 +153,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAdmin = profile 
-    ? (profile.role === 'admin' || profile.role === 'super_admin' || profile.role === 'hr' || profile.role === 'inventory_manager' || profile.role === 'customer_support') 
+    ? (profile.role === 'admin' || profile.role === 'super_admin') 
     : false;
+
+  const isStaff = profile ? isStaffRole(profile.role) : false;
+
+  const hasPermission = (permission: Permission): boolean => {
+    return checkPermission(profile?.role, permission);
+  };
 
   const isCreator = !!creatorProfile || profile?.role === 'creator';
   const isApprovedCreator = creatorProfile?.status === 'approved';
@@ -166,9 +175,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signInWithGoogle,
       signOut,
       isAdmin,
+      isStaff,
       isCreator,
       isApprovedCreator,
-      creatorStatus
+      creatorStatus,
+      hasPermission
     }}>
       {children}
     </AuthContext.Provider>

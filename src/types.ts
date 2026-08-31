@@ -306,7 +306,7 @@ export interface AdPerformance {
   isMock?: boolean;
 }
 
-export type UserRole = 'customer' | 'creator' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'customer_support';
+export type UserRole = 'customer' | 'creator' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'customer_support' | 'wholesale_customer';
 
 export type CreatorStatus = 'pending' | 'approved' | 'suspended';
 
