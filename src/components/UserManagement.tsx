@@ -74,15 +74,14 @@ export const UserManagement: React.FC = () => {
         });
       });
 
-      // Sort by Super Admin > HR > Admin > Creator > Staff > Customer
+      // Sort by Super Admin > HR > Admin > Creator > Inventory Manager > Customer
       const rolePriority: Record<string, number> = {
         super_admin: 1,
         hr: 2,
         admin: 3,
         creator: 4,
         inventory_manager: 5,
-        customer_support: 6,
-        customer: 7,
+        customer: 6,
       };
 
       userList.sort((a, b) => (rolePriority[a.role] || 99) - (rolePriority[b.role] || 99));
@@ -261,7 +260,7 @@ export const UserManagement: React.FC = () => {
   const superAdminsCount = users.filter((u) => u.role === 'super_admin').length;
   const hrCount = users.filter((u) => u.role === 'hr').length;
   const creatorsCount = users.filter((u) => u.role === 'creator').length;
-  const staffCount = users.filter((u) => ['admin', 'inventory_manager', 'customer_support'].includes(u.role)).length;
+  const staffCount = users.filter((u) => ['admin', 'inventory_manager'].includes(u.role)).length;
   const customersCount = users.filter((u) => u.role === 'customer').length;
   const wholesaleCount = users.filter((u) => u.wholesaleAccess === true).length;
 
@@ -296,12 +295,6 @@ export const UserManagement: React.FC = () => {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-100 text-amber-800 border border-amber-300">
             <BadgeCheck size={12} className="text-amber-600" /> Inventory Mgr
-          </span>
-        );
-      case 'customer_support':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-blue-100 text-blue-800 border border-blue-300">
-            <UserCheck size={12} className="text-blue-600" /> Support Rep
           </span>
         );
       default:
@@ -529,7 +522,6 @@ export const UserManagement: React.FC = () => {
               { id: 'admin', label: 'Admin' },
               { id: 'creator', label: 'Creators' },
               { id: 'inventory_manager', label: 'Inventory' },
-              { id: 'customer_support', label: 'Support' },
               { id: 'customer', label: 'Customers' },
             ].map((tab) => (
               <button
@@ -615,7 +607,6 @@ export const UserManagement: React.FC = () => {
                       >
                         <option value="customer">Customer</option>
                         <option value="creator">Creator</option>
-                        <option value="customer_support">Support Rep</option>
                         <option value="inventory_manager">Inventory Manager</option>
                         <option value="admin">Store Admin</option>
                         <option value="hr">HR Manager</option>
@@ -769,7 +760,6 @@ export const UserManagement: React.FC = () => {
                     >
                       <option value="customer">Customer</option>
                       <option value="creator">Creator (K-Beauty Creator)</option>
-                      <option value="customer_support">Customer Support</option>
                       <option value="inventory_manager">Inventory Manager</option>
                       <option value="admin">Store Admin</option>
                       <option value="hr">HR Manager</option>
@@ -929,7 +919,6 @@ export const UserManagement: React.FC = () => {
                     >
                       <option value="customer">Customer</option>
                       <option value="creator">Creator (K-Beauty Creator)</option>
-                      <option value="customer_support">Customer Support</option>
                       <option value="inventory_manager">Inventory Manager</option>
                       <option value="admin">Store Admin</option>
                       <option value="hr">HR Manager</option>

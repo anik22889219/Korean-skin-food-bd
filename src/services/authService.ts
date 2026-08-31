@@ -47,13 +47,12 @@ export const authService = {
     return { success: false, message: 'Invalid OTP code. Please try again.' };
   },
 
-  loginStaff(email: string, role: 'admin' | 'inventory_manager' | 'customer_support'): { success: boolean; user?: UserProfile; message: string } {
+  loginStaff(email: string, role: 'admin' | 'inventory_manager'): { success: boolean; user?: UserProfile; message: string } {
     // Check if staff already exists in Firestore
     const existingUser = userService.getUsers().find(u => u.email === email && u.role === role);
 
     const name = role === 'admin' ? 'Senior Administrator' 
-                 : role === 'inventory_manager' ? 'Inventory Supervisor' 
-                 : 'Support Associate';
+                 : 'Inventory Supervisor';
                  
     const uid = auth.currentUser?.uid || existingUser?.uid || 'staff-' + Math.random().toString(36).substring(2, 11);
     const user: UserProfile = {

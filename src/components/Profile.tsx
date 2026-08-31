@@ -6,6 +6,7 @@ import { Order, Product, UserRole } from '../types';
 import { posService } from '../services/posService';
 import { productService } from '../services/productService';
 import { useCart } from '../context/CartContext';
+import { canAccessAdminRoute } from '../utils/permissions';
 import { 
   ShoppingBag, Phone, MapPin, User, Save, CheckCircle, Clock, Package, 
   HelpCircle, Search, Filter, Copy, Check, ChevronDown, ChevronUp, 
@@ -161,14 +162,6 @@ const RoleBadge: React.FC<{ role?: UserRole; isCreatorApproved?: boolean }> = ({
       </span>
     );
   }
-  if (role === 'customer_support') {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-900 text-purple-200 border border-purple-700 text-xs font-black uppercase tracking-wider shadow-xs">
-        <HelpCircle size={13} className="text-purple-300" />
-        <span>Customer Support</span>
-      </span>
-    );
-  }
   if (role === 'creator' || isCreatorApproved) {
     return (
       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-pink-500 to-rose-600 text-white text-xs font-black uppercase tracking-wider shadow-md shadow-pink-500/20">
@@ -190,7 +183,7 @@ const RoleBadge: React.FC<{ role?: UserRole; isCreatorApproved?: boolean }> = ({
    Main Profile Component
 ------------------------------------------------------------- */
 export const Profile: React.FC = () => {
-  const { user, profile, signOut, isAdmin, creatorProfile } = useAuth();
+  const { user, profile, signOut, isAdmin, isStaff, creatorProfile } = useAuth();
   const navigate = useNavigate();
   const { addToCart, setIsCartOpen } = useCart();
 
@@ -439,7 +432,7 @@ export const Profile: React.FC = () => {
       {/* 1. ROLE-AWARE TOP HIGHLIGHT CARDS */}
       
       {/* Super Admin & Staff Fast Deck Access */}
-      {isAdmin && (
+      {(isAdmin || isStaff) && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -630,7 +623,7 @@ export const Profile: React.FC = () => {
           </button>
 
           {/* If Creator or Admin, show dedicated Role Hub tab */}
-          {(creatorProfile || isAdmin) && (
+          {(creatorProfile || isAdmin || isStaff) && (
             <button
               onClick={() => setActiveTab('role_hub')}
               className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 shrink-0 border ${
@@ -640,7 +633,7 @@ export const Profile: React.FC = () => {
               }`}
             >
               <Sparkles size={14} />
-              <span>{isAdmin ? 'Staff Hub' : 'Creator Portal'}</span>
+              <span>{isAdmin || isStaff ? 'Staff Hub' : 'Creator Portal'}</span>
             </button>
           )}
 
@@ -1121,7 +1114,7 @@ export const Profile: React.FC = () => {
           )}
 
           {/* If Admin / Staff */}
-          {isAdmin && (
+          {(isAdmin || isStaff) && (
             <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm space-y-6">
               <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-100 pb-4">
                 <div>
@@ -1137,32 +1130,38 @@ export const Profile: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Link
-                  to="/admin/users"
-                  className="p-5 bg-slate-50 hover:bg-pink-50/50 rounded-2xl border border-slate-200 transition group block"
-                >
-                  <Crown size={20} className="text-[#E91E8C] mb-2 group-hover:scale-110 transition-transform" />
-                  <h4 className="text-sm font-black text-gray-900">User Management</h4>
-                  <p className="text-xs text-gray-500 mt-1">Manage user roles, HR permissions, and creator authorizations.</p>
-                </Link>
+                {canAccessAdminRoute(profile?.role, '/admin/users') && (
+                  <Link
+                    to="/admin/users"
+                    className="p-5 bg-slate-50 hover:bg-pink-50/50 rounded-2xl border border-slate-200 transition group block"
+                  >
+                    <Crown size={20} className="text-[#E91E8C] mb-2 group-hover:scale-110 transition-transform" />
+                    <h4 className="text-sm font-black text-gray-900">User Management</h4>
+                    <p className="text-xs text-gray-500 mt-1">Manage user roles, HR permissions, and creator authorizations.</p>
+                  </Link>
+                )}
 
-                <Link
-                  to="/admin/orders"
-                  className="p-5 bg-slate-50 hover:bg-pink-50/50 rounded-2xl border border-slate-200 transition group block"
-                >
-                  <Package size={20} className="text-purple-600 mb-2 group-hover:scale-110 transition-transform" />
-                  <h4 className="text-sm font-black text-gray-900">Order Fulfillment</h4>
-                  <p className="text-xs text-gray-500 mt-1">Update courier delivery stages, Steadfast IDs, and invoices.</p>
-                </Link>
+                {canAccessAdminRoute(profile?.role, '/admin/orders') && (
+                  <Link
+                    to="/admin/orders"
+                    className="p-5 bg-slate-50 hover:bg-pink-50/50 rounded-2xl border border-slate-200 transition group block"
+                  >
+                    <Package size={20} className="text-purple-600 mb-2 group-hover:scale-110 transition-transform" />
+                    <h4 className="text-sm font-black text-gray-900">Order Fulfillment</h4>
+                    <p className="text-xs text-gray-500 mt-1">Update courier delivery stages, Steadfast IDs, and invoices.</p>
+                  </Link>
+                )}
 
-                <Link
-                  to="/admin/creators"
-                  className="p-5 bg-slate-50 hover:bg-pink-50/50 rounded-2xl border border-slate-200 transition group block"
-                >
-                  <Sparkles size={20} className="text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
-                  <h4 className="text-sm font-black text-gray-900">Creator Approvals</h4>
-                  <p className="text-xs text-gray-500 mt-1">Review pending creator profiles, audit reels, and assign points.</p>
-                </Link>
+                {canAccessAdminRoute(profile?.role, '/admin/creators') && (
+                  <Link
+                    to="/admin/creators"
+                    className="p-5 bg-slate-50 hover:bg-pink-50/50 rounded-2xl border border-slate-200 transition group block"
+                  >
+                    <Sparkles size={20} className="text-amber-500 mb-2 group-hover:scale-110 transition-transform" />
+                    <h4 className="text-sm font-black text-gray-900">Creator Approvals</h4>
+                    <p className="text-xs text-gray-500 mt-1">Review pending creator profiles, audit reels, and assign points.</p>
+                  </Link>
+                )}
               </div>
             </div>
           )}

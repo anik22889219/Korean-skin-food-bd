@@ -2,105 +2,126 @@ import { UserRole } from '../types';
 
 export type Permission =
   | 'VIEW_ADMIN_DASHBOARD'
+  | 'VIEW_ORDERS'
+  | 'MANAGE_ORDERS'
+  | 'USE_POS'
+  | 'VIEW_POS_HISTORY'
+  | 'MANAGE_PRODUCTS'
+  | 'REGISTER_PRODUCT'
+  | 'MANAGE_INVENTORY'
+  | 'VIEW_INVENTORY_VALUATION'
   | 'VIEW_FINANCE'
   | 'MANAGE_FINANCE'
   | 'VIEW_DUES'
   | 'MANAGE_DUES'
   | 'VIEW_REPORTS'
   | 'MANAGE_CREATORS'
+  | 'VIEW_USERS'
   | 'MANAGE_USERS'
-  | 'MANAGE_ORDERS'
-  | 'USE_POS'
-  | 'VIEW_POS_MONITOR'
-  | 'MANAGE_PRODUCTS'
-  | 'MANAGE_INVENTORY'
+  | 'VIEW_LEADS'
+  | 'MANAGE_AI_AGENTS'
   | 'MANAGE_SEO'
   | 'MANAGE_MARKETING'
-  | 'VIEW_LEADS'
   | 'MANAGE_SETTINGS'
-  | 'MANAGE_AI_AGENTS'
   | 'MANAGE_SLACK';
 
 // Explicit mapping of 7 roles to their allowed permissions
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   super_admin: [
     'VIEW_ADMIN_DASHBOARD',
+    'VIEW_ORDERS',
+    'MANAGE_ORDERS',
+    'USE_POS',
+    'VIEW_POS_HISTORY',
+    'MANAGE_PRODUCTS',
+    'REGISTER_PRODUCT',
+    'MANAGE_INVENTORY',
+    'VIEW_INVENTORY_VALUATION',
     'VIEW_FINANCE',
     'MANAGE_FINANCE',
     'VIEW_DUES',
     'MANAGE_DUES',
     'VIEW_REPORTS',
     'MANAGE_CREATORS',
+    'VIEW_USERS',
     'MANAGE_USERS',
-    'MANAGE_ORDERS',
-    'USE_POS',
-    'VIEW_POS_MONITOR',
-    'MANAGE_PRODUCTS',
-    'MANAGE_INVENTORY',
+    'VIEW_LEADS',
+    'MANAGE_AI_AGENTS',
     'MANAGE_SEO',
     'MANAGE_MARKETING',
-    'VIEW_LEADS',
     'MANAGE_SETTINGS',
-    'MANAGE_AI_AGENTS',
     'MANAGE_SLACK'
   ],
   admin: [
     'VIEW_ADMIN_DASHBOARD',
+    'VIEW_ORDERS',
+    'MANAGE_ORDERS',
+    'USE_POS',
+    'VIEW_POS_HISTORY',
+    'MANAGE_PRODUCTS',
+    'REGISTER_PRODUCT',
+    'MANAGE_INVENTORY',
+    'VIEW_INVENTORY_VALUATION',
     'VIEW_FINANCE',
     'MANAGE_FINANCE',
     'VIEW_DUES',
     'MANAGE_DUES',
     'VIEW_REPORTS',
     'MANAGE_CREATORS',
-    'MANAGE_ORDERS',
-    'USE_POS',
-    'VIEW_POS_MONITOR',
-    'MANAGE_PRODUCTS',
-    'MANAGE_INVENTORY',
+    'VIEW_USERS',
+    'VIEW_LEADS',
+    'MANAGE_AI_AGENTS',
     'MANAGE_SEO',
     'MANAGE_MARKETING',
-    'VIEW_LEADS',
-    'MANAGE_SETTINGS',
-    'MANAGE_AI_AGENTS'
+    'MANAGE_SETTINGS'
   ],
   inventory_manager: [
     'VIEW_ADMIN_DASHBOARD',
+    'VIEW_ORDERS',
     'MANAGE_ORDERS',
-    'MANAGE_PRODUCTS',
-    'MANAGE_INVENTORY',
     'USE_POS',
-    'VIEW_POS_MONITOR',
+    'VIEW_POS_HISTORY',
+    'MANAGE_PRODUCTS',
+    'REGISTER_PRODUCT',
+    'MANAGE_INVENTORY',
+    'VIEW_INVENTORY_VALUATION',
     'VIEW_REPORTS'
   ],
-  customer_support: [
-    'VIEW_LEADS',
-    'MANAGE_ORDERS'
+  hr: [
+    'VIEW_ADMIN_DASHBOARD',
+    'VIEW_USERS',
+    'MANAGE_USERS',
+    'VIEW_REPORTS'
   ],
-  hr: [],
   creator: [],
   wholesale_customer: [],
   customer: []
 };
 
-// Route path to required permission mapping
+// Complete Route path to required permission mapping
 export const ROUTE_PERMISSION_MAP: Record<string, Permission> = {
   '/admin': 'VIEW_ADMIN_DASHBOARD',
+  '/admin/orders': 'VIEW_ORDERS',
+  '/admin/users': 'MANAGE_USERS',
+  '/admin/products': 'MANAGE_PRODUCTS',
+  '/admin/product-registration': 'REGISTER_PRODUCT',
+  '/admin/pos': 'USE_POS',
+  '/admin/pos-history': 'VIEW_POS_HISTORY',
+  '/admin/inventory': 'MANAGE_INVENTORY',
+  '/admin/inventory/valuation': 'VIEW_INVENTORY_VALUATION',
   '/admin/business-finance': 'VIEW_FINANCE',
   '/admin/finance': 'VIEW_FINANCE',
   '/admin/payments-due': 'VIEW_DUES',
   '/admin/dues': 'VIEW_DUES',
   '/admin/reports': 'VIEW_REPORTS',
   '/admin/creators': 'MANAGE_CREATORS',
-  '/admin/users': 'MANAGE_USERS',
-  '/admin/orders': 'MANAGE_ORDERS',
-  '/admin/theme-editor': 'MANAGE_SETTINGS',
-  '/admin/pos': 'USE_POS',
-  '/admin/products': 'MANAGE_PRODUCTS',
-  '/admin/seo': 'MANAGE_SEO',
-  '/admin/social': 'MANAGE_MARKETING',
   '/admin/chat-leads': 'VIEW_LEADS',
-  '/admin/slack': 'MANAGE_SLACK',
-  '/admin/ai-agents': 'MANAGE_AI_AGENTS'
+  '/admin/ai-agents': 'MANAGE_AI_AGENTS',
+  '/admin/seo': 'MANAGE_SEO',
+  '/admin/theme-editor': 'MANAGE_SETTINGS',
+  '/admin/theme': 'MANAGE_SETTINGS',
+  '/admin/social': 'MANAGE_MARKETING',
+  '/admin/slack': 'MANAGE_SLACK'
 };
 
 /**
@@ -122,19 +143,18 @@ export function hasAnyPermission(role: UserRole | undefined | null, permissions:
 
 /**
  * Checks if a user role can access a specific admin path
+ * Unknown /admin routes strictly default to DENY (fail-closed)
  */
 export function canAccessAdminRoute(role: UserRole | undefined | null, pathname: string): boolean {
   if (!role) return false;
+  if (role === 'super_admin') return true;
   
-  // Normalize path
+  // Normalize path (remove trailing slash)
   const cleanPath = pathname.endsWith('/') && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
   const requiredPermission = ROUTE_PERMISSION_MAP[cleanPath];
 
+  // Unknown route -> STRICT DENY
   if (!requiredPermission) {
-    // If exact path not found, check if it starts with /admin
-    if (cleanPath.startsWith('/admin')) {
-      return hasPermission(role, 'VIEW_ADMIN_DASHBOARD');
-    }
     return false;
   }
 
@@ -142,9 +162,10 @@ export function canAccessAdminRoute(role: UserRole | undefined | null, pathname:
 }
 
 /**
- * Checks if a user has any administrative or staff access
+ * Checks if a user has any operational administrative or staff access
  */
 export function isStaffRole(role: UserRole | undefined | null): boolean {
   if (!role) return false;
-  return role === 'super_admin' || role === 'admin' || role === 'inventory_manager' || role === 'customer_support';
+  return role === 'super_admin' || role === 'admin' || role === 'inventory_manager';
 }
+

@@ -960,6 +960,51 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; em
   }
 }
 
+async function getUserRoleFromToken(verifiedUser: { uid: string; email?: string }, idToken: string): Promise<string> {
+  const email = (verifiedUser.email || '').toLowerCase().trim();
+  if (email === 'koreanskinfood.bd@gmail.com') return 'super_admin';
+  if (email === 'admin@koreanskinfood.bd') return 'admin';
+  if (email === 'inventory@koreanskinfood.bd') return 'inventory_manager';
+
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0633897500";
+  const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
+
+  // 1. Try reading the user document via authenticated Firestore REST API using the user's idToken
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${verifiedUser.uid}`;
+    const restRes = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${idToken}`
+      }
+    });
+
+    if (restRes.ok) {
+      const docData: any = await restRes.json();
+      const role = docData?.fields?.role?.stringValue;
+      if (role) return role;
+    }
+  } catch (err) {
+    console.warn("Firestore REST API role check notice:", err);
+  }
+
+  // 2. Try Firestore Client SDK if available
+  if (db) {
+    try {
+      const userDocRef = doc(db, "users", verifiedUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        const role = userSnap.data()?.role;
+        if (role) return role;
+      }
+    } catch (sdkErr: any) {
+      // Graceful fallback if unauthenticated SDK read is blocked
+      console.warn("Firestore SDK user doc read notice:", sdkErr?.message || sdkErr);
+    }
+  }
+
+  return 'customer';
+}
+
 async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -985,26 +1030,15 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     });
   }
 
-  if (!db) {
-    return res.status(503).json({
-      success: false,
-      error: "Database not initialized on server."
-    });
-  }
-
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
-
+    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
     const adminRoles = ['admin', 'super_admin'];
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
-    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
 
-    if (isSuperAdminEmail || (userRole && adminRoles.includes(userRole))) {
+    if (adminRoles.includes(userRole)) {
       (req as any).user = {
         uid: verifiedUser.uid,
         email: verifiedUser.email,
-        role: userRole || 'super_admin'
+        role: userRole
       };
       return next();
     }
@@ -1047,26 +1081,15 @@ async function verifyStaffAuth(req: express.Request, res: express.Response, next
     });
   }
 
-  if (!db) {
-    return res.status(503).json({
-      success: false,
-      error: "Database not initialized on server."
-    });
-  }
-
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
+    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager'];
 
-    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'customer_support'];
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
-    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
-
-    if (isSuperAdminEmail || (userRole && staffRoles.includes(userRole))) {
+    if (staffRoles.includes(userRole)) {
       (req as any).user = {
         uid: verifiedUser.uid,
         email: verifiedUser.email,
-        role: userRole || 'super_admin'
+        role: userRole
       };
       return next();
     }
@@ -1109,26 +1132,15 @@ async function verifyInventoryAuth(req: express.Request, res: express.Response, 
     });
   }
 
-  if (!db) {
-    return res.status(503).json({
-      success: false,
-      error: "Database not initialized on server."
-    });
-  }
-
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
-
+    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
     const inventoryRoles = ['admin', 'super_admin', 'inventory_manager'];
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
-    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
 
-    if (isSuperAdminEmail || (userRole && inventoryRoles.includes(userRole))) {
+    if (inventoryRoles.includes(userRole)) {
       (req as any).user = {
         uid: verifiedUser.uid,
         email: verifiedUser.email,
-        role: userRole || 'super_admin'
+        role: userRole
       };
       return next();
     }
@@ -1171,21 +1183,10 @@ async function verifySuperAdminAuth(req: express.Request, res: express.Response,
     });
   }
 
-  if (!db) {
-    return res.status(503).json({
-      success: false,
-      error: "Database not initialized on server."
-    });
-  }
-
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
+    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
 
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
-    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
-
-    if (isSuperAdminEmail || userRole === 'super_admin') {
+    if (userRole === 'super_admin') {
       (req as any).user = {
         uid: verifiedUser.uid,
         email: verifiedUser.email,
@@ -1236,26 +1237,12 @@ app.post("/api/auth/verify-route", async (req, res) => {
     });
   }
 
-  if (!db) {
-    return res.status(503).json({
-      success: false,
-      authorized: false,
-      error: "Database not initialized on server."
-    });
-  }
-
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
-
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
-    const userRole = userSnap.exists() ? (userSnap.data()?.role || 'customer') : (isSuperAdminEmail ? 'super_admin' : 'customer');
-    const effectiveRole = isSuperAdminEmail ? 'super_admin' : userRole;
-
+    const effectiveRole = await getUserRoleFromToken(verifiedUser, idToken);
     const { pathname, requiredPermission } = req.body || {};
 
-    // Check staff status
-    const isStaff = ['super_admin', 'admin', 'inventory_manager', 'customer_support'].includes(effectiveRole);
+    // Check staff status - strictly 3 staff roles (super_admin, admin, inventory_manager)
+    const isStaff = ['super_admin', 'admin', 'inventory_manager'].includes(effectiveRole);
     if (!isStaff) {
       return res.status(403).json({
         success: true,
@@ -1266,26 +1253,26 @@ app.post("/api/auth/verify-route", async (req, res) => {
       });
     }
 
-    // Role permissions mapping
+    // Role permissions mapping - EXACT 7 roles, 23 permissions
     const serverRolePermissions: Record<string, string[]> = {
       super_admin: [
-        'VIEW_ADMIN_DASHBOARD', 'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES',
-        'VIEW_REPORTS', 'MANAGE_CREATORS', 'MANAGE_USERS', 'MANAGE_ORDERS', 'USE_POS',
-        'VIEW_POS_MONITOR', 'MANAGE_PRODUCTS', 'MANAGE_INVENTORY', 'MANAGE_SEO',
-        'MANAGE_MARKETING', 'VIEW_LEADS', 'MANAGE_SETTINGS', 'MANAGE_AI_AGENTS', 'MANAGE_SLACK'
+        'VIEW_ADMIN_DASHBOARD', 'VIEW_ORDERS', 'MANAGE_ORDERS', 'USE_POS', 'VIEW_POS_HISTORY',
+        'MANAGE_PRODUCTS', 'REGISTER_PRODUCT', 'MANAGE_INVENTORY', 'VIEW_INVENTORY_VALUATION',
+        'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES', 'VIEW_REPORTS',
+        'MANAGE_CREATORS', 'VIEW_USERS', 'MANAGE_USERS', 'VIEW_LEADS', 'MANAGE_AI_AGENTS',
+        'MANAGE_SEO', 'MANAGE_MARKETING', 'MANAGE_SETTINGS', 'MANAGE_SLACK'
       ],
       admin: [
-        'VIEW_ADMIN_DASHBOARD', 'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES',
-        'VIEW_REPORTS', 'MANAGE_CREATORS', 'MANAGE_ORDERS', 'USE_POS',
-        'VIEW_POS_MONITOR', 'MANAGE_PRODUCTS', 'MANAGE_INVENTORY', 'MANAGE_SEO',
-        'MANAGE_MARKETING', 'VIEW_LEADS', 'MANAGE_SETTINGS', 'MANAGE_AI_AGENTS'
+        'VIEW_ADMIN_DASHBOARD', 'VIEW_ORDERS', 'MANAGE_ORDERS', 'USE_POS', 'VIEW_POS_HISTORY',
+        'MANAGE_PRODUCTS', 'REGISTER_PRODUCT', 'MANAGE_INVENTORY', 'VIEW_INVENTORY_VALUATION',
+        'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES', 'VIEW_REPORTS',
+        'MANAGE_CREATORS', 'VIEW_USERS', 'VIEW_LEADS', 'MANAGE_AI_AGENTS',
+        'MANAGE_SEO', 'MANAGE_MARKETING', 'MANAGE_SETTINGS'
       ],
       inventory_manager: [
-        'VIEW_ADMIN_DASHBOARD', 'MANAGE_ORDERS', 'MANAGE_PRODUCTS', 'MANAGE_INVENTORY',
-        'USE_POS', 'VIEW_POS_MONITOR', 'VIEW_REPORTS'
-      ],
-      customer_support: [
-        'VIEW_LEADS', 'MANAGE_ORDERS'
+        'VIEW_ADMIN_DASHBOARD', 'VIEW_ORDERS', 'USE_POS', 'VIEW_POS_HISTORY',
+        'MANAGE_PRODUCTS', 'REGISTER_PRODUCT', 'MANAGE_INVENTORY',
+        'VIEW_INVENTORY_VALUATION', 'VIEW_REPORTS'
       ],
       hr: [],
       creator: [],
@@ -1295,22 +1282,29 @@ app.post("/api/auth/verify-route", async (req, res) => {
 
     const serverRoutePermissionMap: Record<string, string> = {
       '/admin': 'VIEW_ADMIN_DASHBOARD',
+      '/admin/orders': 'VIEW_ORDERS',
+      '/admin/users': 'MANAGE_USERS',
+      '/admin/products': 'MANAGE_PRODUCTS',
+      '/admin/product-registration': 'REGISTER_PRODUCT',
+      '/admin/pos': 'USE_POS',
+      '/admin/pos-scan': 'USE_POS',
+      '/admin/pos-stock-in': 'MANAGE_INVENTORY',
+      '/admin/pos-history': 'VIEW_POS_HISTORY',
+      '/admin/inventory': 'MANAGE_INVENTORY',
+      '/admin/inventory/valuation': 'VIEW_INVENTORY_VALUATION',
       '/admin/business-finance': 'VIEW_FINANCE',
       '/admin/finance': 'VIEW_FINANCE',
       '/admin/payments-due': 'VIEW_DUES',
       '/admin/dues': 'VIEW_DUES',
       '/admin/reports': 'VIEW_REPORTS',
       '/admin/creators': 'MANAGE_CREATORS',
-      '/admin/users': 'MANAGE_USERS',
-      '/admin/orders': 'MANAGE_ORDERS',
-      '/admin/theme-editor': 'MANAGE_SETTINGS',
-      '/admin/pos': 'USE_POS',
-      '/admin/products': 'MANAGE_PRODUCTS',
-      '/admin/seo': 'MANAGE_SEO',
-      '/admin/social': 'MANAGE_MARKETING',
       '/admin/chat-leads': 'VIEW_LEADS',
-      '/admin/slack': 'MANAGE_SLACK',
-      '/admin/ai-agents': 'MANAGE_AI_AGENTS'
+      '/admin/ai-agents': 'MANAGE_AI_AGENTS',
+      '/admin/seo': 'MANAGE_SEO',
+      '/admin/theme-editor': 'MANAGE_SETTINGS',
+      '/admin/theme': 'MANAGE_SETTINGS',
+      '/admin/social': 'MANAGE_MARKETING',
+      '/admin/slack': 'MANAGE_SLACK'
     };
 
     const userPermissions = serverRolePermissions[effectiveRole] || [];
@@ -1329,12 +1323,23 @@ app.post("/api/auth/verify-route", async (req, res) => {
       });
     }
 
-    // Check pathname
+    // Check pathname (Fail-closed: unknown admin routes MUST default to DENY)
     if (pathname) {
       const cleanPath = pathname.endsWith('/') && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
-      const neededPerm = serverRoutePermissionMap[cleanPath] || (cleanPath.startsWith('/admin') ? 'VIEW_ADMIN_DASHBOARD' : null);
+      const neededPerm = serverRoutePermissionMap[cleanPath];
       
-      if (neededPerm && !userPermissions.includes(neededPerm)) {
+      // Unknown route or unmapped admin route -> STRICT DENY
+      if (!neededPerm) {
+        return res.status(403).json({
+          success: true,
+          authorized: false,
+          role: effectiveRole,
+          error: `Access Denied: Unrecognized administrative route [${cleanPath}].`,
+          redirectUrl: userPermissions.includes('VIEW_ADMIN_DASHBOARD') ? '/admin' : '/'
+        });
+      }
+
+      if (!userPermissions.includes(neededPerm)) {
         let fallback = "/";
         if (userPermissions.includes('VIEW_ADMIN_DASHBOARD') && cleanPath !== '/admin') fallback = "/admin";
         else if (userPermissions.includes('USE_POS') && cleanPath !== '/admin/pos') fallback = "/admin/pos";

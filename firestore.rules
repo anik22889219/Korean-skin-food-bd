@@ -30,14 +30,6 @@ service cloud.firestore {
       );
     }
 
-    // Global helper: Check if user is Customer Support
-    function isCustomerSupport() {
-      return request.auth != null && (
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'customer_support'
-      );
-    }
-
     // Global helper: Check if user is HR
     function isHR() {
       return request.auth != null && (
@@ -53,15 +45,15 @@ service cloud.firestore {
 
     // Global helper: Any verified staff member with operational access
     function isStaff() {
-      return isAdmin() || isInventoryManager() || isCustomerSupport();
+      return isAdmin() || isInventoryManager();
     }
 
     // ====================================================
     // USER PROFILES & ACCESS
     // ====================================================
     match /users/{userId} {
-      // Super admins can view all accounts; users can view their own profile
-      allow read: if isSuperAdmin() || (request.auth != null && request.auth.uid == userId);
+      // Super admins and admins can view accounts; users can view their own profile
+      allow read: if isSuperAdmin() || isAdmin() || isHR() || (request.auth != null && request.auth.uid == userId);
       
       // Users can register themselves as customer or creator (never admin/staff)
       allow create: if isSuperAdmin() || (
@@ -328,7 +320,7 @@ service cloud.firestore {
     // ====================================================
     match /chat_leads/{leadId} {
       allow create: if true;
-      allow read, update, delete: if isAdmin() || isCustomerSupport();
+      allow read, update, delete: if isAdmin();
     }
 
     match /support_tickets/{ticketId} {

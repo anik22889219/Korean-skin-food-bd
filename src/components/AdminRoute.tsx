@@ -112,14 +112,13 @@ export const AdminRoute: React.FC<AdminRouteProps> = ({ requiredPermission }) =>
           });
         }
       } catch (err: any) {
-        console.warn('Server route authorization check encountered network error, falling back to secure client verification:', err);
-        // If server verification network error, enforce strict client-side validation
+        console.error('Server route authorization check failed:', err);
+        // Fail-closed: Never silently authorize on server errors
         if (isMounted) {
-          if (canAccessAdminRoute(profile?.role, location.pathname)) {
-            setServerAuth({ status: 'authorized', verifiedRole: profile?.role });
-          } else {
-            setServerAuth({ status: 'unauthorized', redirectUrl: '/admin' });
-          }
+          setServerAuth({
+            status: 'unauthorized',
+            errorMessage: 'Security verification failed: server authorization unreachable. Access denied.'
+          });
         }
       }
     }

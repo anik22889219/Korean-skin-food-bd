@@ -26,7 +26,7 @@ import { getProductUnitPrice } from '../utils/pricing';
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, signOut, isAdmin, signInWithGoogle, creatorProfile } = useAuth();
+  const { user, profile, signOut, isAdmin, isStaff, signInWithGoogle, creatorProfile } = useAuth();
   const { 
     cart, isCartOpen, setIsCartOpen, language, setLanguage, 
     checkoutStep, setCheckoutStep, checkoutForm, setCheckoutForm,
@@ -131,7 +131,7 @@ export const MainLayout: React.FC = () => {
             <Menu size={20} />
           </button>
 
-          {user && isAdmin && (
+          {user && (isAdmin || isStaff) && (
             <Link 
               to="/admin"
               className="hidden sm:flex px-3 py-1.5 bg-slate-900 hover:bg-[#E91E8C] text-white rounded-xl text-xs font-bold transition-all items-center gap-1.5 shadow-xs shrink-0"
@@ -308,7 +308,7 @@ export const MainLayout: React.FC = () => {
                         </Link>
                       )}
 
-                      {isAdmin && (
+                      {(isAdmin || isStaff) && (
                         <Link 
                           to="/admin" 
                           onClick={() => setProfileMenuOpen(false)}
@@ -455,7 +455,7 @@ export const MainLayout: React.FC = () => {
                     <span>{language === 'bn' ? 'আমার প্রোফাইল ও অর্ডার' : 'My Account & Orders'}</span>
                   </Link>
 
-                  {user && isAdmin && (
+                  {user && (isAdmin || isStaff) && (
                     <Link
                       to="/admin"
                       onClick={() => setMobileMenuOpen(false)}
@@ -881,7 +881,7 @@ export const MainLayout: React.FC = () => {
           <span className="text-[9px]">{language === 'bn' ? 'প্রোফাইল' : 'Profile'}</span>
         </Link>
 
-        {user && isAdmin && (
+        {user && (isAdmin || isStaff) && (
           <Link 
             to="/admin"
             className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition-all ${

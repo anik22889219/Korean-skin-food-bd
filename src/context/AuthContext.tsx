@@ -3,6 +3,8 @@ import {
   User, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut as fbSignOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
@@ -35,6 +37,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    // Check for redirect result on mount
+    getRedirectResult(auth).catch((err) => {
+      console.warn('[AuthContext] getRedirectResult notice:', err);
+    });
+
     let profileUnsub: (() => void) | null = null;
     let creatorUnsub: (() => void) | null = null;
 
@@ -129,8 +136,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error('[AuthContext] Google sign-in error:', error);
+      if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+        try {
+          console.log('[AuthContext] Falling back to signInWithRedirect...');
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirectError) {
+          console.error('[AuthContext] Google redirect error:', redirectError);
+          throw redirectError;
+        }
+      }
       throw error;
     } finally {
       setLoading(false);

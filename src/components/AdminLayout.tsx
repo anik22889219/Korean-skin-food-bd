@@ -94,15 +94,9 @@ export const AdminLayout: React.FC = () => {
   }, []);
 
   const navItems = [
-    { to: '/admin', label: 'Dashboard Overview', badge: 'Live', icon: BarChart3, end: true },
-    { to: '/admin/business-finance', label: 'Business Banking & Dues', badge: 'Finance', icon: Landmark },
-    { to: '/admin/payments-due', label: 'Due Payments', badge: 'Receivables', icon: Receipt },
-    { to: '/admin/reports', label: 'All Reports & Analytics', badge: 'Reports', icon: FileText },
-    { to: '/admin/creators', label: 'Creators Hub', badge: 'Hub', icon: Sparkles },
-    { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
-    { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
-    { to: '/admin/orders', label: 'Order Fulfillment', badge: 'Orders', icon: Package },
-    { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
+    { to: '/admin', label: 'Dashboard', badge: 'Live', icon: BarChart3, end: true },
+    { to: '/admin/orders', label: 'Orders', badge: 'Orders', icon: Package },
+    { to: '/admin/products', label: 'Products', badge: 'Catalog', icon: Boxes },
     { 
       to: '/admin/pos', 
       label: 'POS Register', 
@@ -110,14 +104,21 @@ export const AdminLayout: React.FC = () => {
       icon: CreditCard,
       highlight: isAdminOrSuperAdmin && activePosCount > 0
     },
-    { to: '/admin/products', label: 'Skincare Catalog', badge: 'Stock', icon: Boxes },
+    { to: '/admin/reports', label: 'Reports', badge: 'Analytics', icon: FileText },
+    // Other admin modules (hidden for inventory_manager)
+    { to: '/admin/business-finance', label: 'Business Banking & Dues', badge: 'Finance', icon: Landmark },
+    { to: '/admin/payments-due', label: 'Due Payments', badge: 'Receivables', icon: Receipt },
+    { to: '/admin/creators', label: 'Creators Hub', badge: 'Hub', icon: Sparkles },
+    { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
+    { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
+    { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
   ];
 
-  const visibleNavItems = navItems.filter(item => canAccessAdminRoute(profile?.role, item.to));
+  const visibleNavItems = navItems.filter(item => profile?.role === 'super_admin' || canAccessAdminRoute(profile?.role, item.to));
 
   const handleSignOut = async () => {
     try {
@@ -425,7 +426,7 @@ export const AdminLayout: React.FC = () => {
           <span className="text-[9px] font-black text-pink-600 uppercase tracking-wider shrink-0 mr-1 hidden sm:inline-block">
             Quick Nav:
           </span>
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <NavLink

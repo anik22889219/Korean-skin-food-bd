@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store, FileText, Landmark, Receipt } from 'lucide-react';
+import { canAccessAdminRoute } from '../utils/permissions';
 
 interface AdminNavCard { title: string; description: string; to: string; icon: React.ElementType; tone: string; iconTone: string; badge?: string; }
 
@@ -12,13 +13,13 @@ const navCards: AdminNavCard[] = [
   { title: 'All Reports & Analytics', description: 'Consolidated financial reports, inventory valuation and channel stats.', to: '/admin/reports', icon: FileText, tone: 'from-rose-50 to-pink-50 border-rose-100', iconTone: 'bg-rose-100 text-rose-600', badge: 'REPORTS' },
   { title: 'Creator Hub', description: 'Approve creators, moderate reels, manage points, tiers & leaderboard.', to: '/admin/creators', icon: Sparkles, tone: 'from-pink-50 to-rose-50 border-pink-100', iconTone: 'bg-pink-100 text-pink-600', badge: 'CREATORS' },
   { title: 'User Management', description: 'Super Admin & HR user accounts and access control.', to: '/admin/users', icon: Users, tone: 'from-indigo-50 to-purple-50 border-indigo-100', iconTone: 'bg-indigo-100 text-indigo-600', badge: 'HR' },
-  { title: 'AI Agent Manager', description: 'Manage AI agents, permissions, quotas and activity.', to: '/admin/ai-agents', icon: Bot, tone: 'from-purple-50 to-indigo-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'AI' },
   { title: 'Skincare Catalog', description: 'Products, stock, barcode tools and product intelligence.', to: '/admin/products', icon: Boxes, tone: 'from-emerald-50 to-teal-50 border-emerald-100', iconTone: 'bg-emerald-100 text-emerald-600', badge: 'STOCK' },
   { title: 'Order Fulfillment', description: 'Review orders and manage the fulfillment workflow.', to: '/admin/orders', icon: ShoppingBag, tone: 'from-amber-50 to-yellow-50 border-amber-100', iconTone: 'bg-amber-100 text-amber-600', badge: 'OPS' },
+  { title: 'POS Register', description: 'Run in-store sales and barcode-based checkout.', to: '/admin/pos', icon: CreditCard, tone: 'from-sky-50 to-blue-50 border-sky-100', iconTone: 'bg-sky-100 text-sky-600', badge: 'POS' },
+  { title: 'AI Agent Manager', description: 'Manage AI agents, permissions, quotas and activity.', to: '/admin/ai-agents', icon: Bot, tone: 'from-purple-50 to-indigo-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'AI' },
   { title: 'SEO Optimizer', description: 'Generate and refine search-friendly product content.', to: '/admin/seo', icon: Search, tone: 'from-blue-50 to-cyan-50 border-blue-100', iconTone: 'bg-blue-100 text-blue-600', badge: 'AI' },
   { title: 'Social Copy Studio', description: 'Create campaign-ready social media content with AI.', to: '/admin/social', icon: Megaphone, tone: 'from-fuchsia-50 to-pink-50 border-fuchsia-100', iconTone: 'bg-fuchsia-100 text-fuchsia-600', badge: 'AI' },
   { title: 'WhatsApp Leads', description: 'Manage skincare conversations and customer leads.', to: '/admin/chat-leads', icon: MessageCircle, tone: 'from-green-50 to-emerald-50 border-green-100', iconTone: 'bg-green-100 text-green-600', badge: 'CRM' },
-  { title: 'POS Register', description: 'Run in-store sales and barcode-based checkout.', to: '/admin/pos', icon: CreditCard, tone: 'from-sky-50 to-blue-50 border-sky-100', iconTone: 'bg-sky-100 text-sky-600', badge: 'POS' },
   { title: 'Theme Editor', description: 'Control storefront branding and visual settings.', to: '/admin/theme-editor', icon: Palette, tone: 'from-purple-50 to-fuchsia-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'DESIGN' },
   { title: 'Slack Operations', description: 'Monitor alerts, queues and team operations.', to: '/admin/slack', icon: ShieldCheck, tone: 'from-slate-50 to-gray-50 border-slate-200', iconTone: 'bg-slate-100 text-slate-600', badge: 'OPS' },
 ];
@@ -26,6 +27,8 @@ const navCards: AdminNavCard[] = [
 export const AdminDashboardHome: React.FC = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
+
+  const visibleNavCards = navCards.filter(card => canAccessAdminRoute(profile?.role, card.to));
 
   return (
     <div className="min-h-full pb-8">
@@ -50,9 +53,9 @@ export const AdminDashboardHome: React.FC = () => {
       </section>
 
       <section className="mt-5">
-        <div className="mb-3 flex items-end justify-between px-1"><div><h2 className="text-base font-black tracking-tight text-slate-900 sm:text-lg">Admin Navigation</h2><p className="mt-0.5 text-[11px] text-slate-400">Choose a workspace to continue</p></div><span className="hidden rounded-full bg-pink-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-pink-600 sm:inline-flex">{navCards.length} Workspaces</span></div>
+        <div className="mb-3 flex items-end justify-between px-1"><div><h2 className="text-base font-black tracking-tight text-slate-900 sm:text-lg">Admin Navigation</h2><p className="mt-0.5 text-[11px] text-slate-400">Choose a workspace to continue</p></div><span className="hidden rounded-full bg-pink-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-pink-600 sm:inline-flex">{visibleNavCards.length} Workspaces</span></div>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-          {navCards.map((card) => { const Icon = card.icon; return (
+          {visibleNavCards.map((card) => { const Icon = card.icon; return (
             <button key={card.to} type="button" onClick={() => navigate(card.to)} className={`group relative flex min-h-[148px] flex-col items-center justify-center overflow-hidden rounded-[22px] border bg-gradient-to-br p-4 text-center shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md active:scale-[0.98] sm:min-h-[164px] sm:rounded-[24px] ${card.tone}`}>
               <span className="absolute right-3 top-3 rounded-full bg-white/80 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wider text-slate-400 backdrop-blur">{card.badge}</span>
               <span className={`mb-3 flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm ring-1 ring-white/80 transition group-hover:scale-105 sm:h-16 sm:w-16 ${card.iconTone}`}><Icon size={25} strokeWidth={2} /></span>
