@@ -42,18 +42,21 @@ export function getRetailOriginalPrice(product?: Partial<Product> | null): numbe
  * Returns the wholesale unit price based on tiered quantity.
  * Quantity < 50 -> wholesalePrice
  * Quantity >= 50 -> wholesalePrice50Plus
+ * Strict wholesale mode: If wholesale price is not configured, returns 0 / throws or flags error rather than silently charging retail.
  */
-export function getWholesalePrice(product?: Partial<Product> | null, quantity: number = 1): number {
+export function getWholesalePrice(product?: Partial<Product> | null, quantity: number = 1, strict: boolean = false): number {
   if (!product) return 0;
 
-  const fallbackRetail = getRetailPrice(product);
-  const ws1to49 = product.wholesalePrice !== undefined && !isNaN(Number(product.wholesalePrice)) && Number(product.wholesalePrice) > 0
-    ? Number(product.wholesalePrice)
-    : fallbackRetail;
+  const hasWs1to49 = product.wholesalePrice !== undefined && !isNaN(Number(product.wholesalePrice)) && Number(product.wholesalePrice) > 0;
+  const hasWs50Plus = product.wholesalePrice50Plus !== undefined && !isNaN(Number(product.wholesalePrice50Plus)) && Number(product.wholesalePrice50Plus) > 0;
 
-  const ws50Plus = product.wholesalePrice50Plus !== undefined && !isNaN(Number(product.wholesalePrice50Plus)) && Number(product.wholesalePrice50Plus) > 0
-    ? Number(product.wholesalePrice50Plus)
-    : ws1to49;
+  if (strict && !hasWs1to49 && !hasWs50Plus) {
+    throw new Error(`Wholesale price not configured for "${product.name || 'this product'}".`);
+  }
+
+  const fallbackRetail = getRetailPrice(product);
+  const ws1to49 = hasWs1to49 ? Number(product.wholesalePrice) : fallbackRetail;
+  const ws50Plus = hasWs50Plus ? Number(product.wholesalePrice50Plus) : ws1to49;
 
   if (quantity >= 50) {
     return ws50Plus;
@@ -62,16 +65,40 @@ export function getWholesalePrice(product?: Partial<Product> | null, quantity: n
 }
 
 /**
- * Calculates the unit price for any product given pricing mode and quantity.
+ * Checks if a product has valid wholesale pricing configured.
+ */
+export function isWholesaleConfigured(product?: Partial<Product> | null): boolean {
+  if (!product) return false;
+  const hasWs1to49 = product.wholesalePrice !== undefined && !isNaN(Number(product.wholesalePrice)) && Number(product.wholesalePrice) > 0;
+  const hasWs50Plus = product.wholesalePrice50Plus !== undefined && !isNaN(Number(product.wholesalePrice50Plus)) && Number(product.wholesalePrice50Plus) > 0;
+  return hasWs1to49 || hasWs50Plus;
+}
+
+/**
+ * Aggregates item quantities by productId across cart items to ensure
+ * multi-line or split-line quantities (e.g. 30 + 20 = 50) receive the appropriate 50+ wholesale tier.
+ */
+export function aggregateProductQuantities(items: Array<{ productId: string; quantity: number }>): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const item of items) {
+    if (!item.productId) continue;
+    map[item.productId] = (map[item.productId] || 0) + Number(item.quantity || 0);
+  }
+  return map;
+}
+
+/**
+ * Calculates the unit price for any product given pricing mode and total aggregated quantity.
  */
 export function getProductUnitPrice(
   product?: Partial<Product> | null,
   pricingMode: 'retail' | 'wholesale' = 'retail',
-  quantity: number = 1
+  quantity: number = 1,
+  strictWholesale: boolean = false
 ): number {
   if (!product) return 0;
   if (pricingMode === 'wholesale') {
-    return getWholesalePrice(product, quantity);
+    return getWholesalePrice(product, quantity, strictWholesale);
   }
   return getRetailPrice(product);
 }

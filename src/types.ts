@@ -7,6 +7,7 @@ export interface Product {
   skinTypes: string[];
   // Pricing Fields
   importPrice?: number;
+  costPrice?: number;
   wholesalePrice?: number;
   wholesalePrice50Plus?: number;
   retailPrice?: number;
@@ -35,7 +36,7 @@ export interface Product {
 
 export type OrderStatus = 'pending' | 'packing' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
-export type OrderSource = 'WEBSITE' | 'POS';
+export type OrderSource = 'WEBSITE' | 'POS' | 'WHOLESALE' | 'MANUAL';
 
 export interface OrderItem {
   productId: string;
@@ -57,6 +58,70 @@ export interface CourierData {
   createdAt: string;
 }
 
+export type PaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'REFUNDED' | 'VOID';
+
+export type PaymentMethodType = 'CASH' | 'BKASH' | 'NAGAD' | 'ROCKET' | 'CARD' | 'BANK_TRANSFER' | 'CREDIT_DUE' | 'COD' | 'POS_In_Person';
+
+export interface PaymentTransaction {
+  id: string;
+  orderId: string;
+  type: 'POS_PAYMENT' | 'POS_DUE_COLLECTION' | 'ONLINE_PAYMENT' | 'COD_SETTLEMENT' | 'REFUND' | 'WHOLESALE_PAYMENT';
+  method: PaymentMethodType;
+  amount: number;
+  note?: string;
+  receivedBy: string;
+  receivedAt: string;
+  source: 'POS' | 'WEBSITE' | 'WHOLESALE' | 'MANUAL';
+  idempotencyKey?: string;
+  accountCode?: string; // e.g. 'CASH_REGISTER', 'BKASH_MERCHANT', 'NAGAD_MERCHANT', 'BRAC_BANK'
+  customerPhone?: string;
+  customerName?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface FinancialTransaction {
+  id: string;
+  transactionType: 'MONEY_IN' | 'MONEY_OUT' | 'EXPENSE' | 'COGS' | 'REFUND' | 'TRANSFER' | 'CAPITAL_IN' | 'WITHDRAWAL';
+  category: 'REVENUE' | 'COGS' | 'OPERATING_EXPENSE' | 'SALARY' | 'MARKETING' | 'RENT' | 'SUPPLIER_PAYMENT' | 'COURIER_CHARGE' | 'PACKAGING' | 'CAPITAL' | 'WITHDRAWAL' | 'TAX' | 'UTILITY' | 'TRANSFER' | 'OTHER';
+  amount: number;
+  date: string; // ISO or YYYY-MM-DD
+  referenceType?: 'ORDER' | 'STOCK_RECEIPT' | 'SUPPLIER_INVOICE' | 'EXPENSE_VOUCHER' | 'TRANSFER' | 'CAPITAL' | 'WITHDRAWAL' | 'MANUAL';
+  referenceId?: string;
+  accountCode: 'CASH_REGISTER' | 'BKASH_MERCHANT' | 'NAGAD_MERCHANT' | 'CITY_BANK' | 'BRAC_BANK' | 'PETTY_CASH' | 'ACCOUNTS_RECEIVABLE' | 'GENERAL';
+  targetAccountCode?: 'CASH_REGISTER' | 'BKASH_MERCHANT' | 'NAGAD_MERCHANT' | 'CITY_BANK' | 'BRAC_BANK' | 'PETTY_CASH' | 'GENERAL';
+  description: string;
+  performedBy: string;
+  createdAt: string;
+  receiptUrl?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface InventoryCostLayer {
+  id: string;
+  productId: string;
+  receiptId?: string;
+  quantityRemaining: number;
+  unitCostBDT: number;
+  batchNumber?: string;
+  createdAt: string;
+}
+
+export interface WholesaleCustomer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  storeName?: string;
+  address?: string;
+  tradeLicenseNumber?: string;
+  creditLimit: number;
+  currentDue: number;
+  status: 'active' | 'suspended' | 'pending';
+  totalPurchasedBDT: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Order {
   id: string;
   customerName: string;
@@ -75,9 +140,16 @@ export interface Order {
   stock_restored?: boolean;
   cancelReason?: string;
   createdAt: string;
-  paymentMethod: 'COD' | 'POS_In_Person';
+  paymentMethod: 'COD' | 'POS_In_Person' | PaymentMethodType;
   sessionType: 'Online' | 'POS';
   isPaid: boolean;
+  paymentStatus?: PaymentStatus;
+  totalPaid?: number;
+  dueAmount?: number;
+  changeAmount?: number;
+  cogsAmount?: number;
+  grossProfit?: number;
+  paymentTransactions?: PaymentTransaction[];
   courier?: CourierData;
   attribution?: {
     utm_source?: string;
@@ -106,7 +178,7 @@ export interface StockMovement {
   orderId?: string;
   quantity: number; // Negative for sale/deduction, positive for return/restock
   type: 'sale' | 'return' | 'restock' | 'adjustment' | 'stock_in';
-  source: 'WEBSITE' | 'POS' | 'MANUAL';
+  source: OrderSource;
   createdAt: string;
   performedBy: string;
   previousStock?: number;

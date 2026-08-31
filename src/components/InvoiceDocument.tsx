@@ -243,9 +243,46 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
           </div>
 
           <div className="border-t-2 border-gray-900 pt-2 flex justify-between items-center mt-2">
-            <span className="text-[14px] font-bold text-gray-900">Total paid</span>
-            <span className="text-[16px] font-extrabold text-[#993556] font-mono">
+            <span className="text-[13px] font-bold text-gray-900">Grand Total</span>
+            <span className="text-[15px] font-extrabold text-[#993556] font-mono">
               ৳{order.totalAmount.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="flex justify-between items-center text-gray-600 pt-1 text-[11px]">
+            <span>Paid Amount ({order.paymentMethod || 'CASH'})</span>
+            <span className="font-mono font-bold text-emerald-700">
+              ৳{(order.totalPaid ?? (order.isPaid ? order.totalAmount : 0)).toLocaleString()}
+            </span>
+          </div>
+
+          {(order.dueAmount !== undefined && order.dueAmount > 0) && (
+            <div className="flex justify-between items-center text-rose-700 bg-rose-50 px-2 py-1 rounded border border-rose-200 text-[11px] font-bold">
+              <span>Due Balance</span>
+              <span className="font-mono">৳{order.dueAmount.toLocaleString()}</span>
+            </div>
+          )}
+
+          {(order.changeAmount !== undefined && order.changeAmount > 0) && (
+            <div className="flex justify-between items-center text-gray-500 text-[11px]">
+              <span>Change Return</span>
+              <span className="font-mono font-medium">৳{order.changeAmount.toLocaleString()}</span>
+            </div>
+          )}
+
+          <div className="text-right pt-0.5">
+            <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+              (order.dueAmount === 0 || order.isPaid || order.paymentStatus === 'PAID')
+                ? 'bg-emerald-100 text-emerald-800'
+                : (order.totalPaid && order.totalPaid > 0)
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-rose-100 text-rose-800'
+            }`}>
+              {(order.dueAmount === 0 || order.isPaid || order.paymentStatus === 'PAID')
+                ? 'PAID IN FULL'
+                : (order.totalPaid && order.totalPaid > 0)
+                ? 'PARTIALLY PAID'
+                : 'UNPAID / DUE'}
             </span>
           </div>
         </div>

@@ -34,8 +34,13 @@ import {
   Bug, 
   Loader2, 
   PackagePlus, 
-  Package 
+  Package,
+  Eye,
+  EyeOff,
+  Sparkles
 } from 'lucide-react';
+import { PosScanProgressOverlay } from './pos/PosScanProgressOverlay';
+import { PosProductQuickViewModal } from './pos/PosProductQuickViewModal';
 
 export { type ScannerContext };
 
@@ -171,6 +176,30 @@ export default function PosScan({
       return true;
     }
   });
+
+  // Quick View Inspection Overlay State
+  const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [isQuickViewOpen, setIsQuickViewOpen] = useState<boolean>(false);
+  const [quickViewEnabled, setQuickViewEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('pos_scan_quickview_enabled');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleQuickViewMode = () => {
+    const next = !quickViewEnabled;
+    setQuickViewEnabled(next);
+    try {
+      localStorage.setItem('pos_scan_quickview_enabled', String(next));
+    } catch {}
+    setScanStatusMsg({
+      type: 'success',
+      text: next ? '✨ Quick-View on scan active' : '⚡ Fast direct add on scan active'
+    });
+  };
 
   const [showDebugMode, setShowDebugMode] = useState<boolean>(false);
   const [debugInfo, setDebugInfo] = useState<BarcodeDebugInfo | null>(null);
@@ -517,6 +546,60 @@ export default function PosScan({
   };
 
   // ================= 5. BARCODE SUCCESS PROCESSING =================
+  const handleAddProductWithQuantity = async (
+    product: Product,
+    quantity: number,
+    action: 'keep_scanning' | 'checkout'
+  ) => {
+    if (!product || quantity <= 0) return;
+    getAudioContext();
+    const productId = product.id;
+
+    if (context === 'STOCK_IN') {
+      // CONTEXT-AWARE: STOCK RECEIVING FLOW
+      if (onAddToStockIn) {
+        for (let i = 0; i < quantity; i++) {
+          onAddToStockIn(product);
+        }
+      }
+    } else {
+      // CONTEXT-AWARE: SALE REGISTER FLOW
+      if (activeSessionId) {
+        for (let i = 0; i < quantity; i++) {
+          const result = await addProductToSession(activeSessionId, productId);
+          if (!result.success && i === 0) {
+            if (soundEnabled) playErrorBeep();
+            setScanStatusMsg({
+              type: 'error',
+              text: result.message || `Failed to add product.`
+            });
+            return;
+          }
+        }
+      } else if (onAddToCart) {
+        for (let i = 0; i < quantity; i++) {
+          onAddToCart(product);
+        }
+      }
+    }
+
+    if (soundEnabled) playSuccessBeep();
+    if (navigator.vibrate) navigator.vibrate(90);
+
+    setLastScannedProduct(product);
+    setScanStatusMsg({
+      type: 'success',
+      text: `Added ${quantity > 1 ? `${quantity} × ` : ''}"${product.name}"!`
+    });
+
+    setIsQuickViewOpen(false);
+
+    if (action === 'checkout') {
+      stopScanner();
+      onBack();
+    }
+  };
+
   const handleScanSuccess = async (rawText: string) => {
     if (!rawText) return;
 
@@ -549,31 +632,16 @@ export default function PosScan({
     if (soundEnabled) playSuccessBeep();
     if (navigator.vibrate) navigator.vibrate(90);
 
-    if (context === 'STOCK_IN') {
-      // CONTEXT-AWARE: STOCK RECEIVING FLOW
-      if (onAddToStockIn) {
-        onAddToStockIn(product);
-      }
-    } else {
-      // CONTEXT-AWARE: SALE REGISTER FLOW
-      if (activeSessionId) {
-        const result = await addProductToSession(activeSessionId, productId);
-        if (!result.success) {
-          if (soundEnabled) playErrorBeep();
-          setScanStatusMsg({
-            type: 'error',
-            text: result.message || `Failed to add product.`
-          });
-          return;
-        }
-      } else if (onAddToCart) {
-        onAddToCart(product);
-      }
-    }
+    setLastScannedProduct(product);
 
-    // Successful scan: stop camera/media tracks, close scanner, return to originating POS section/card
-    stopScanner();
-    onBack();
+    if (quickViewEnabled) {
+      // Show Quick-View for product details upon successful match!
+      setQuickViewProduct(product);
+      setIsQuickViewOpen(true);
+    } else {
+      // Direct fast add
+      await handleAddProductWithQuantity(product, 1, 'keep_scanning');
+    }
   };
 
   // Products list for manual search
@@ -597,44 +665,18 @@ export default function PosScan({
     }).slice(0, 15);
   }, [productsList, manualCode]);
 
-  const handleSelectManualProduct = async (product: Product) => {
+  const handleSelectManualProduct = async (product: Product, openQuickViewFirst: boolean = false) => {
     if (!product) return;
     getAudioContext();
-    const productId = product.id;
 
-    if (soundEnabled) playSuccessBeep();
-    if (navigator.vibrate) navigator.vibrate(90);
-
-    setLastScannedProduct(product);
-
-    if (context === 'STOCK_IN') {
-      if (onAddToStockIn) {
-        onAddToStockIn(product);
-      }
-    } else {
-      if (activeSessionId) {
-        const result = await addProductToSession(activeSessionId, productId);
-        if (!result.success) {
-          if (soundEnabled) playErrorBeep();
-          setScanStatusMsg({
-            type: 'error',
-            text: result.message || `Failed to add product.`
-          });
-          return;
-        }
-      } else if (onAddToCart) {
-        onAddToCart(product);
-      }
+    if (openQuickViewFirst || quickViewEnabled) {
+      setQuickViewProduct(product);
+      setIsQuickViewOpen(true);
+      return;
     }
 
-    setScanStatusMsg({
-      type: 'success',
-      text: `Added "${product.name}" to cart!`
-    });
-
+    await handleAddProductWithQuantity(product, 1, 'keep_scanning');
     setManualCode('');
-    stopScanner();
-    onBack();
   };
 
   // Manual code submission
@@ -967,6 +1009,20 @@ export default function PosScan({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Quick-View Mode Toggle */}
+            <button
+              type="button"
+              onClick={toggleQuickViewMode}
+              className={`p-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 shadow-2xs ${
+                quickViewEnabled 
+                  ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100' 
+                  : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'
+              }`}
+              title={quickViewEnabled ? 'Quick-View Product Modal ON (Inspect details & qty upon scan)' : 'Direct Fast Add (Quick-View Modal OFF)'}
+            >
+              {quickViewEnabled ? <Eye size={13} className="text-purple-600" /> : <EyeOff size={13} />}
+            </button>
+
             {/* Audio Toggle */}
             <button
               type="button"
@@ -1069,14 +1125,17 @@ export default function PosScan({
               <div className="w-full aspect-square max-w-[300px] bg-black rounded-3xl overflow-hidden relative border-4 border-[#E91E8C] shadow-2xl">
                 <div id="reader-container" className="w-full h-full"></div>
                 
-                {/* Laser animation */}
-                <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-0.5 bg-red-500 shadow-[0_0_12px_#ef4444] animate-pulse z-10 pointer-events-none"></div>
-
-                <div className="absolute top-2 inset-x-0 text-center z-10">
-                  <span className="bg-black/60 text-white text-[9px] font-bold px-3 py-1 rounded-full backdrop-blur-xs">
-                    Align Barcode or QR in Box
-                  </span>
-                </div>
+                {/* Advanced Visual Scanner Progress HUD Overlay */}
+                <PosScanProgressOverlay
+                  isScanning={isCameraActive}
+                  isAnalyzingPhoto={isPhotoScanning}
+                  zoomLevel={posCameraZoom}
+                  onZoomChange={handlePosZoomChange}
+                  onRefocus={() => applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true })}
+                  onSwitchCamera={() => setUseFrontCamera(!useFrontCamera)}
+                  useFrontCamera={useFrontCamera}
+                  scanStatusMsg={scanStatusMsg}
+                />
               </div>
             ) : (
               <div className="w-full aspect-square max-w-[300px] bg-white rounded-3xl border border-pink-100 shadow-inner flex flex-col items-center justify-center p-6 text-center space-y-4">
@@ -1189,18 +1248,40 @@ export default function PosScan({
 
             {/* RECENTLY SCANNED ITEM BANNER */}
             {lastScannedProduct && (
-              <div className="w-full bg-white p-3.5 rounded-2xl border-b-4 border-[#E91E8C] shadow-md flex items-center gap-3 animate-scaleIn">
-                <img 
-                  src={lastScannedProduct.image} 
-                  alt={lastScannedProduct.name}
-                  className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-xs flex-shrink-0"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="flex-1 min-w-0 text-left text-[11px]">
-                  <span className="text-[9px] uppercase font-extrabold text-[#E91E8C] block">Added to Session Cart</span>
-                  <h4 className="font-bold text-gray-800 truncate">{lastScannedProduct.name}</h4>
-                  <p className="text-gray-500 font-mono mt-0.5">Price: <strong>৳{getRetailPrice(lastScannedProduct)}</strong></p>
+              <div className="w-full bg-white p-3.5 rounded-2xl border-b-4 border-[#E91E8C] shadow-md flex items-center justify-between gap-3 animate-scaleIn">
+                <div 
+                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                  onClick={() => {
+                    setQuickViewProduct(lastScannedProduct);
+                    setIsQuickViewOpen(true);
+                  }}
+                  title="Click to view product details & adjust quantity"
+                >
+                  <img 
+                    src={lastScannedProduct.image} 
+                    alt={lastScannedProduct.name}
+                    className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-xs flex-shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="flex-1 min-w-0 text-left text-[11px]">
+                    <span className="text-[9px] uppercase font-extrabold text-[#E91E8C] block">Matched & Added to Cart</span>
+                    <h4 className="font-bold text-gray-800 truncate">{lastScannedProduct.name}</h4>
+                    <p className="text-gray-500 font-mono mt-0.5">Price: <strong>৳{getRetailPrice(lastScannedProduct)}</strong> &bull; Stock: {lastScannedProduct.stock}</p>
+                  </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickViewProduct(lastScannedProduct);
+                    setIsQuickViewOpen(true);
+                  }}
+                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 p-2 rounded-xl border border-purple-200 transition cursor-pointer flex-shrink-0 flex items-center gap-1 text-[10px] font-bold"
+                  title="Quick View Product Specs & Quantities"
+                >
+                  <Eye size={13} />
+                  <span>Inspect</span>
+                </button>
               </div>
             )}
 
@@ -1290,27 +1371,52 @@ export default function PosScan({
                 <div className="bg-pink-50/50 border border-pink-100 rounded-2xl p-2 space-y-1.5 max-h-56 overflow-y-auto">
                   <span className="text-[9px] font-bold text-gray-400 uppercase px-1">Matching Products ({filteredManualProducts.length}):</span>
                   {filteredManualProducts.map((p) => (
-                    <button
+                    <div
                       key={p.id}
-                      type="button"
-                      onClick={() => handleSelectManualProduct(p)}
-                      className="w-full bg-white hover:bg-pink-100/60 p-2 rounded-xl border border-pink-100 text-left flex items-center justify-between gap-2 transition cursor-pointer"
+                      className="w-full bg-white hover:bg-pink-100/60 p-2 rounded-xl border border-pink-100 text-left flex items-center justify-between gap-2 transition"
                     >
                       <img 
                         src={p.image} 
                         alt={p.name}
-                        className="w-8 h-8 object-cover rounded-lg border border-pink-100 flex-shrink-0"
+                        className="w-8 h-8 object-cover rounded-lg border border-pink-100 flex-shrink-0 cursor-pointer"
                         referrerPolicy="no-referrer"
+                        onClick={() => {
+                          setQuickViewProduct(p);
+                          setIsQuickViewOpen(true);
+                        }}
                       />
-                      <div className="min-w-0 flex-1">
+                      <div 
+                        className="min-w-0 flex-1 cursor-pointer"
+                        onClick={() => {
+                          setQuickViewProduct(p);
+                          setIsQuickViewOpen(true);
+                        }}
+                      >
                         <span className="text-[8px] font-bold text-[#E91E8C] uppercase block truncate">{p.brand}</span>
                         <h5 className="font-bold text-gray-900 text-[11px] truncate">{p.name}</h5>
                         <span className="font-mono text-[9px] text-gray-400">৳{getRetailPrice(p)} &bull; Stock: {p.stock}</span>
                       </div>
-                      <span className="bg-[#E91E8C] text-white text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 flex items-center gap-0.5">
-                        <Plus size={10} /> Add
-                      </span>
-                    </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickViewProduct(p);
+                            setIsQuickViewOpen(true);
+                          }}
+                          className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg border border-purple-200 cursor-pointer transition"
+                          title="Quick View details"
+                        >
+                          <Eye size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectManualProduct(p, false)}
+                          className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 flex items-center gap-0.5 cursor-pointer transition shadow-xs"
+                        >
+                          <Plus size={10} /> Add
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -1332,9 +1438,12 @@ export default function PosScan({
                   <button
                     key={prod.id}
                     type="button"
-                    onClick={() => handleSelectManualProduct(prod)}
+                    onClick={() => {
+                      setQuickViewProduct(prod);
+                      setIsQuickViewOpen(true);
+                    }}
                     className="bg-pink-50 hover:bg-pink-100 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1 rounded-xl cursor-pointer transition truncate max-w-[150px]"
-                    title={prod.name}
+                    title={`View ${prod.name}`}
                   >
                     {prod.name}
                   </button>
@@ -1372,16 +1481,38 @@ export default function PosScan({
                     <img 
                       src={item.product.image} 
                       alt={item.product.name} 
-                      className="w-10 h-10 object-cover rounded-xl border border-pink-100 flex-shrink-0"
+                      className="w-10 h-10 object-cover rounded-xl border border-pink-100 flex-shrink-0 cursor-pointer"
                       referrerPolicy="no-referrer"
+                      onClick={() => {
+                        setQuickViewProduct(item.product);
+                        setIsQuickViewOpen(true);
+                      }}
+                      title="Inspect Product"
                     />
                     
-                    <div className="flex-1 min-w-0">
+                    <div 
+                      className="flex-1 min-w-0 cursor-pointer"
+                      onClick={() => {
+                        setQuickViewProduct(item.product);
+                        setIsQuickViewOpen(true);
+                      }}
+                    >
                       <h5 className="font-bold text-gray-800 text-[11px] truncate">{item.product.name}</h5>
                       <span className="text-[#E91E8C] font-black font-mono text-[10px]">৳{getRetailPrice(item.product)}</span>
                     </div>
 
                     <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQuickViewProduct(item.product);
+                          setIsQuickViewOpen(true);
+                        }}
+                        className="p-1 text-purple-600 hover:bg-purple-50 rounded-lg cursor-pointer mr-0.5"
+                        title="Quick View Details"
+                      >
+                        <Eye size={12} />
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleDecrementMobile(item.docIds)}
@@ -1444,6 +1575,15 @@ export default function PosScan({
           </span>
         </div>
       </footer>
+
+      {/* POS PRODUCT QUICK-VIEW MODAL UPON SUCCESSFUL SCAN OR INSPECT */}
+      <PosProductQuickViewModal
+        product={quickViewProduct}
+        isOpen={isQuickViewOpen}
+        onClose={() => setIsQuickViewOpen(false)}
+        onConfirmAdd={handleAddProductWithQuantity}
+        context={context}
+      />
     </div>
   );
 }

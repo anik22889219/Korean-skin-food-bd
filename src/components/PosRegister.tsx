@@ -6,7 +6,7 @@ import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
 import { posDiscoveryService } from '../services/posDiscoveryService';
 import { useAuth } from '../context/AuthContext';
-import { Product, Order, StockReceipt } from '../types';
+import { Product, Order, StockReceipt, PaymentMethodType } from '../types';
 import { InvoiceDocument } from './InvoiceDocument';
 import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 import { playSuccessBeep } from './PosScan';
@@ -133,6 +133,11 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [deliveryArea, setDeliveryArea] = useState<DeliveryArea>('none');
+  
+  // Payment Tender & Method state
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>('CASH');
+  const [paidAmount, setPaidAmount] = useState<string>('');
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
   
   // Completed Invoice State
   const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
@@ -571,7 +576,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         customerAddress: customerAddress.trim(),
         deliveryArea,
         pricingMode,
-        items: checkoutItems
+        items: checkoutItems,
+        paidAmount: paidAmount !== '' ? Number(paidAmount) : undefined,
+        paymentMethod,
+        notes: paymentNotes
       });
 
       if (!result.success || !result.order) {
@@ -594,6 +602,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     setCustomerName('');
     setCustomerPhone('');
     setCustomerAddress('');
+    setPaidAmount('');
+    setPaymentNotes('');
+    setPaymentMethod('CASH');
     setScans([]);
   };
 
@@ -969,6 +980,12 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                     setCustomerAddress={setCustomerAddress}
                     deliveryArea={deliveryArea}
                     setDeliveryArea={setDeliveryArea}
+                    paymentMethod={paymentMethod}
+                    setPaymentMethod={setPaymentMethod}
+                    paidAmount={paidAmount}
+                    setPaidAmount={setPaidAmount}
+                    notes={paymentNotes}
+                    setNotes={setPaymentNotes}
                     onCheckout={handleCheckout}
                     isSubmitting={isSubmitting}
                   />
@@ -1003,6 +1020,12 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 setCustomerAddress={setCustomerAddress}
                 deliveryArea={deliveryArea}
                 setDeliveryArea={setDeliveryArea}
+                paymentMethod={paymentMethod}
+                setPaymentMethod={setPaymentMethod}
+                paidAmount={paidAmount}
+                setPaidAmount={setPaidAmount}
+                notes={paymentNotes}
+                setNotes={setPaymentNotes}
                 onCheckout={handleCheckout}
                 isSubmitting={isSubmitting}
               />

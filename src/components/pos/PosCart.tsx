@@ -1,6 +1,7 @@
 import React from 'react';
 import { CartItem, PricingMode, DeliveryArea } from './types';
-import { ShoppingBag, Trash2, Plus, Minus, User, Phone, MapPin, Truck, Receipt, CheckCircle, Loader2, ScanLine } from 'lucide-react';
+import { PaymentMethodType } from '../../types';
+import { ShoppingBag, Trash2, Plus, Minus, User, Phone, MapPin, Truck, Receipt, CheckCircle, Loader2, ScanLine, CreditCard, Banknote, AlertCircle } from 'lucide-react';
 import { getProductUnitPrice } from '../../utils/pricing';
 
 interface PosCartProps {
@@ -23,6 +24,12 @@ interface PosCartProps {
   setCustomerAddress: (val: string) => void;
   deliveryArea: DeliveryArea;
   setDeliveryArea: (val: DeliveryArea) => void;
+  paymentMethod: PaymentMethodType;
+  setPaymentMethod: (method: PaymentMethodType) => void;
+  paidAmount: string;
+  setPaidAmount: (val: string) => void;
+  notes: string;
+  setNotes: (val: string) => void;
   onCheckout: (e: React.FormEvent) => void;
   isSubmitting: boolean;
 }
@@ -47,6 +54,12 @@ export const PosCart: React.FC<PosCartProps> = ({
   setCustomerAddress,
   deliveryArea,
   setDeliveryArea,
+  paymentMethod,
+  setPaymentMethod,
+  paidAmount,
+  setPaidAmount,
+  notes,
+  setNotes,
   onCheckout,
   isSubmitting
 }) => {
@@ -357,36 +370,182 @@ export const PosCart: React.FC<PosCartProps> = ({
         </div>
       </div>
 
+      {/* PAYMENT METHOD & TENDER SECTION */}
+      <div className="bg-white p-5 sm:p-6 rounded-[32px] border border-pink-100 shadow-xs space-y-4">
+        <div className="border-b border-pink-50 pb-2 flex items-center justify-between">
+          <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+            <CreditCard size={15} className="text-[#E91E8C]" />
+            <span>Payment Method & Tender</span>
+          </h4>
+          <span className="text-[10px] text-pink-600 font-bold uppercase tracking-wider bg-pink-50 px-2 py-0.5 rounded-full border border-pink-100">
+            Realtime Settlement
+          </span>
+        </div>
+
+        {/* Payment Methods Grid */}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {[
+            { id: 'CASH', label: 'Cash', icon: '💵' },
+            { id: 'BKASH', label: 'bKash', icon: '📱' },
+            { id: 'NAGAD', label: 'Nagad', icon: '💳' },
+            { id: 'CARD', label: 'Card / POS', icon: '🏧' },
+            { id: 'BANK_TRANSFER', label: 'Bank', icon: '🏦' },
+            { id: 'CREDIT_DUE', label: 'Due / Credit', icon: '📝' },
+          ].map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => {
+                setPaymentMethod(m.id as PaymentMethodType);
+                if (m.id === 'CREDIT_DUE') {
+                  setPaidAmount('0');
+                } else if (paidAmount === '0' || !paidAmount) {
+                  setPaidAmount(grandTotal.toString());
+                }
+              }}
+              className={`p-2 rounded-xl border text-center transition cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                paymentMethod === m.id
+                  ? 'bg-[#E91E8C] border-[#E91E8C] text-white shadow-xs font-black'
+                  : 'bg-white border-pink-100 hover:bg-pink-50 text-gray-700 font-semibold'
+              }`}
+            >
+              <span className="text-base">{m.icon}</span>
+              <span className="text-[11px] whitespace-nowrap">{m.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Paid Amount Input & Quick Tender Buttons */}
+        <div className="space-y-2 pt-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-bold text-gray-700 flex items-center gap-1">
+              <Banknote size={13} className="text-pink-500" />
+              <span>Customer Tendered / Paid Amount (৳)</span>
+            </label>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPaidAmount(grandTotal.toString())}
+                className="text-[10px] font-bold bg-pink-50 hover:bg-pink-100 text-[#E91E8C] px-2 py-0.5 rounded-lg border border-pink-200 transition cursor-pointer"
+              >
+                Exact (৳{grandTotal.toLocaleString()})
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaidAmount('0')}
+                className="text-[10px] font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded-lg border border-gray-300 transition cursor-pointer"
+              >
+                Zero / Full Due
+              </button>
+            </div>
+          </div>
+
+          <div className="relative">
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-black text-gray-400 text-sm">৳</span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={paidAmount}
+              onChange={(e) => setPaidAmount(e.target.value)}
+              placeholder={grandTotal.toString()}
+              className="w-full bg-pink-50/10 text-gray-900 font-mono font-bold text-base pl-8 pr-4 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] focus:bg-white transition"
+            />
+          </div>
+
+          {/* Quick Denominations */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-1">
+            <span className="text-[10px] text-gray-400 font-bold uppercase">Quick:</span>
+            {[500, 1000, 2000, 3000, 5000].map((denom) => (
+              <button
+                key={denom}
+                type="button"
+                onClick={() => setPaidAmount(denom.toString())}
+                className="text-[10px] font-mono font-bold bg-gray-50 hover:bg-pink-50 text-gray-600 hover:text-[#E91E8C] px-2 py-1 rounded-md border border-gray-200 hover:border-pink-200 transition cursor-pointer"
+              >
+                ৳{denom.toLocaleString()}
+              </button>
+            ))}
+          </div>
+
+          {/* Optional notes */}
+          <div className="pt-2">
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Payment Note (e.g. bKash TrxID, Cheque #, Due Promise Date)"
+              className="w-full bg-pink-50/10 text-gray-800 text-[11px] px-3.5 py-2 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] focus:bg-white transition"
+            />
+          </div>
+        </div>
+      </div>
+
       {/* ORDER SUMMARY & CHECKOUT BUTTON */}
       <div className="bg-gradient-to-b from-pink-50/40 to-pink-50/90 p-5 sm:p-6 rounded-[32px] border border-pink-200/80 shadow-xs space-y-4 text-xs">
         <div className="border-b border-pink-200/60 pb-2 flex items-center justify-between">
           <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
             <Receipt size={15} className="text-[#E91E8C]" />
-            <span>Order Summary</span>
+            <span>Order & Payment Summary</span>
           </h4>
           <span className="font-mono text-[11px] text-pink-700 font-semibold">{totalItemsCount} total items</span>
         </div>
 
-        <div className="space-y-1.5 font-mono text-gray-700">
-          <div className="flex justify-between font-medium">
-            <span className="text-gray-600">Items Subtotal:</span>
-            <span className="font-bold text-gray-900">৳{subtotal.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between font-medium">
-            <span className="text-gray-600">Delivery Charge:</span>
-            <span className="font-bold text-gray-900">৳{cartItems.length > 0 ? deliveryCharge : 0}</span>
-          </div>
+        {(() => {
+          const tenderedNum = paidAmount === '' ? grandTotal : Number(paidAmount) || 0;
+          const totalPaidNum = Math.max(0, Math.min(tenderedNum, grandTotal));
+          const dueNum = Math.max(0, grandTotal - totalPaidNum);
+          const changeNum = Math.max(0, tenderedNum - grandTotal);
 
-          <div className="bg-white p-4 rounded-2xl border border-pink-200 shadow-2xs flex items-center justify-between mt-2">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-pink-600 block tracking-wider">Total Amount Due</span>
-              <span className="text-xs sm:text-sm font-black text-gray-900">Grand Total BDT</span>
+          return (
+            <div className="space-y-2 font-mono text-gray-700">
+              <div className="flex justify-between font-medium">
+                <span className="text-gray-600">Items Subtotal:</span>
+                <span className="font-bold text-gray-900">৳{subtotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between font-medium">
+                <span className="text-gray-600">Delivery Charge:</span>
+                <span className="font-bold text-gray-900">৳{cartItems.length > 0 ? deliveryCharge : 0}</span>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-pink-200 shadow-2xs space-y-2 mt-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-pink-600 block tracking-wider">Total Amount Due</span>
+                    <span className="text-xs sm:text-sm font-black text-gray-900 font-sans">Grand Total BDT</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-[#E91E8C] font-mono">৳{grandTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-pink-100 pt-2 grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-emerald-50/80 p-2 rounded-xl border border-emerald-100">
+                    <span className="text-[9px] uppercase font-bold text-emerald-800 block font-sans">Total Paid</span>
+                    <span className="text-sm font-black text-emerald-700 font-mono">৳{totalPaidNum.toLocaleString()}</span>
+                  </div>
+                  <div className={`p-2 rounded-xl border ${dueNum > 0 ? 'bg-rose-50 border-rose-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <span className="text-[9px] uppercase font-bold text-rose-800 block font-sans">Due Remaining</span>
+                    <span className={`text-sm font-black font-mono ${dueNum > 0 ? 'text-rose-700' : 'text-gray-400'}`}>
+                      ৳{dueNum.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="bg-blue-50/80 p-2 rounded-xl border border-blue-100">
+                    <span className="text-[9px] uppercase font-bold text-blue-800 block font-sans">Change Return</span>
+                    <span className="text-sm font-black text-blue-700 font-mono">৳{changeNum.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {dueNum > 0 && !customerPhone.trim() && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-amber-800 bg-amber-50 p-2 rounded-xl border border-amber-200 font-sans">
+                    <AlertCircle size={13} className="shrink-0 text-amber-600" />
+                    <span>Recommendation: Provide customer mobile phone number to track due balance.</span>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="text-right">
-              <span className="text-2xl font-black text-[#E91E8C] font-mono">৳{grandTotal.toLocaleString()}</span>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
 
         <button
           type="submit"

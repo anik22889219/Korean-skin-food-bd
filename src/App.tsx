@@ -23,6 +23,8 @@ import { AdminAIAgents } from './components/AdminAIAgents';
 import { UserManagement } from './components/UserManagement';
 import { AdminCreators } from './components/AdminCreators';
 import { AdminReportsPage } from './components/AdminReportsPage';
+import AdminBusinessFinance from './components/AdminBusinessFinance';
+import AdminPaymentsDue from './components/AdminPaymentsDue';
 import { CreatorRoute } from './components/CreatorRoute';
 import { CreatorLayout } from './components/CreatorLayout';
 import { CreatorDashboard } from './components/CreatorDashboard';
@@ -36,6 +38,8 @@ import { ContactUs } from './components/ContactUs';
 import PosRegister from './components/PosRegister';
 import PosScan from './components/PosScan';
 import { productService } from './services/productService';
+import { posService } from './services/posService';
+import { Order } from './types';
 import { analytics } from './services/analyticsService';
 
 // Centralized SPA Route Tracker for Meta Pixel PageView and GA4 page_view
@@ -104,6 +108,34 @@ const PosScanRouteWrapper: React.FC = () => {
   );
 };
 
+// Wrapper for the Business Finance Dashboard to pass real-time orders
+const AdminBusinessFinanceRouteWrapper: React.FC = () => {
+  const [orders, setOrders] = React.useState<Order[]>(() => posService.getOrders());
+  
+  React.useEffect(() => {
+    const unsub = posService.subscribe((updatedOrders) => {
+      setOrders(updatedOrders);
+    });
+    return () => unsub();
+  }, []);
+
+  return <AdminBusinessFinance orders={orders} />;
+};
+
+// Wrapper for the Customer Due Payments Dashboard to pass real-time orders
+const AdminPaymentsDueRouteWrapper: React.FC = () => {
+  const [orders, setOrders] = React.useState<Order[]>(() => posService.getOrders());
+  
+  React.useEffect(() => {
+    const unsub = posService.subscribe((updatedOrders) => {
+      setOrders(updatedOrders);
+    });
+    return () => unsub();
+  }, []);
+
+  return <AdminPaymentsDue orders={orders} />;
+};
+
 // Wrapper for the POS Register simulator to pass products
 const PosRegisterRouteWrapper: React.FC = () => {
   const navigate = useNavigate();
@@ -157,6 +189,10 @@ export default function App() {
             <Route element={<AdminRoute />}>
               <Route path="admin" element={<AdminLayout />}>
                 <Route index element={<AdminDashboardHome />} />
+                <Route path="business-finance" element={<AdminBusinessFinanceRouteWrapper />} />
+                <Route path="finance" element={<AdminBusinessFinanceRouteWrapper />} />
+                <Route path="payments-due" element={<AdminPaymentsDueRouteWrapper />} />
+                <Route path="dues" element={<AdminPaymentsDueRouteWrapper />} />
                 <Route path="reports" element={<AdminReportsPage />} />
                 <Route path="creators" element={<AdminCreators />} />
                 <Route path="users" element={<UserManagement />} />

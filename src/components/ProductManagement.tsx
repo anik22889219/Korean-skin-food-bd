@@ -2248,7 +2248,10 @@ export const ProductManagement: React.FC = () => {
                       step="any"
                       placeholder="e.g. 800"
                       value={editingProduct.importPrice ?? ''}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, importPrice: Number(e.target.value) })}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, importPrice: val });
+                      }}
                       className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
                     />
                     <span className="text-[9px] text-gray-400 block mt-0.5">Confidential cost per unit</span>
@@ -2266,7 +2269,10 @@ export const ProductManagement: React.FC = () => {
                       step="any"
                       placeholder="e.g. 1000"
                       value={editingProduct.wholesalePrice ?? ''}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, wholesalePrice: Number(e.target.value) })}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, wholesalePrice: val });
+                      }}
                       className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
                     />
                     <span className="text-[9px] text-gray-400 block mt-0.5">Wholesale unit price for small bulk</span>
@@ -2284,7 +2290,10 @@ export const ProductManagement: React.FC = () => {
                       step="any"
                       placeholder="e.g. 900"
                       value={editingProduct.wholesalePrice50Plus ?? ''}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, wholesalePrice50Plus: Number(e.target.value) })}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, wholesalePrice50Plus: val });
+                      }}
                       className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
                     />
                     <span className="text-[9px] text-gray-400 block mt-0.5">Wholesale unit price for volume (50+)</span>
@@ -2303,7 +2312,7 @@ export const ProductManagement: React.FC = () => {
                       placeholder="e.g. 1200"
                       value={editingProduct.retailPrice ?? editingProduct.price ?? ''}
                       onChange={(e) => {
-                        const val = Number(e.target.value);
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
                         setEditingProduct({ ...editingProduct, retailPrice: val, price: val });
                       }}
                       className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
@@ -2342,7 +2351,10 @@ export const ProductManagement: React.FC = () => {
                       min="0"
                       placeholder="e.g. 20"
                       value={editingProduct.stock ?? ''}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, stock: Number(e.target.value) })}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, stock: val });
+                      }}
                       className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
                     />
                     <span className="text-[9px] text-gray-400 block mt-0.5">Available physical inventory units</span>
@@ -2358,7 +2370,7 @@ export const ProductManagement: React.FC = () => {
                     type="text" 
                     list="korean-brands-list"
                     placeholder="e.g. COSRX, Anua"
-                    value={editingProduct.brand}
+                    value={editingProduct.brand || ''}
                     onChange={(e) => setEditingProduct({ ...editingProduct, brand: e.target.value })}
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                   />
@@ -2370,15 +2382,19 @@ export const ProductManagement: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-gray-500 font-bold mb-1">Category</label>
-                  <select 
-                    value={editingProduct.category}
+                  <input 
+                    type="text" 
+                    list="product-categories-list"
+                    placeholder="e.g. Cleanser, Toner, Sunscreen"
+                    value={editingProduct.category || ''}
                     onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
-                  >
+                  />
+                  <datalist id="product-categories-list">
                     {CATEGORIES.filter(c => c !== 'All').map(c => (
-                      <option key={c} value={c}>{c}</option>
+                      <option key={c} value={c} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-gray-500 font-bold mb-1">Volume/Size (ml)</label>
@@ -3137,10 +3153,13 @@ export const ProductManagement: React.FC = () => {
                     min="0"
                     step="any"
                     value={confirmationProductData.importPrice ?? ''}
-                    onChange={(e) => setConfirmationProductData({
-                      ...confirmationProductData,
-                      importPrice: Number(e.target.value) || 0
-                    })}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        importPrice: val
+                      });
+                    }}
                     className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
                   />
                 </div>
@@ -3153,7 +3172,7 @@ export const ProductManagement: React.FC = () => {
                     step="any"
                     value={confirmationProductData.retailPrice ?? confirmationProductData.price ?? ''}
                     onChange={(e) => {
-                      const val = Number(e.target.value) || 0;
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
                       setConfirmationProductData({
                         ...confirmationProductData,
                         retailPrice: val,
@@ -3171,10 +3190,13 @@ export const ProductManagement: React.FC = () => {
                     min="0"
                     step="any"
                     value={confirmationProductData.wholesalePrice ?? ''}
-                    onChange={(e) => setConfirmationProductData({
-                      ...confirmationProductData,
-                      wholesalePrice: Number(e.target.value) || 0
-                    })}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        wholesalePrice: val
+                      });
+                    }}
                     className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
                   />
                 </div>
@@ -3186,10 +3208,13 @@ export const ProductManagement: React.FC = () => {
                     min="0"
                     step="any"
                     value={confirmationProductData.wholesalePrice50Plus ?? ''}
-                    onChange={(e) => setConfirmationProductData({
-                      ...confirmationProductData,
-                      wholesalePrice50Plus: Number(e.target.value) || 0
-                    })}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        wholesalePrice50Plus: val
+                      });
+                    }}
                     className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
                   />
                 </div>
@@ -3220,10 +3245,13 @@ export const ProductManagement: React.FC = () => {
                     type="number"
                     min="0"
                     value={confirmationProductData.stock ?? ''}
-                    onChange={(e) => setConfirmationProductData({
-                      ...confirmationProductData,
-                      stock: Number(e.target.value) || 0
-                    })}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        stock: val
+                      });
+                    }}
                     className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
                   />
                 </div>

@@ -2140,7 +2140,7 @@ app.post("/api/slack/trigger-test-notification", async (req, res) => {
 
 // 1. placeOrder Endpoint (mirrors Firebase Cloud Function)
 app.post("/api/functions/placeOrder", async (req, res) => {
-  const { items, customerName, customerPhone, address, deliveryArea } = req.body;
+  const { items, customerName, customerPhone, customerEmail, address, deliveryArea } = req.body;
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Cart cannot be empty" });
   }
@@ -2150,80 +2150,144 @@ app.post("/api/functions/placeOrder", async (req, res) => {
   }
 
   const orderId = "ORD-" + Math.floor(100000 + Math.random() * 900000);
-  const deliveryCharge = deliveryArea === "outside" ? 150 : 80;
-  let itemsSubtotal = 0;
-  for (const item of items) {
-    itemsSubtotal += item.price * item.quantity;
-  }
-  const totalAmount = itemsSubtotal + deliveryCharge;
+  const deliveryCharge = deliveryArea === "outside" ? 120 : 60;
+  const nowIso = new Date().toISOString();
 
   try {
-    await runTransaction(db, async (transaction) => {
-      const updates = [];
+    const committedOrder = await runTransaction(db, async (transaction) => {
+      const validatedProducts: Array<{
+        ref: any;
+        data: any;
+        currentStock: number;
+        updatedStock: number;
+        productId: string;
+        quantity: number;
+        name: string;
+        unitPrice: number;
+      }> = [];
 
       for (const item of items) {
         const productRef = doc(db, "products", item.productId);
         const productDoc = await transaction.get(productRef);
 
         if (!productDoc.exists()) {
-          throw new Error(`Product "${item.name}" (ID: ${item.productId}) does not exist.`);
+          throw new Error(`Product "${item.name || item.productId}" does not exist.`);
         }
 
-        const productData = productDoc.data();
-        const currentStock = productData?.stock ?? 0;
+        const productData = productDoc.data() as any;
+        const currentStock = Number(productData?.stock ?? 0);
 
         if (currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for "${item.name}". Requested: ${item.quantity}, Available: ${currentStock}`);
+          throw new Error(`Insufficient stock for "${productData?.name || item.name}". Requested: ${item.quantity}, Available: ${currentStock}`);
         }
 
-        updates.push({
+        // Authoritative server-side retail price
+        const retail = Number(productData.retailPrice ?? productData.price ?? 0);
+        const discount = productData.discountRetailPrice !== undefined && Number(productData.discountRetailPrice) > 0 && Number(productData.discountRetailPrice) < retail
+          ? Number(productData.discountRetailPrice)
+          : undefined;
+        const unitPrice = discount ?? retail;
+
+        validatedProducts.push({
           ref: productRef,
           updatedStock: currentStock - item.quantity,
           productId: item.productId,
           quantity: item.quantity,
-          name: item.name,
-          prevStock: currentStock
+          name: productData.name || item.name,
+          unitPrice,
+          currentStock,
+          data: productData
         });
       }
 
+      // Calculate server-side total
+      const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
+      const totalAmount = itemsSubtotal + deliveryCharge;
+      const cogsAmount = validatedProducts.reduce((sum, p) => {
+        const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
+        return sum + (cost * p.quantity);
+      }, 0);
+      const grossProfit = Math.max(0, totalAmount - cogsAmount);
+
       // Decrement stock and log inventory change
-      for (const upd of updates) {
-        transaction.update(upd.ref, { stock: upd.updatedStock });
+      for (const upd of validatedProducts) {
+        transaction.update(upd.ref, { stock: upd.updatedStock, updated_at: nowIso });
 
         const logRef = doc(collection(db, "inventory_logs"));
         transaction.set(logRef, {
           id: logRef.id,
           productId: upd.productId,
+          productName: upd.name,
           type: "sale",
           quantity: upd.updatedStock,
           change: -1 * upd.quantity,
-          prevStock: upd.prevStock,
+          prevStock: upd.currentStock,
           newStock: upd.updatedStock,
-          note: `Order Checkout - ID ${orderId}`,
-          timestamp: new Date().toISOString()
+          note: `Website Order Checkout - #${orderId}`,
+          source: "WEBSITE",
+          orderId,
+          performedBy: "Website Checkout",
+          timestamp: nowIso,
+          createdAt: nowIso
+        });
+
+        const movementRef = doc(collection(db, "stock_movements"));
+        transaction.set(movementRef, {
+          id: movementRef.id,
+          productId: upd.productId,
+          productName: upd.name,
+          orderId,
+          quantity: -upd.quantity,
+          type: "sale",
+          source: "WEBSITE",
+          performedBy: "Website Checkout",
+          previousStock: upd.currentStock,
+          newStock: upd.updatedStock,
+          reason: "Website Online Checkout",
+          timestamp: nowIso,
+          createdAt: nowIso
         });
       }
 
-      // Create Order doc
-      const orderRef = doc(db, "orders", orderId);
-      transaction.set(orderRef, {
+      // Create Order doc with initial UNPAID due status
+      const newOrder = {
         id: orderId,
-        customerName: customerName || "In-Person Customer",
-        customerPhone: customerPhone || "Walk-In",
-        address: address || "In-Store POS",
-        items,
+        customerName: (customerName || "").trim() || "Website Customer",
+        customerPhone: (customerPhone || "").trim() || "N/A",
+        customerEmail: customerEmail || "",
+        address: address || "Inside Dhaka",
+        items: validatedProducts.map(p => ({
+          productId: p.productId,
+          name: p.name,
+          price: p.unitPrice,
+          quantity: p.quantity,
+          scannedQuantity: p.quantity
+        })),
         totalAmount,
+        totalPaid: 0,
+        dueAmount: totalAmount,
+        paymentStatus: "UNPAID",
         status: "pending",
-        createdAt: new Date().toISOString(),
-        paymentMethod: "Cash on Delivery",
+        order_source: "WEBSITE",
+        stock_deducted: true,
+        createdAt: nowIso,
+        paymentMethod: "COD",
         sessionType: "Web",
-        isPaid: false
-      });
+        isPaid: false,
+        cogsAmount,
+        grossProfit,
+        paymentTransactions: []
+      };
+
+      const orderRef = doc(db, "orders", orderId);
+      transaction.set(orderRef, newOrder);
+      return newOrder;
     });
 
     res.json({
       success: true,
       orderId,
+      order: committedOrder,
       message: `Successfully placed order ${orderId}`
     });
   } catch (error: any) {
@@ -2232,9 +2296,26 @@ app.post("/api/functions/placeOrder", async (req, res) => {
   }
 });
 
-// 1B. posCheckout Endpoint (Atomic POS in-store checkout)
+// 1B. posCheckout Endpoint (Atomic POS in-store checkout with Payment Due Support)
 app.post("/api/functions/posCheckout", async (req, res) => {
-  const { sessionId, userId, userRole, operatorName, customerName, customerPhone, customerAddress, deliveryArea, pricingMode, items, idempotencyKey } = req.body;
+  const {
+    sessionId,
+    userId,
+    userRole,
+    operatorName,
+    customerName,
+    customerPhone,
+    customerAddress,
+    deliveryArea,
+    pricingMode = "retail",
+    items,
+    idempotencyKey,
+    paidAmount,
+    paymentMethod,
+    accountCode,
+    notes
+  } = req.body;
+
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Cart cannot be empty" });
   }
@@ -2248,7 +2329,7 @@ app.post("/api/functions/posCheckout", async (req, res) => {
   }
 
   const orderId = req.body.orderId || ("POS-" + Math.floor(100000 + Math.random() * 900000));
-  const effectiveIdempotencyKey = idempotencyKey || orderId;
+  const effectiveIdempotencyKey = idempotencyKey || `pos_${orderId}_${Date.now()}`;
 
   try {
     const committedOrder = await runTransaction(db, async (transaction) => {
@@ -2263,6 +2344,12 @@ app.post("/api/functions/posCheckout", async (req, res) => {
         throw new Error("Unauthorized POS session ownership");
       }
 
+      // Wholesale role guard
+      const allowedRoles = ["admin", "super_admin", "inventory_manager"];
+      if (pricingMode === "wholesale" && !allowedRoles.includes(userRole || sessionData.role)) {
+        throw new Error("Unauthorized: Only Admins or Inventory Managers can initiate wholesale checkout");
+      }
+
       // 2. Idempotency Check
       const orderRef = doc(db, "orders", orderId);
       const existingOrderDoc = await transaction.get(orderRef);
@@ -2270,7 +2357,14 @@ app.post("/api/functions/posCheckout", async (req, res) => {
         return existingOrderDoc.data();
       }
 
-      // 3. Read products and re-verify stock
+      // 3. Aggregate item quantities per product to calculate tiered pricing and check aggregate stock
+      const aggregatedQtyMap: Record<string, number> = {};
+      for (const it of items) {
+        if (it.productId) {
+          aggregatedQtyMap[it.productId] = (aggregatedQtyMap[it.productId] || 0) + Number(it.quantity || 0);
+        }
+      }
+
       const validatedProducts: Array<{
         ref: any;
         data: any;
@@ -2291,22 +2385,27 @@ app.post("/api/functions/posCheckout", async (req, res) => {
 
         const prodData: any = { id: prodDoc.id, ...prodDoc.data() };
         const currentStock = Number(prodData.stock ?? 0);
+        const totalReqQty = aggregatedQtyMap[item.productId] || item.quantity;
 
-        if (currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for "${prodData.name}". Available: ${currentStock}, Requested: ${item.quantity}`);
+        if (currentStock < totalReqQty) {
+          throw new Error(`Insufficient stock for "${prodData.name}". Available: ${currentStock}, Total Requested: ${totalReqQty}`);
         }
 
         // Authoritative price calculation
-        let unitPrice = Number(prodData.retailPrice ?? prodData.price ?? 0);
-        if (prodData.discountRetailPrice && Number(prodData.discountRetailPrice) > 0 && Number(prodData.discountRetailPrice) < unitPrice) {
-          unitPrice = Number(prodData.discountRetailPrice);
-        }
-        if (pricingMode === 'wholesale') {
-          if (item.quantity >= 50 && prodData.wholesalePrice50Plus) {
-            unitPrice = Number(prodData.wholesalePrice50Plus);
-          } else if (prodData.wholesalePrice) {
-            unitPrice = Number(prodData.wholesalePrice);
+        let unitPrice = 0;
+        if (pricingMode === "wholesale") {
+          const ws1to49 = prodData.wholesalePrice ? Number(prodData.wholesalePrice) : 0;
+          const ws50Plus = prodData.wholesalePrice50Plus ? Number(prodData.wholesalePrice50Plus) : ws1to49;
+          if (ws1to49 <= 0 && ws50Plus <= 0) {
+            throw new Error(`Wholesale price not configured for "${prodData.name}".`);
           }
+          unitPrice = totalReqQty >= 50 && ws50Plus > 0 ? ws50Plus : ws1to49;
+        } else {
+          const retail = Number(prodData.retailPrice ?? prodData.price ?? 0);
+          const discount = prodData.discountRetailPrice !== undefined && Number(prodData.discountRetailPrice) > 0 && Number(prodData.discountRetailPrice) < retail
+            ? Number(prodData.discountRetailPrice)
+            : undefined;
+          unitPrice = discount ?? retail;
         }
 
         validatedProducts.push({
@@ -2320,11 +2419,81 @@ app.post("/api/functions/posCheckout", async (req, res) => {
         });
       }
 
-      // 4. Calculate final totals
+      // 4. Calculate final totals & Payment / Due breakdown
       const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
       const deliveryCharge = deliveryArea === "inside" ? 60 : deliveryArea === "outside" ? 120 : 0;
       const totalAmount = itemsSubtotal + (validatedProducts.length > 0 ? deliveryCharge : 0);
       const nowIso = new Date().toISOString();
+
+      const tendered = paidAmount !== undefined ? Number(paidAmount) : totalAmount;
+      const totalPaid = Math.max(0, Math.min(tendered, totalAmount));
+      const dueAmount = Math.max(0, totalAmount - totalPaid);
+      const changeAmount = Math.max(0, tendered - totalAmount);
+      const paymentStatus = dueAmount === 0 ? "PAID" : totalPaid > 0 ? "PARTIALLY_PAID" : "UNPAID";
+      const isPaid = paymentStatus === "PAID";
+      const effectiveMethod = paymentMethod || (dueAmount === totalAmount ? "CREDIT_DUE" : "CASH");
+      const effectiveAccount = accountCode || (
+        effectiveMethod === "BKASH" ? "BKASH_MERCHANT" :
+        effectiveMethod === "NAGAD" ? "NAGAD_MERCHANT" :
+        effectiveMethod === "CARD" || effectiveMethod === "BANK_TRANSFER" ? "BRAC_BANK" :
+        "CASH_REGISTER"
+      );
+
+      const cogsAmount = validatedProducts.reduce((sum, p) => {
+        const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
+        return sum + (cost * p.quantity);
+      }, 0);
+      const grossProfit = Math.max(0, totalAmount - cogsAmount);
+
+      const paymentTransactions: any[] = [];
+
+      // Record payment & financial transaction if money collected
+      if (totalPaid > 0) {
+        const payTxId = "PAY-" + Math.floor(100000 + Math.random() * 900000);
+        const payTx = {
+          id: payTxId,
+          orderId,
+          type: "POS_PAYMENT",
+          method: effectiveMethod,
+          amount: totalPaid,
+          note: notes || `POS Checkout tender ৳${totalPaid} (${effectiveMethod})`,
+          receivedBy: operatorName || "POS Operator",
+          receivedAt: nowIso,
+          source: "POS",
+          idempotencyKey: effectiveIdempotencyKey,
+          accountCode: effectiveAccount,
+          customerPhone: customerPhone || "Walk-In",
+          customerName: customerName || "In-Person Customer"
+        };
+        paymentTransactions.push(payTx);
+        transaction.set(doc(db, "payment_transactions", payTxId), payTx);
+
+        const finTxId = "FIN-REV-" + Math.floor(100000 + Math.random() * 900000);
+        const finTx = {
+          id: finTxId,
+          transactionType: "MONEY_IN",
+          category: "REVENUE",
+          amount: totalPaid,
+          date: nowIso.split("T")[0],
+          accountCode: effectiveAccount,
+          description: `POS Checkout Revenue - Order #${orderId} (${effectiveMethod})`,
+          performedBy: operatorName || "POS Operator",
+          referenceType: "ORDER",
+          referenceId: orderId,
+          createdAt: nowIso
+        };
+        transaction.set(doc(db, "financial_transactions", finTxId), finTx);
+
+        // Write Idempotency Lock
+        const idempRef = doc(db, "payment_idempotency", effectiveIdempotencyKey);
+        transaction.set(idempRef, {
+          idempotencyKey: effectiveIdempotencyKey,
+          orderId,
+          amount: totalPaid,
+          payTxId,
+          createdAt: nowIso
+        });
+      }
 
       // 5. Construct POS Order
       const newOrder = {
@@ -2343,13 +2512,20 @@ app.post("/api/functions/posCheckout", async (req, res) => {
           barcode: p.barcode
         })),
         totalAmount,
+        totalPaid,
+        dueAmount,
+        changeAmount,
+        paymentStatus,
+        isPaid,
         status: "delivered",
         order_source: "POS",
         stock_deducted: true,
         createdAt: nowIso,
-        paymentMethod: "POS_In_Person",
+        paymentMethod: effectiveMethod,
         sessionType: "POS",
-        isPaid: true
+        cogsAmount,
+        grossProfit,
+        paymentTransactions
       };
 
       // 6. Write Order
@@ -2413,6 +2589,204 @@ app.post("/api/functions/posCheckout", async (req, res) => {
   } catch (error: any) {
     console.error("posCheckout transaction failed:", error);
     res.status(400).json({ error: error.message || "Transaction aborted" });
+  }
+});
+
+// 1C. Finance Collect Due Endpoint
+app.post("/api/finance/collect-due", async (req, res) => {
+  const { orderId, amount, method = "CASH", accountCode, note, receivedBy = "Store Staff", source = "POS", idempotencyKey } = req.body;
+
+  if (!orderId || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: "orderId and valid positive amount are required" });
+  }
+
+  if (!db) {
+    return res.status(500).json({ error: "Database not initialized" });
+  }
+
+  const effectiveIdempotencyKey = idempotencyKey || `due_${orderId}_${Date.now()}`;
+  const nowIso = new Date().toISOString();
+  const payTxId = "PAY-" + Math.floor(100000 + Math.random() * 900000);
+  const finTxId = "FIN-REV-" + Math.floor(100000 + Math.random() * 900000);
+
+  const effectiveAccount = accountCode || (
+    method === "BKASH" ? "BKASH_MERCHANT" :
+    method === "NAGAD" ? "NAGAD_MERCHANT" :
+    method === "CARD" || method === "BANK_TRANSFER" ? "BRAC_BANK" :
+    "CASH_REGISTER"
+  );
+
+  try {
+    const result = await runTransaction(db, async (transaction) => {
+      // Check idempotency
+      const idempRef = doc(db, "payment_idempotency", effectiveIdempotencyKey);
+      const idempDoc = await transaction.get(idempRef);
+      if (idempDoc.exists()) {
+        return { isDuplicate: true, ...idempDoc.data() };
+      }
+
+      const orderRef = doc(db, "orders", orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists()) {
+        throw new Error(`Order #${orderId} not found`);
+      }
+
+      const orderData = orderDoc.data() as any;
+      const totalAmount = Number(orderData.totalAmount || 0);
+      const currentPaid = Number(orderData.totalPaid ?? (orderData.isPaid ? totalAmount : 0));
+      const currentDue = Number(orderData.dueAmount ?? Math.max(0, totalAmount - currentPaid));
+
+      if (currentDue <= 0) {
+        throw new Error(`Order #${orderId} is already fully paid. No outstanding due.`);
+      }
+
+      const paymentToApply = Math.min(Number(amount), currentDue);
+      const newTotalPaid = currentPaid + paymentToApply;
+      const newDueAmount = Math.max(0, totalAmount - newTotalPaid);
+      const newPaymentStatus = newDueAmount === 0 ? "PAID" : "PARTIALLY_PAID";
+
+      const payTx = {
+        id: payTxId,
+        orderId,
+        type: "POS_DUE_COLLECTION",
+        method,
+        amount: paymentToApply,
+        note: note || `Due collection of ৳${paymentToApply} for Order #${orderId}`,
+        receivedBy,
+        receivedAt: nowIso,
+        source,
+        idempotencyKey: effectiveIdempotencyKey,
+        accountCode: effectiveAccount,
+        customerPhone: orderData.customerPhone,
+        customerName: orderData.customerName
+      };
+
+      const finTx = {
+        id: finTxId,
+        transactionType: "MONEY_IN",
+        category: "REVENUE",
+        amount: paymentToApply,
+        date: nowIso.split("T")[0],
+        accountCode: effectiveAccount,
+        description: `Due Collection ৳${paymentToApply} for Order #${orderId} (${method})`,
+        performedBy: receivedBy,
+        referenceType: "ORDER",
+        referenceId: orderId,
+        createdAt: nowIso
+      };
+
+      const updatedOrder = {
+        ...orderData,
+        totalPaid: newTotalPaid,
+        dueAmount: newDueAmount,
+        paymentStatus: newPaymentStatus,
+        isPaid: newPaymentStatus === "PAID",
+        paymentTransactions: [...(orderData.paymentTransactions || []), payTx]
+      };
+
+      transaction.set(orderRef, updatedOrder);
+      transaction.set(doc(db, "payment_transactions", payTxId), payTx);
+      transaction.set(doc(db, "financial_transactions", finTxId), finTx);
+      transaction.set(idempRef, {
+        idempotencyKey: effectiveIdempotencyKey,
+        orderId,
+        amount: paymentToApply,
+        payTxId,
+        order: updatedOrder,
+        paymentTx: payTx,
+        createdAt: nowIso
+      });
+
+      return { isDuplicate: false, updatedOrder, payTx, finTx };
+    });
+
+    res.json({
+      success: true,
+      ...result,
+      message: result.isDuplicate ? "Duplicate request safely handled" : `Collected ৳${amount} for Order #${orderId}`
+    });
+  } catch (error: any) {
+    console.error("collect-due transaction failed:", error);
+    res.status(400).json({ error: error.message || "Transaction aborted" });
+  }
+});
+
+// 1D. Finance Wallet Transfer Endpoint
+app.post("/api/finance/transfer", async (req, res) => {
+  const { fromAccount, toAccount, amount, description, performedBy = "Store Admin" } = req.body;
+
+  if (!fromAccount || !toAccount || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: "fromAccount, toAccount and valid positive amount are required" });
+  }
+  if (fromAccount === toAccount) {
+    return res.status(400).json({ error: "Source and target accounts must be different" });
+  }
+
+  if (!db) {
+    return res.status(500).json({ error: "Database not initialized" });
+  }
+
+  const txId = "FIN-TRF-" + Math.floor(100000 + Math.random() * 900000);
+  const nowIso = new Date().toISOString();
+
+  const tx = {
+    id: txId,
+    transactionType: "TRANSFER",
+    category: "TRANSFER",
+    amount: Number(amount),
+    date: nowIso.split("T")[0],
+    accountCode: fromAccount,
+    targetAccountCode: toAccount,
+    description: description || `Wallet Transfer: ${fromAccount} → ${toAccount}`,
+    performedBy,
+    referenceType: "TRANSFER",
+    referenceId: txId,
+    createdAt: nowIso
+  };
+
+  try {
+    await setDoc(doc(db, "financial_transactions", txId), tx);
+    res.json({ success: true, transaction: tx, message: `Transferred ৳${amount} from ${fromAccount} to ${toAccount}` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to record transfer" });
+  }
+});
+
+// 1E. Finance Record Transaction Endpoint (Expenses, Capital, Withdrawals)
+app.post("/api/finance/transaction", async (req, res) => {
+  const { transactionType, category, amount, accountCode, description, performedBy, referenceType, referenceId, receiptUrl } = req.body;
+
+  if (!amount || Number(amount) <= 0 || !accountCode) {
+    return res.status(400).json({ error: "Valid amount and accountCode are required" });
+  }
+
+  if (!db) {
+    return res.status(500).json({ error: "Database not initialized" });
+  }
+
+  const txId = "FIN-" + (transactionType || "EXP") + "-" + Math.floor(100000 + Math.random() * 900000);
+  const nowIso = new Date().toISOString();
+
+  const tx = {
+    id: txId,
+    transactionType: transactionType || "EXPENSE",
+    category: category || "OPERATING_EXPENSE",
+    amount: Number(amount),
+    date: nowIso.split("T")[0],
+    accountCode,
+    description: description || "Financial Transaction",
+    performedBy: performedBy || "Store Admin",
+    referenceType: referenceType || "MANUAL",
+    referenceId: referenceId || txId,
+    receiptUrl: receiptUrl || "",
+    createdAt: nowIso
+  };
+
+  try {
+    await setDoc(doc(db, "financial_transactions", txId), tx);
+    res.json({ success: true, transaction: tx, message: "Transaction recorded successfully" });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to record transaction" });
   }
 });
 

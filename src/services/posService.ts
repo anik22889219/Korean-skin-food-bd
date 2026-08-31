@@ -1,9 +1,20 @@
-import { PosSession, Order, Product, PosAllowedRole, PosDeviceType, PosSessionNotification } from '../types';
+import { 
+  PosSession, 
+  Order, 
+  Product, 
+  PosAllowedRole, 
+  PosDeviceType, 
+  PosSessionNotification,
+  PaymentTransaction,
+  FinancialTransaction,
+  PaymentMethodType,
+  PaymentStatus
+} from '../types';
 import { productService } from './productService';
 import { auth, db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, addDoc, getDocs, getDoc, arrayUnion, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
-import { getProductUnitPrice } from '../utils/pricing';
+import { getProductUnitPrice, aggregateProductQuantities } from '../utils/pricing';
 
 export const ALLOWED_POS_ROLES: PosAllowedRole[] = ['admin', 'super_admin', 'inventory_manager'];
 
@@ -28,6 +39,10 @@ export interface PosCheckoutParams {
   items: PosCheckoutItemInput[];
   orderId?: string;
   idempotencyKey?: string;
+  paidAmount?: number;
+  paymentMethod?: PaymentMethodType;
+  accountCode?: string;
+  notes?: string;
 }
 
 export interface PosCheckoutResult {
@@ -837,14 +852,93 @@ export const posService = {
       return { success: false, message: 'User does not possess an authorized POS checkout role.', code: 'PERMISSION_DENIED' };
     }
 
-    // Deterministic or stable Order ID
+    // Deterministic or stable Order ID & Idempotency Key
     const orderId = params.orderId || ('POS-' + Math.floor(100000 + Math.random() * 900000));
-    const effectiveIdempotencyKey = idempotencyKey || orderId;
+    const effectiveIdempotencyKey = idempotencyKey || `pos_${orderId}_${Date.now()}`;
+
+    // 2. Try Authoritative Server-Side Checkout Endpoint First
+    try {
+      const response = await fetch('/api/functions/posCheckout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          userId,
+          userRole,
+          operatorName,
+          customerName: customerName ? customerName.trim() : undefined,
+          customerPhone: customerPhone ? customerPhone.trim() : undefined,
+          customerAddress: customerAddress ? customerAddress.trim() : undefined,
+          deliveryArea,
+          pricingMode,
+          items,
+          orderId,
+          idempotencyKey: effectiveIdempotencyKey,
+          paidAmount: params.paidAmount !== undefined ? Number(params.paidAmount) : undefined,
+          paymentMethod: params.paymentMethod,
+          accountCode: params.accountCode,
+          notes: params.notes
+        })
+      });
+
+      const data = await response.json();
+      if (response.ok && data.success && data.order) {
+        const committedOrder = data.order as Order;
+
+        // Post-Checkout Cart Cleanup & Cache Sync
+        try {
+          const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
+          const scansSnapshot = await getDocs(scansColRef);
+          if (!scansSnapshot.empty) {
+            const batch = writeBatch(db);
+            scansSnapshot.forEach((docSnap) => batch.delete(docSnap.ref));
+            await batch.commit();
+          }
+        } catch (cleanupErr) {
+          console.warn('[posService] Non-critical warning clearing session scans after checkout:', cleanupErr);
+        }
+
+        if (!ordersCache.some(o => o.id === committedOrder.id)) {
+          ordersCache = [committedOrder, ...ordersCache];
+          notifyOrderSubscribers();
+        }
+
+        import('./slackNotificationService').then(({ slackNotificationService }) => {
+          slackNotificationService.notifyNewOrder(committedOrder).catch(console.warn);
+        }).catch(() => {});
+
+        return {
+          success: true,
+          order: committedOrder,
+          orderId: committedOrder.id,
+          message: data.message || `Order #${committedOrder.id} completed successfully!`
+        };
+      } else if (response.status === 400 && data.error && !data.error.includes('fetch')) {
+        // Explicit business logic rejection from server
+        let code: PosCheckoutResult['code'] = 'TRANSACTION_FAILED';
+        if (data.error.includes('Insufficient stock')) code = 'INSUFFICIENT_STOCK';
+        else if (data.error.includes('Unauthorized') || data.error.includes('permission')) code = 'PERMISSION_DENIED';
+        else if (data.error.includes('not found') || data.error.includes('does not exist')) code = 'PRODUCT_NOT_FOUND';
+        else if (data.error.includes('session')) code = 'INVALID_SESSION';
+
+        return {
+          success: false,
+          message: data.error,
+          code
+        };
+      }
+    } catch (apiErr) {
+      console.warn('[posService] Server API unavailable, executing strict atomic client transaction:', apiErr);
+    }
 
     try {
-      // 2. Execute Atomic Firestore Transaction
+      // 3. Strict Multi-Document Atomic Firestore Transaction Fallback
+      // Guarantees simultaneous Order creation, Stock deduction, Inventory log, Stock movement,
+      // and Financial ledger records with zero partial writes on failure.
       const committedOrder = await runTransaction(db, async (transaction) => {
-        // --- STEP A: READS (Must occur before ANY writes in Firestore transactions) ---
+        // =========================================================================
+        // --- STEP A: STRICT READS (All reads MUST occur before ANY writes) ---
+        // =========================================================================
         
         // A.1 Verify Session & Ownership
         const sessionRef = doc(db, 'pos_sessions', sessionId);
@@ -857,15 +951,27 @@ export const posService = {
           throw new Error('Unauthorized: POS session does not belong to the authenticated user.');
         }
 
-        // A.2 Idempotency Check (Check if order already committed)
+        // A.2 Idempotency Check (Check if order or idempotency lock already committed)
         const orderRef = doc(db, 'orders', orderId);
         const existingOrderDoc = await transaction.get(orderRef);
         if (existingOrderDoc.exists()) {
-          // Idempotent safe return of already processed order
           return existingOrderDoc.data() as Order;
         }
 
-        // A.3 Fetch and Validate all Products & Current Stocks from Firestore
+        const idempRef = doc(db, 'payment_idempotency', effectiveIdempotencyKey);
+        const existingIdempDoc = await transaction.get(idempRef);
+        if (existingIdempDoc.exists()) {
+          const idempData = existingIdempDoc.data();
+          if (idempData?.orderId && idempData.orderId !== orderId) {
+            const priorOrderRef = doc(db, 'orders', idempData.orderId);
+            const priorOrderDoc = await transaction.get(priorOrderRef);
+            if (priorOrderDoc.exists()) {
+              return priorOrderDoc.data() as Order;
+            }
+          }
+        }
+
+        // A.3 Fetch and Validate all Products & Current Stocks from Firestore Snapshots
         interface ValidatedProductSnapshot {
           ref: any;
           data: Product;
@@ -877,6 +983,9 @@ export const posService = {
         }
 
         const validatedProducts: ValidatedProductSnapshot[] = [];
+
+        // Aggregate item quantities per product to prevent line-splitting bypass and validate aggregate stock
+        const aggregatedQuantities = aggregateProductQuantities(items);
 
         for (const item of items) {
           if (!item.productId) {
@@ -895,16 +1004,17 @@ export const posService = {
 
           const prodData = { id: prodDoc.id, ...prodDoc.data() } as Product;
           const currentStock = Number(prodData.stock ?? 0);
+          const totalRequestedQtyForProd = aggregatedQuantities[item.productId] || item.quantity;
 
-          // Atomic stock ceiling guard
-          if (currentStock < item.quantity) {
+          // Atomic stock ceiling guard against aggregate requested quantity
+          if (currentStock < totalRequestedQtyForProd) {
             throw new Error(
-              `Insufficient stock for "${prodData.name}". Available in stock: ${currentStock}, Requested: ${item.quantity}.`
+              `Insufficient stock for "${prodData.name}". Available in stock: ${currentStock}, Total Requested: ${totalRequestedQtyForProd}.`
             );
           }
 
-          // Authoritative price calculation
-          const unitPrice = getProductUnitPrice(prodData, pricingMode, item.quantity);
+          // Authoritative price calculation using total aggregated quantity for tier calculation and strict wholesale check
+          const unitPrice = getProductUnitPrice(prodData, pricingMode, totalRequestedQtyForProd, pricingMode === 'wholesale');
 
           validatedProducts.push({
             ref: prodRef,
@@ -917,13 +1027,91 @@ export const posService = {
           });
         }
 
-        // --- STEP B: WRITES (Atomic commit of order, stock deductions, and audit logs) ---
+        // =========================================================================
+        // --- STEP B: ATOMIC WRITES (Order, Stock Deductions, and Ledgers) ---
+        // =========================================================================
         
         // B.1 Calculate final billing totals
         const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
         const deliveryCharge = deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0;
         const totalAmount = itemsSubtotal + (validatedProducts.length > 0 ? deliveryCharge : 0);
         const nowIso = new Date().toISOString();
+
+        // Calculate payment, due, and change
+        const tendered = params.paidAmount !== undefined ? Number(params.paidAmount) : totalAmount;
+        const totalPaid = Math.max(0, Math.min(tendered, totalAmount));
+        const dueAmount = Math.max(0, totalAmount - totalPaid);
+        const changeAmount = Math.max(0, tendered - totalAmount);
+        const paymentStatus: PaymentStatus = dueAmount === 0 ? 'PAID' : totalPaid > 0 ? 'PARTIALLY_PAID' : 'UNPAID';
+        const method: PaymentMethodType = params.paymentMethod || (dueAmount === totalAmount ? 'CREDIT_DUE' : 'CASH');
+        
+        const accountCode = params.accountCode || (
+          method === 'BKASH' ? 'BKASH_MERCHANT' :
+          method === 'NAGAD' ? 'NAGAD_MERCHANT' :
+          method === 'CARD' || method === 'BANK_TRANSFER' ? 'BRAC_BANK' :
+          'CASH_REGISTER'
+        );
+
+        // Estimate COGS
+        const cogsAmount = validatedProducts.reduce((sum, p) => {
+          const unitCost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
+          return sum + (unitCost * p.quantity);
+        }, 0);
+        const grossProfit = Math.max(0, totalAmount - cogsAmount);
+
+        const paymentTxs: PaymentTransaction[] = [];
+        let payTxId = '';
+
+        if (totalPaid > 0) {
+          payTxId = 'PAY-' + Math.floor(100000 + Math.random() * 900000);
+          const payTx: PaymentTransaction = {
+            id: payTxId,
+            orderId,
+            type: 'POS_PAYMENT',
+            method,
+            amount: totalPaid,
+            note: params.notes || `POS Checkout tender ৳${totalPaid} (${method})`,
+            receivedBy: operatorName,
+            receivedAt: nowIso,
+            source: 'POS',
+            idempotencyKey: effectiveIdempotencyKey,
+            accountCode,
+            customerPhone: customerPhone || 'Walk-In',
+            customerName: customerName || 'In-Person Customer'
+          };
+          paymentTxs.push(payTx);
+
+          // Write Payment Transaction document
+          const payDocRef = doc(db, 'payment_transactions', payTxId);
+          transaction.set(payDocRef, sanitizeForFirestore(payTx));
+
+          // Write Financial Transaction (Revenue Ledger)
+          const finTxId = 'FIN-REV-' + Math.floor(100000 + Math.random() * 900000);
+          const finDocRef = doc(db, 'financial_transactions', finTxId);
+          const finTx: FinancialTransaction = {
+            id: finTxId,
+            transactionType: 'MONEY_IN',
+            category: 'REVENUE',
+            amount: totalPaid,
+            date: nowIso.split('T')[0],
+            accountCode: accountCode as any,
+            description: `POS Checkout Revenue - Order #${orderId} (${method})`,
+            performedBy: operatorName,
+            referenceType: 'ORDER',
+            referenceId: orderId,
+            createdAt: nowIso
+          };
+          transaction.set(finDocRef, sanitizeForFirestore(finTx));
+
+          // Write Idempotency Lock
+          transaction.set(idempRef, sanitizeForFirestore({
+            idempotencyKey: effectiveIdempotencyKey,
+            orderId,
+            amount: totalPaid,
+            payTxId,
+            createdAt: nowIso
+          }));
+        }
 
         // B.2 Construct Authoritative Order
         const newOrder: Order = {
@@ -946,9 +1134,16 @@ export const posService = {
           order_source: 'POS',
           stock_deducted: true,
           createdAt: nowIso,
-          paymentMethod: 'POS_In_Person',
+          paymentMethod: method,
           sessionType: 'POS',
-          isPaid: true
+          isPaid: paymentStatus === 'PAID',
+          paymentStatus,
+          totalPaid,
+          dueAmount,
+          changeAmount,
+          cogsAmount,
+          grossProfit,
+          paymentTransactions: paymentTxs
         };
 
         // B.3 Commit Order Document
@@ -1116,6 +1311,13 @@ export const posService = {
       };
     });
 
+    const totalAmt = Number(order.totalAmount || 0);
+    const estimatedCogs = formattedItems.reduce((sum, it) => {
+      const p = productService.getProductById(it.productId);
+      const unitCost = Number(p?.wholesalePrice || p?.costPrice || Math.round((it.price || 0) * 0.58));
+      return sum + (unitCost * it.quantity);
+    }, 0);
+
     const newOrder: Order = {
       ...order,
       items: formattedItems,
@@ -1126,6 +1328,11 @@ export const posService = {
       stock_deducted: false,
       sessionType: 'Online',
       isPaid: false,
+      paymentStatus: 'UNPAID',
+      totalPaid: 0,
+      dueAmount: totalAmt,
+      cogsAmount: estimatedCogs,
+      grossProfit: Math.max(0, totalAmt - estimatedCogs),
       analytics: {
         purchaseEventId: `purchase_${orderId}`,
         purchaseTracked: true,

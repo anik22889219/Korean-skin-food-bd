@@ -393,9 +393,93 @@
         "dismissedBy": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "notificationId", "type", "sessionId", "userId", "userName", "deviceType", "createdAt"]
+    },
+    "PaymentTransaction": {
+      "title": "PaymentTransaction",
+      "description": "Immutable ledger record of all money transactions received or refunded",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "type": { "type": "string", "enum": ["POS_PAYMENT", "POS_DUE_COLLECTION", "ONLINE_PAYMENT", "COD_SETTLEMENT", "REFUND", "WHOLESALE_PAYMENT"] },
+        "method": { "type": "string", "enum": ["CASH", "BKASH", "NAGAD", "ROCKET", "CARD", "BANK_TRANSFER", "CREDIT_DUE"] },
+        "amount": { "type": "number" },
+        "note": { "type": "string" },
+        "receivedBy": { "type": "string" },
+        "receivedAt": { "type": "string" },
+        "source": { "type": "string", "enum": ["POS", "WEBSITE", "WHOLESALE", "MANUAL"] },
+        "idempotencyKey": { "type": "string" },
+        "accountCode": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerName": { "type": "string" }
+      },
+      "required": ["id", "orderId", "type", "method", "amount", "receivedBy", "receivedAt"]
+    },
+    "FinancialTransaction": {
+      "title": "FinancialTransaction",
+      "description": "General accounting ledger of Money In, Money Out, COGS, and operational expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transactionType": { "type": "string", "enum": ["MONEY_IN", "MONEY_OUT", "EXPENSE", "COGS", "REFUND", "TRANSFER"] },
+        "category": { "type": "string", "enum": ["REVENUE", "COGS", "OPERATING_EXPENSE", "SALARY", "MARKETING", "RENT", "SUPPLIER_PAYMENT", "COURIER_CHARGE", "PACKAGING", "OTHER"] },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "referenceType": { "type": "string", "enum": ["ORDER", "STOCK_RECEIPT", "SUPPLIER_INVOICE", "EXPENSE_VOUCHER", "MANUAL"] },
+        "referenceId": { "type": "string" },
+        "accountCode": { "type": "string" },
+        "description": { "type": "string" },
+        "performedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "transactionType", "category", "amount", "date", "accountCode", "performedBy", "createdAt"]
+    },
+    "InventoryCostLayer": {
+      "title": "InventoryCostLayer",
+      "description": "FIFO/Weighted average unit cost tracking layer for inventory batches",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "receiptId": { "type": "string" },
+        "quantityRemaining": { "type": "number" },
+        "unitCostBDT": { "type": "number" },
+        "batchNumber": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "productId", "quantityRemaining", "unitCostBDT", "createdAt"]
+    },
+    "PaymentIdempotency": {
+      "title": "PaymentIdempotency",
+      "description": "Idempotency locks and duplicate prevention records for payment and due collections",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": { "type": "string" },
+        "orderId": { "type": "string" },
+        "amount": { "type": "number" },
+        "payTxId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["idempotencyKey", "orderId", "amount", "createdAt"]
     }
   },
   "firestore": {
+    "/payment_idempotency/{keyId}": {
+      "schema": "PaymentIdempotency",
+      "description": "Payment and due collection idempotency locks"
+    },
+    "/payment_transactions/{txId}": {
+      "schema": "PaymentTransaction",
+      "description": "Immutable payment transactions for cash, digital money, and due settlements"
+    },
+    "/financial_transactions/{txId}": {
+      "schema": "FinancialTransaction",
+      "description": "Financial accounting records for income, expense, COGS and cash flow tracking"
+    },
+    "/inventory_cost_layers/{layerId}": {
+      "schema": "InventoryCostLayer",
+      "description": "Inventory cost tracking per batch for COGS calculation"
+    },
     "/admin_notifications/{notificationId}": {
       "schema": "PosSessionNotification",
       "description": "Realtime administrative notifications for new POS checkout sessions"
