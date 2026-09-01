@@ -12,6 +12,9 @@ import { useCart } from '../context/CartContext';
 import { productService } from '../services/productService';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { themeService, DEFAULT_SHOP_THEME } from '../services/themeService';
+import { useProducts } from '../hooks/queries/products';
+import { useCategories } from '../hooks/queries/categories';
+import { useBrands } from '../hooks/queries/brands';
 import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
 import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
@@ -88,8 +91,10 @@ export const ShopCategoryPage: React.FC = () => {
   // Theme State
   const [shopTheme, setShopTheme] = useState<ShopThemeSettings>(themeService.getShopTheme());
 
-  // Products from Firestore / productService
-  const [products, setProducts] = useState<Product[]>([]);
+  // Products & Taxonomy from TanStack Query
+  const { data: products = [], isLoading } = useProducts();
+  const { data: categories = CATEGORIES } = useCategories();
+  const { data: brandsData } = useBrands();
 
   // Filters State derived from searchParams or defaults
   const [selectedCategory, setSelectedCategory] = useState<string>(searchParams.get('category') || 'All');
@@ -189,14 +194,10 @@ export const ShopCategoryPage: React.FC = () => {
   };
 
   useEffect(() => {
-    // Subscribe to Theme & Product real-time updates
+    // Subscribe to Theme real-time updates
     const unsubscribeShopTheme = themeService.subscribeShop((st) => setShopTheme(st));
-    setProducts(productService.getProducts());
-    const unsubscribeProducts = productService.subscribe((prods) => setProducts([...prods]));
-
     return () => {
       unsubscribeShopTheme();
-      unsubscribeProducts();
     };
   }, []);
 

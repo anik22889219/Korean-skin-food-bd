@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { MainLayout } from './components/MainLayout';
@@ -146,73 +148,75 @@ const PosRegisterRouteWrapper: React.FC = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <CartProvider>
-        <BrowserRouter>
-          <ScrollToTop />
-          <RouteTracker />
-          <Routes>
-            {/* PUBLIC SHOP PAGES */}
-            <Route path="/" element={<MainLayout />}>
-              <Route index element={<StoreCatalog />} />
-              <Route path="shop" element={<ShopCategoryPage />} />
-              <Route path="become-a-creator" element={<BecomeCreatorPage />} />
-              <Route path="creator/apply" element={<BecomeCreatorPage />} />
-              <Route path="about-us" element={<AboutUs />} />
-              <Route path="contact-us" element={<ContactUs />} />
-              <Route path="product/:id" element={<ProductDetail />} />
-              <Route path="login" element={<Login />} />
-              
-              {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
-              <Route element={<ProtectedRoute />}>
-                <Route path="profile" element={<Profile />} />
-              </Route>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <CartProvider>
+          <BrowserRouter>
+            <ScrollToTop />
+            <RouteTracker />
+            <Routes>
+              {/* PUBLIC SHOP PAGES */}
+              <Route path="/" element={<MainLayout />}>
+                <Route index element={<StoreCatalog />} />
+                <Route path="shop" element={<ShopCategoryPage />} />
+                <Route path="become-a-creator" element={<BecomeCreatorPage />} />
+                <Route path="creator/apply" element={<BecomeCreatorPage />} />
+                <Route path="about-us" element={<AboutUs />} />
+                <Route path="contact-us" element={<ContactUs />} />
+                <Route path="product/:id" element={<ProductDetail />} />
+                <Route path="login" element={<Login />} />
+                
+                {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
+                <Route element={<ProtectedRoute />}>
+                  <Route path="profile" element={<Profile />} />
+                </Route>
 
-              {/* CREATOR SYSTEM ROUTES */}
-              <Route path="creator" element={<CreatorRoute />}>
-                <Route element={<CreatorLayout />}>
-                  <Route index element={<Navigate to="dashboard" replace />} />
-                  <Route path="dashboard" element={<CreatorDashboard />} />
-                  <Route path="profile" element={<CreatorProfilePage />} />
-                  <Route path="reels" element={<CreatorReelsPage />} />
-                  <Route path="reels/upload" element={<CreatorReelUploadPage />} />
-                  <Route path="leaderboard" element={<CreatorLeaderboardPage />} />
+                {/* CREATOR SYSTEM ROUTES */}
+                <Route path="creator" element={<CreatorRoute />}>
+                  <Route element={<CreatorLayout />}>
+                    <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route path="dashboard" element={<CreatorDashboard />} />
+                    <Route path="profile" element={<CreatorProfilePage />} />
+                    <Route path="reels" element={<CreatorReelsPage />} />
+                    <Route path="reels/upload" element={<CreatorReelUploadPage />} />
+                    <Route path="leaderboard" element={<CreatorLeaderboardPage />} />
+                  </Route>
                 </Route>
               </Route>
-            </Route>
 
-            {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
-            <Route path="pos/scan" element={<PosScanRouteWrapper />} />
-            <Route path="pos/scan/:sessionId" element={<PosScanRouteWrapper />} />
+              {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
+              <Route path="pos/scan" element={<PosScanRouteWrapper />} />
+              <Route path="pos/scan/:sessionId" element={<PosScanRouteWrapper />} />
 
-            {/* ADMIN DASHBOARD HUB - ADMINS/SUPER_ADMINS ONLY */}
-            <Route element={<AdminRoute />}>
-              <Route path="admin" element={<AdminLayout />}>
-                <Route index element={<AdminDashboardHome />} />
-                <Route path="business-finance" element={<AdminBusinessFinanceRouteWrapper />} />
-                <Route path="finance" element={<AdminBusinessFinanceRouteWrapper />} />
-                <Route path="payments-due" element={<AdminPaymentsDueRouteWrapper />} />
-                <Route path="dues" element={<AdminPaymentsDueRouteWrapper />} />
-                <Route path="reports" element={<AdminReportsPage />} />
-                <Route path="creators" element={<AdminCreators />} />
-                <Route path="users" element={<UserManagement />} />
-                <Route path="orders" element={<AdminOrders />} />
-                <Route path="theme-editor" element={<AdminThemeEditor />} />
-                <Route path="pos" element={<PosRegisterRouteWrapper />} />
-                <Route path="products" element={<ProductManagement />} />
-                <Route path="seo" element={<AdminSEO />} />
-                <Route path="social" element={<AdminSocial />} />
-                <Route path="chat-leads" element={<AdminChatLeads />} />
-                <Route path="slack" element={<AdminSlackSettings />} />
-                <Route path="ai-agents" element={<AdminAIAgents />} />
+              {/* ADMIN DASHBOARD HUB - ADMINS/SUPER_ADMINS ONLY */}
+              <Route element={<AdminRoute />}>
+                <Route path="admin" element={<AdminLayout />}>
+                  <Route index element={<AdminDashboardHome />} />
+                  <Route path="business-finance" element={<AdminBusinessFinanceRouteWrapper />} />
+                  <Route path="finance" element={<AdminBusinessFinanceRouteWrapper />} />
+                  <Route path="payments-due" element={<AdminPaymentsDueRouteWrapper />} />
+                  <Route path="dues" element={<AdminPaymentsDueRouteWrapper />} />
+                  <Route path="reports" element={<AdminReportsPage />} />
+                  <Route path="creators" element={<AdminCreators />} />
+                  <Route path="users" element={<UserManagement />} />
+                  <Route path="orders" element={<AdminOrders />} />
+                  <Route path="theme-editor" element={<AdminThemeEditor />} />
+                  <Route path="pos" element={<PosRegisterRouteWrapper />} />
+                  <Route path="products" element={<ProductManagement />} />
+                  <Route path="seo" element={<AdminSEO />} />
+                  <Route path="social" element={<AdminSocial />} />
+                  <Route path="chat-leads" element={<AdminChatLeads />} />
+                  <Route path="slack" element={<AdminSlackSettings />} />
+                  <Route path="ai-agents" element={<AdminAIAgents />} />
+                </Route>
               </Route>
-            </Route>
 
-            {/* FALLBACK ROUTING */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
-      </CartProvider>
-    </AuthProvider>
+              {/* FALLBACK ROUTING */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </CartProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }

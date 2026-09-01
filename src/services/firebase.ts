@@ -1,5 +1,12 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { initializeFirestore, getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  connectFirestoreEmulator,
+  setLogLevel,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
@@ -52,17 +59,28 @@ if (typeof window !== 'undefined') {
 // Get custom database ID if available
 const databaseId = getEnvVar('VITE_FIREBASE_FIRESTORE_DATABASE_ID') || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
 
-// Initialize Services using official Firestore initializer with auto-detect long polling
+// Initialize Services using official Firestore initializer with persistent local cache & auto-detect long polling
 let db: ReturnType<typeof getFirestore>;
 try {
-  db = initializeFirestore(app, {
+  const isBrowser = typeof window !== 'undefined';
+  const firestoreSettings: any = {
     experimentalAutoDetectLongPolling: true,
-  }, databaseId);
+  };
+  if (isBrowser) {
+    try {
+      firestoreSettings.localCache = persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      });
+    } catch {
+      // Graceful fallback if IndexedDB is restricted
+    }
+  }
+  db = initializeFirestore(app, firestoreSettings, databaseId);
 } catch (e) {
   try {
     db = initializeFirestore(app, {
       experimentalAutoDetectLongPolling: true,
-    });
+    }, databaseId);
   } catch (err) {
     db = getFirestore(app, databaseId);
   }

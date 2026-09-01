@@ -105,9 +105,13 @@ export const PosLiveRecords: React.FC<PosLiveRecordsProps> = ({
   // Helper to calculate products count and total units
   const getSessionCounts = (session: PosSession) => {
     const items = Array.isArray(session.items) ? session.items : [];
-    const uniqueProductsCount = items.length;
-    const totalUnitsCount = items.reduce((sum, it) => sum + (it.quantity || 0), 0);
-    return { uniqueProductsCount, totalUnitsCount };
+    if (items.length > 0) {
+      const uniqueProductsCount = items.length;
+      const totalUnitsCount = items.reduce((sum, it) => sum + (it.quantity || 0), 0);
+      return { uniqueProductsCount, totalUnitsCount };
+    }
+    const totalScanned = session.totalScannedItems || 0;
+    return { uniqueProductsCount: totalScanned > 0 ? 1 : 0, totalUnitsCount: totalScanned };
   };
 
   const mobileCount = liveSessions.filter((s) => s.deviceType === 'mobile').length;

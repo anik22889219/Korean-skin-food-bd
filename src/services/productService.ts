@@ -1,10 +1,12 @@
 import { Product, InventoryLog, StockMovement, StockReceipt, StockReceiptItem } from '../types';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, writeBatch, runTransaction, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, limit, startAfter, writeBatch, runTransaction, getDoc, getDocs } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
 import { getCanonicalBrandName } from '../data/brands';
 import { normalizeProductPricing } from '../utils/pricing';
+import { queryClient } from '../lib/queryClient';
+import { queryKeys } from '../lib/queryKeys';
 
 // Ensure initial products cache starts empty
 let productsCache: Product[] = [];
@@ -63,6 +65,14 @@ onSnapshot(collection(db, 'products'), (snapshot) => {
     isSeedingDone = true;
     productsCache = prods;
     notifySubscribers();
+    try {
+      queryClient.setQueryData(queryKeys.products.all, prods);
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.brands.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+    } catch {
+      // Ignored if queryClient not initialized in testing
+    }
   }
 }, (err) => {
   console.warn('[Firebase] products onSnapshot warning:', err);
@@ -71,13 +81,19 @@ onSnapshot(collection(db, 'products'), (snapshot) => {
   }
 });
 
-// Subscribe to real-time changes in inventory logs
-onSnapshot(query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc')), (snapshot) => {
+// Subscribe to real-time changes in latest 200 inventory logs
+onSnapshot(query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
   const logs: InventoryLog[] = [];
   snapshot.forEach((doc) => {
     logs.push(doc.data() as InventoryLog);
   });
   inventoryLogsCache = logs;
+  try {
+    queryClient.setQueryData(queryKeys.inventory.logs(), logs);
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+  } catch {
+    // Safe guard
+  }
 }, (err) => {
   console.warn('[Firebase] inventory_logs onSnapshot warning:', err);
   if (err?.code === 'permission-denied' || err?.message?.includes('permission') || err?.message?.includes('Permission')) {
@@ -85,25 +101,37 @@ onSnapshot(query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc'))
   }
 });
 
-// Subscribe to real-time changes in stock movements
-onSnapshot(query(collection(db, 'stock_movements'), orderBy('createdAt', 'desc')), (snapshot) => {
+// Subscribe to real-time changes in latest 200 stock movements
+onSnapshot(query(collection(db, 'stock_movements'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
   const movements: StockMovement[] = [];
   snapshot.forEach((docSnap) => {
     movements.push(docSnap.data() as StockMovement);
   });
   stockMovementsCache = movements;
+  try {
+    queryClient.setQueryData(queryKeys.inventory.movements(), movements);
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.movements() });
+  } catch {
+    // Safe guard
+  }
 }, (err) => {
   console.warn('[Firebase] stock_movements onSnapshot warning:', err);
 });
 
-// Subscribe to real-time changes in stock receipts
-onSnapshot(query(collection(db, 'stock_receipts'), orderBy('createdAt', 'desc')), (snapshot) => {
+// Subscribe to real-time changes in latest 200 stock receipts
+onSnapshot(query(collection(db, 'stock_receipts'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
   const receipts: StockReceipt[] = [];
   snapshot.forEach((docSnap) => {
     receipts.push(docSnap.data() as StockReceipt);
   });
   stockReceiptsCache = receipts;
   notifyReceiptSubscribers();
+  try {
+    queryClient.setQueryData(queryKeys.inventory.receipts(), receipts);
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.receipts() });
+  } catch {
+    // Safe guard
+  }
 }, (err) => {
   console.warn('[Firebase] stock_receipts onSnapshot warning:', err);
 });
@@ -111,6 +139,70 @@ onSnapshot(query(collection(db, 'stock_receipts'), orderBy('createdAt', 'desc'))
 export const productService = {
   getProducts(): Product[] {
     return productsCache;
+  },
+
+  async fetchProducts(): Promise<Product[]> {
+    if (productsCache && productsCache.length > 0) {
+      return productsCache;
+    }
+    try {
+      const snap = await getDocs(collection(db, 'products'));
+      const prods: Product[] = [];
+      snap.forEach((docSnap) => {
+        const rawData = docSnap.data() as Product;
+        const data = normalizeProductPricing(rawData);
+        const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
+        prods.push({
+          ...data,
+          id: docSnap.id || data.id,
+          brand: normalizedBrand,
+          barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode),
+        });
+      });
+      productsCache = prods;
+      notifySubscribers();
+      try {
+        queryClient.setQueryData(queryKeys.products.all, prods);
+        queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.brands.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+      } catch {
+        // Safe guard
+      }
+      return prods;
+    } catch (err: any) {
+      console.warn('[ProductService] fetchProducts error:', err);
+      return productsCache;
+    }
+  },
+
+  async fetchProductById(id: string): Promise<Product | null> {
+    const local = productsCache.find(p => p.id === id);
+    if (local) return local;
+
+    try {
+      const docSnap = await getDoc(doc(db, 'products', id));
+      if (!docSnap.exists()) return null;
+      const rawData = docSnap.data() as Product;
+      const data = normalizeProductPricing(rawData);
+      const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
+      const prod: Product = {
+        ...data,
+        id: docSnap.id || data.id,
+        brand: normalizedBrand,
+        barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode),
+      };
+      productsCache = [...productsCache.filter(p => p.id !== id), prod];
+      try {
+        queryClient.setQueryData(queryKeys.products.detail(id), prod);
+      } catch {
+        // Safe guard
+      }
+      return prod;
+    } catch (err) {
+      console.warn('[ProductService] fetchProductById error:', err);
+      return null;
+    }
   },
 
   subscribe(callback: (products: Product[]) => void): () => void {
@@ -125,6 +217,14 @@ export const productService = {
     const normalized = products.map(p => normalizeProductPricing(p));
     productsCache = normalized;
     notifySubscribers();
+    try {
+      queryClient.setQueryData(queryKeys.products.all, normalized);
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.brands.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+    } catch {
+      // Safe guard
+    }
     const BATCH_SIZE = 40;
     for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
       const chunk = normalized.slice(i, i + BATCH_SIZE);
@@ -155,6 +255,14 @@ export const productService = {
     productsCache = productsCache.filter(p => p.id !== product.id);
     productsCache.push(newProduct);
     notifySubscribers();
+    try {
+      queryClient.setQueryData(queryKeys.products.detail(newProduct.id), newProduct);
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.brands.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+    } catch {
+      // Safe guard
+    }
 
     // Save to Firestore asynchronously
     setDoc(doc(db, 'products', product.id), sanitizeForFirestore(newProduct)).catch(console.error);
@@ -186,6 +294,14 @@ export const productService = {
     // Update local cache synchronously
     productsCache = productsCache.map(p => p.id === product.id ? updatedProduct : p);
     notifySubscribers();
+    try {
+      queryClient.setQueryData(queryKeys.products.detail(updatedProduct.id), updatedProduct);
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.brands.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+    } catch {
+      // Safe guard
+    }
 
     // Save to Firestore asynchronously
     setDoc(doc(db, 'products', product.id), sanitizeForFirestore(updatedProduct)).catch(console.error);
@@ -230,6 +346,14 @@ export const productService = {
     productsCache = productsCache.filter(p => p.id !== id);
     notifySubscribers();
     try {
+      queryClient.removeQueries({ queryKey: queryKeys.products.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.brands.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.categories.all });
+    } catch {
+      // Safe guard
+    }
+    try {
       await deleteDoc(doc(db, 'products', id));
       return true;
     } catch (err: any) {
@@ -243,6 +367,33 @@ export const productService = {
 
   getInventoryLogs(): InventoryLog[] {
     return inventoryLogsCache;
+  },
+
+  async fetchHistoricalInventoryLogs(options: {
+    limitCount?: number;
+    startAfterCreatedAt?: string;
+    productId?: string;
+  } = {}): Promise<InventoryLog[]> {
+    const { limitCount = 50, startAfterCreatedAt, productId } = options;
+    try {
+      let q = query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc'));
+      if (startAfterCreatedAt) {
+        q = query(q, startAfter(startAfterCreatedAt));
+      }
+      q = query(q, limit(limitCount));
+      const snap = await getDocs(q);
+      const logs: InventoryLog[] = [];
+      snap.forEach((d) => {
+        const item = d.data() as InventoryLog;
+        if (!productId || item.productId === productId) {
+          logs.push(item);
+        }
+      });
+      return logs;
+    } catch (err) {
+      console.warn('[ProductService] fetchHistoricalInventoryLogs error:', err);
+      return [];
+    }
   },
 
   getStockMovements(): StockMovement[] {

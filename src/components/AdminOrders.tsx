@@ -41,6 +41,7 @@ import {
 import { Order, OrderItem, Product, StockMovement } from '../types';
 import { posService } from '../services/posService';
 import { productService } from '../services/productService';
+import { useProducts } from '../hooks/queries/products';
 import InvoiceDocument from './InvoiceDocument';
 import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 import { createSteadfastConsignment } from '../services/steadfastService';
@@ -74,7 +75,7 @@ function playScanBeep() {
 export const AdminOrders: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'movements'>('pending');
   const [orders, setOrders] = useState<Order[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const { data: products = [] } = useProducts();
   const [movements, setMovements] = useState<StockMovement[]>([]);
 
   // Filtering state
@@ -170,7 +171,6 @@ export const AdminOrders: React.FC = () => {
   useEffect(() => {
     const loadData = () => {
       setOrders([...posService.getOrders()]);
-      setProducts([...productService.getProducts()]);
       setMovements([...productService.getStockMovements()]);
     };
 
@@ -367,7 +367,6 @@ export const AdminOrders: React.FC = () => {
       setActiveFulfillmentOrder(null);
       setScanMessage(null);
       setOrders([...posService.getOrders()]);
-      setProducts([...productService.getProducts()]);
       setMovements([...productService.getStockMovements()]);
     } else {
       setScanMessage({ type: 'error', text: `❌ ${res.message}` });
@@ -414,7 +413,6 @@ export const AdminOrders: React.FC = () => {
         }
 
         setOrders([...posService.getOrders()]);
-        setProducts([...productService.getProducts()]);
         setMovements([...productService.getStockMovements()]);
         setOrderToCancel(null);
       } else {
@@ -443,7 +441,6 @@ export const AdminOrders: React.FC = () => {
     if (res.success) {
       alert(res.message);
       setRestockProductModal(null);
-      setProducts([...productService.getProducts()]);
       setMovements([...productService.getStockMovements()]);
     } else {
       alert(res.message);

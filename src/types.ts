@@ -276,6 +276,7 @@ export interface PosSession {
     mobileScannerName: string;
     requestedAt: string;
   } | null;
+  totalScannedItems?: number;
   items?: {
     productId: string;
     name: string;

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { productService } from '../services/productService';
+import { useProducts } from '../hooks/queries/products';
+import { useCategories } from '../hooks/queries/categories';
+import { useBrands } from '../hooks/queries/brands';
 import { agentService } from '../services/agentService';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { Product } from '../types';
@@ -49,7 +52,10 @@ const CATEGORIES = [
 
 export const ProductManagement: React.FC = () => {
   const navigate = useNavigate();
-  const [products, setProducts] = useState<Product[]>([]);
+  const { data: products = [], isLoading: isProductsLoading } = useProducts();
+  const { data: categories = CATEGORIES } = useCategories();
+  const { data: brandsData } = useBrands();
+
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [selectedProductForPopup, setSelectedProductForPopup] = useState<Product | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
@@ -740,16 +746,8 @@ export const ProductManagement: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    refreshProducts();
-    const unsubscribe = productService.subscribe((prods) => {
-      setProducts([...prods]);
-    });
-    return () => unsubscribe();
-  }, []);
-
   const refreshProducts = () => {
-    setProducts(productService.getProducts());
+    // TanStack Query handles automatic cache synchronization
   };
 
   const handleStartAddProduct = () => {

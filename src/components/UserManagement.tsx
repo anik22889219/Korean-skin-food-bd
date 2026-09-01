@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
-import { collection, onSnapshot, doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from '../types';
+import { useUsers } from '../hooks/queries/users';
 import { 
   Users, ShieldAlert, Search, Filter, UserCheck, Shield, UserPlus, 
   Edit3, Trash2, Award, Mail, Phone, Lock, Sparkles, CheckCircle2, 
@@ -12,8 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export const UserManagement: React.FC = () => {
   const { profile } = useAuth();
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { data: rawUsers = [], isLoading: usersLoading } = useUsers();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedRole, setSelectedRole] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -38,65 +38,46 @@ export const UserManagement: React.FC = () => {
 
   // Strictly check if current user is Super Admin or HR
   const isAuthorized = profile?.role === 'super_admin' || profile?.role === 'hr';
+  const loading = isAuthorized ? usersLoading : false;
+
+  // Compute normalized and priority-sorted users
+  const users = useMemo(() => {
+    if (!isAuthorized || !rawUsers) return [];
+
+    const userList: UserProfile[] = rawUsers.map((data) => ({
+      uid: data.uid || '',
+      name: data.name || 'Unnamed User',
+      email: data.email || '',
+      phone: data.phone || '',
+      role: data.role || 'customer',
+      loyaltyPoints: data.loyaltyPoints || 0,
+      photoURL: data.photoURL || '',
+      address: data.address || '',
+      createdAt: data.createdAt,
+      department: data.department || '',
+      status: data.status || 'active',
+      wholesaleAccess: data.wholesaleAccess === true,
+      ...data,
+    }));
+
+    const rolePriority: Record<string, number> = {
+      super_admin: 1,
+      hr: 2,
+      admin: 3,
+      creator: 4,
+      inventory_manager: 5,
+      customer_support: 6,
+      customer: 7,
+    };
+
+    return userList.sort((a, b) => (rolePriority[a.role] || 99) - (rolePriority[b.role] || 99));
+  }, [rawUsers, isAuthorized]);
 
   // Show auto-clearing toast
   const showToast = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 4000);
   };
-
-  useEffect(() => {
-    if (!isAuthorized) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    const usersRef = collection(db, 'users');
-    
-    const unsubscribe = onSnapshot(usersRef, (snapshot) => {
-      const userList: UserProfile[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        userList.push({
-          uid: docSnap.id,
-          name: data.name || 'Unnamed User',
-          email: data.email || '',
-          phone: data.phone || '',
-          role: data.role || 'customer',
-          loyaltyPoints: data.loyaltyPoints || 0,
-          photoURL: data.photoURL || '',
-          address: data.address || '',
-          createdAt: data.createdAt,
-          department: data.department || '',
-          status: data.status || 'active',
-          wholesaleAccess: data.wholesaleAccess === true,
-        });
-      });
-
-      // Sort by Super Admin > HR > Admin > Creator > Staff > Customer
-      const rolePriority: Record<string, number> = {
-        super_admin: 1,
-        hr: 2,
-        admin: 3,
-        creator: 4,
-        inventory_manager: 5,
-        customer_support: 6,
-        customer: 7,
-      };
-
-      userList.sort((a, b) => (rolePriority[a.role] || 99) - (rolePriority[b.role] || 99));
-
-      setUsers(userList);
-      setLoading(false);
-    }, (error) => {
-      console.error('[UserManagement] Error loading users:', error);
-      handleFirestoreError(error, OperationType.LIST, 'users', false);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [isAuthorized]);
 
   // Handle Quick Role Change directly in table
   const handleRoleChange = async (targetUid: string, newRole: UserRole) => {

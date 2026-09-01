@@ -34,14 +34,14 @@ export interface AdminNotification {
 
 export const AdminNotificationBell: React.FC = () => {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const userRole = profile?.role;
   const userUid = user?.uid || '';
 
-  // Only Admin and Super Admin receive POS session notifications
+  // Admins, Super Admins, Inventory Managers, and authorized staff receive POS session notifications
   const canReceivePosNotifs = useMemo(() => {
-    return userRole === 'admin' || userRole === 'super_admin' || user?.email === 'koreanskinfood.bd@gmail.com';
-  }, [userRole, user?.email]);
+    return isAdmin || Boolean(userRole && ['admin', 'super_admin', 'inventory_manager', 'customer_support'].includes(userRole)) || user?.email === 'koreanskinfood.bd@gmail.com';
+  }, [isAdmin, userRole, user?.email]);
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'pos' | 'orders' | 'stock'>('all');

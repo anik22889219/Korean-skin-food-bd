@@ -12,9 +12,11 @@ import {
 } from '../types';
 import { productService } from './productService';
 import { auth, db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, addDoc, getDocs, getDoc, arrayUnion, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, limit, startAfter, addDoc, getDocs, getDoc, arrayUnion, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
 import { getProductUnitPrice, aggregateProductQuantities } from '../utils/pricing';
+import { queryClient } from '../lib/queryClient';
+import { queryKeys } from '../lib/queryKeys';
 
 export const ALLOWED_POS_ROLES: PosAllowedRole[] = ['admin', 'super_admin', 'inventory_manager'];
 
@@ -185,17 +187,22 @@ function notifyOrderSubscribers() {
   });
 }
 
-onSnapshot(query(collection(db, 'draft_orders'), orderBy('createdAt', 'desc')), (snapshot) => {
+onSnapshot(query(collection(db, 'draft_orders'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
   const drafts: Order[] = [];
   snapshot.forEach((doc) => {
     drafts.push(doc.data() as Order);
   });
   draftOrdersCache = drafts;
+  try {
+    queryClient.setQueryData(queryKeys.orders.drafts(), drafts);
+  } catch {
+    // Safe guard
+  }
 }, (err) => {
   console.warn('[Firebase] draft_orders onSnapshot warning:', err);
 });
 
-onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snapshot) => {
+onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
   const ords: Order[] = [];
   snapshot.forEach((docSnap) => {
     const raw = docSnap.data() as Order;
@@ -213,6 +220,12 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snaps
   if (ords.length > 0) {
     ordersCache = ords;
     notifyOrderSubscribers();
+    try {
+      queryClient.setQueryData(queryKeys.orders.all, ords);
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders.lists() });
+    } catch {
+      // Safe guard
+    }
   }
 }, (err) => {
   console.warn('[Firebase] orders onSnapshot warning:', err);
@@ -429,6 +442,24 @@ export const posService = {
           deviceType
         }).catch(() => {});
 
+        // Dispatch or refresh administrative realtime notification for this session
+        const notifId = `pos-session-${activeSession.id}`;
+        const notificationPayload: PosSessionNotification = {
+          id: notifId,
+          notificationId: notifId,
+          type: 'POS_SESSION_STARTED',
+          sessionId: activeSession.id,
+          userId: activeSession.userId || userId,
+          userName: activeSession.userName || userName || 'Store Staff',
+          userRole: (activeSession.userRole || userRole || 'staff') as PosAllowedRole,
+          deviceType: activeSession.deviceType || deviceType,
+          createdAt: activeSession.startedAt || activeSession.created_at || nowIso,
+          read: false,
+          readBy: [],
+          dismissedBy: []
+        };
+        setDoc(doc(db, 'admin_notifications', notifId), sanitizeForFirestore(notificationPayload), { merge: true }).catch(() => {});
+
         return {
           ...activeSession,
           lastSeenAt: nowIso,
@@ -503,35 +534,87 @@ export const posService = {
   },
 
   /**
-   * Realtime subscription to POS session administrative notifications (For admin and super_admin only)
+   * Realtime subscription to POS session administrative notifications (For admin, super_admin, and inventory managers)
    */
   subscribeAdminNotifications(
     callback: (notifications: PosSessionNotification[]) => void,
     onError?: (err: any) => void
   ): () => void {
     try {
-      const q = query(
-        collection(db, 'admin_notifications'),
-        where('type', '==', 'POS_SESSION_STARTED')
-      );
-      return onSnapshot(q, (snapshot) => {
+      let notifsFromAdminNotifs: PosSessionNotification[] = [];
+      let notifsFromPosSessions: PosSessionNotification[] = [];
+
+      const emitCombined = () => {
+        const combinedMap = new Map<string, PosSessionNotification>();
+
+        // First add pos_sessions as notifications
+        notifsFromPosSessions.forEach(n => {
+          combinedMap.set(n.sessionId, n);
+        });
+
+        // Overlay explicit admin_notifications
+        notifsFromAdminNotifs.forEach(n => {
+          combinedMap.set(n.sessionId, n);
+        });
+
+        const list = Array.from(combinedMap.values());
+        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        callback(list);
+      };
+
+      const unsubAdminNotifs = onSnapshot(collection(db, 'admin_notifications'), (snapshot) => {
         const notifs: PosSessionNotification[] = [];
         snapshot.forEach(docSnap => {
           const data = docSnap.data() as PosSessionNotification;
-          notifs.push({
-            ...data,
-            id: docSnap.id,
-            notificationId: data.notificationId || docSnap.id,
-            sessionId: data.sessionId || docSnap.id.replace('pos-session-', '')
-          });
+          if (data.type === 'POS_SESSION_STARTED' || !data.type) {
+            notifs.push({
+              ...data,
+              id: docSnap.id,
+              notificationId: data.notificationId || docSnap.id,
+              sessionId: data.sessionId || docSnap.id.replace('pos-session-', '')
+            });
+          }
         });
-        // Sort descending by creation timestamp
-        notifs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        callback(notifs);
+        notifsFromAdminNotifs = notifs;
+        emitCombined();
       }, (err) => {
         if (onError) onError(err);
         else console.warn('[posService] Realtime admin notifications notice:', err);
       });
+
+      const unsubPosSessions = onSnapshot(collection(db, 'pos_sessions'), (snapshot) => {
+        const notifs: PosSessionNotification[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as PosSession;
+          if (data.status === 'active' || data.status === 'open' || !data.status) {
+            const notifId = `pos-session-${docSnap.id}`;
+            notifs.push({
+              id: notifId,
+              notificationId: notifId,
+              type: 'POS_SESSION_STARTED',
+              sessionId: docSnap.id,
+              userId: data.userId || '',
+              userName: data.userName || data.operatorName || 'Store Staff',
+              userRole: data.userRole || 'staff',
+              deviceType: data.deviceType || 'desktop',
+              createdAt: data.startedAt || data.created_at || new Date().toISOString(),
+              read: false,
+              readBy: [],
+              dismissedBy: []
+            });
+          }
+        });
+        notifsFromPosSessions = notifs;
+        emitCombined();
+      }, (err) => {
+        if (onError) onError(err);
+        else console.warn('[posService] Realtime pos_sessions notification fallback notice:', err);
+      });
+
+      return () => {
+        unsubAdminNotifs();
+        unsubPosSessions();
+      };
     } catch (err) {
       if (onError) onError(err);
       return () => {};
@@ -887,6 +970,14 @@ export const posService = {
 
         // Post-Checkout Cart Cleanup & Cache Sync
         try {
+          const sessionRef = doc(db, 'pos_sessions', sessionId);
+          updateDoc(sessionRef, {
+            items: [],
+            totalScannedItems: 0,
+            lastSeenAt: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).catch(() => {});
+
           const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
           const scansSnapshot = await getDocs(scansColRef);
           if (!scansSnapshot.empty) {
@@ -1219,6 +1310,14 @@ export const posService = {
 
       // 3. Post-Transaction Cart Cleanup & Local Cache Update
       try {
+        const sessionRef = doc(db, 'pos_sessions', sessionId);
+        updateDoc(sessionRef, {
+          items: [],
+          totalScannedItems: 0,
+          lastSeenAt: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).catch(() => {});
+
         // Clear scans subcollection for this POS session in Firestore
         const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
         const scansSnapshot = await getDocs(scansColRef);
@@ -1310,6 +1409,47 @@ export const posService = {
 
   getOrders(): Order[] {
     return ordersCache;
+  },
+
+  async fetchHistoricalOrders(options: {
+    limitCount?: number;
+    startAfterCreatedAt?: string;
+    status?: string;
+    sessionType?: 'POS' | 'ONLINE';
+  } = {}): Promise<Order[]> {
+    const { limitCount = 50, startAfterCreatedAt, status, sessionType } = options;
+    try {
+      let q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+      if (status && status !== 'all') {
+        q = query(q, where('status', '==', status));
+      }
+      if (sessionType) {
+        q = query(q, where('sessionType', '==', sessionType));
+      }
+      if (startAfterCreatedAt) {
+        q = query(q, startAfter(startAfterCreatedAt));
+      }
+      q = query(q, limit(limitCount));
+      const snap = await getDocs(q);
+      const list: Order[] = [];
+      snap.forEach((d) => {
+        const raw = d.data() as Order;
+        list.push({
+          ...raw,
+          id: d.id || raw.id,
+          order_source: raw.order_source || (raw.sessionType === 'POS' ? 'POS' : 'WEBSITE'),
+          stock_deducted: raw.stock_deducted ?? (raw.status === 'delivered' || raw.status === 'processing' || raw.status === 'shipped'),
+          items: (raw.items || []).map(item => ({
+            ...item,
+            scannedQuantity: item.scannedQuantity ?? (raw.status === 'delivered' ? item.quantity : 0)
+          }))
+        });
+      });
+      return list;
+    } catch (err) {
+      console.warn('[posService] fetchHistoricalOrders error:', err);
+      return [];
+    }
   },
 
   getDraftOrders(): Order[] {

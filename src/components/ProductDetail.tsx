@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { productService } from '../services/productService';
+import { useProduct, useProducts } from '../hooks/queries/products';
 import { reviewService } from '../services/reviewService';
 import { posService } from '../services/posService';
 import { Product, ProductReview, Order } from '../types';
@@ -29,13 +30,30 @@ export const ProductDetail: React.FC = () => {
   const { language, addToCart } = useCart();
   const { user, profile, signInWithGoogle, isAdmin } = useAuth();
 
-  const [product, setProduct] = useState<Product | null>(null);
-  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+  const { data: product, isLoading: isProductLoading, isError } = useProduct(id);
+  const { data: allProducts = [] } = useProducts();
+
   const [activeTab, setActiveTab] = useState<'desc' | 'ingredients' | 'how-to'>('desc');
   const [selectedMainImage, setSelectedMainImage] = useState<string>('');
   const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Sync main image when product changes
+  useEffect(() => {
+    if (product?.image) {
+      setSelectedMainImage(product.image);
+    }
+  }, [product?.id, product?.image]);
+
+  // Related products calculated dynamically from cached allProducts
+  const relatedProducts = useMemo(() => {
+    if (!product || !allProducts.length) return [];
+    const filtered = allProducts
+      .filter(p => p.id !== product.id && (p.category === product.category || p.brand === product.brand))
+      .slice(0, 4);
+    return filtered.length > 0 ? filtered : allProducts.filter(p => p.id !== product.id).slice(0, 4);
+  }, [product, allProducts]);
 
   // Quantity State (Default: 1)
   const [quantity, setQuantity] = useState<number>(1);
@@ -262,31 +280,25 @@ export const ProductDetail: React.FC = () => {
   // Tracked Product ID Ref Guard to prevent re-render double-firing
   const trackedProductIdRef = useRef<string | null>(null);
 
-  // Load Product Info
+  // Scroll to top and track ViewContent / view_item once per product load
   useEffect(() => {
     if (!id) return;
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    const prod = productService.getProductById(id);
-    if (prod) {
-      setProduct(prod);
-      setSelectedMainImage(prod.image);
-      
-      // Track ViewContent / view_item once per product load
-      if (trackedProductIdRef.current !== prod.id) {
-        trackedProductIdRef.current = prod.id;
-        analytics.trackViewItem(prod);
-      }
+  }, [id]);
 
-      // Load related products
-      const allProds = productService.getProducts();
-      const filtered = allProds
-        .filter(p => p.id !== prod.id && (p.category === prod.category || p.brand === prod.brand))
-        .slice(0, 4);
-      setRelatedProducts(filtered.length > 0 ? filtered : allProds.filter(p => p.id !== prod.id).slice(0, 4));
-    } else {
-      navigate('/');
+  useEffect(() => {
+    if (product && trackedProductIdRef.current !== product.id) {
+      trackedProductIdRef.current = product.id;
+      analytics.trackViewItem(product);
     }
-  }, [id, navigate]);
+  }, [product]);
+
+  // If query failed completely after loading and no product found, redirect gracefully
+  useEffect(() => {
+    if (!isProductLoading && !product && id) {
+      navigate('/', { replace: true });
+    }
+  }, [isProductLoading, product, id, navigate]);
 
   // Subscribe to Product Reviews
   useEffect(() => {

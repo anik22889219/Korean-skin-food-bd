@@ -1,6 +1,8 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings } from '../types/theme';
+import { queryClient } from '../lib/queryClient';
+import { queryKeys } from '../lib/queryKeys';
 
 export const DEFAULT_SHOP_THEME: ShopThemeSettings = {
   heroTitle: 'The Apothecary',
@@ -431,6 +433,9 @@ class ThemeService {
             this.currentTheme = this.sanitizeTheme({ ...DEFAULT_HOME_THEME, ...data });
             localStorage.setItem(STORAGE_KEY, JSON.stringify(this.currentTheme));
             this.notifyListeners();
+            try {
+              queryClient.setQueryData(queryKeys.settings.homeTheme(), this.currentTheme);
+            } catch {}
           }
         },
         (error) => {
@@ -453,6 +458,9 @@ class ThemeService {
             localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(this.currentGlobalTheme));
             applyGlobalThemeToDOM(this.currentGlobalTheme);
             this.notifyGlobalListeners();
+            try {
+              queryClient.setQueryData(queryKeys.settings.globalTheme(), this.currentGlobalTheme);
+            } catch {}
           }
         },
         (error) => {
@@ -474,6 +482,9 @@ class ThemeService {
             this.currentShopTheme = { ...DEFAULT_SHOP_THEME, ...data };
             localStorage.setItem(SHOP_STORAGE_KEY, JSON.stringify(this.currentShopTheme));
             this.notifyShopListeners();
+            try {
+              queryClient.setQueryData(queryKeys.settings.shopTheme(), this.currentShopTheme);
+            } catch {}
           }
         },
         (error) => {
@@ -505,6 +516,10 @@ class ThemeService {
     this.currentTheme = updated;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     this.notifyListeners();
+    try {
+      queryClient.setQueryData(queryKeys.settings.homeTheme(), updated);
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.homeTheme() });
+    } catch {}
 
     try {
       const docRef = doc(db, 'site_settings', 'theme_home');
@@ -523,6 +538,11 @@ class ThemeService {
     localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(updated));
     applyGlobalThemeToDOM(updated);
     this.notifyGlobalListeners();
+    try {
+      queryClient.setQueryData(queryKeys.settings.globalTheme(), updated);
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.globalTheme() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.site() });
+    } catch {}
 
     try {
       const docRef = doc(db, 'site_settings', 'theme_global');
@@ -540,6 +560,10 @@ class ThemeService {
     this.currentShopTheme = updated;
     localStorage.setItem(SHOP_STORAGE_KEY, JSON.stringify(updated));
     this.notifyShopListeners();
+    try {
+      queryClient.setQueryData(queryKeys.settings.shopTheme(), updated);
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.shopTheme() });
+    } catch {}
 
     try {
       const docRef = doc(db, 'site_settings', 'theme_shop');

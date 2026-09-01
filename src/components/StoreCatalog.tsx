@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { themeService } from '../services/themeService';
 import { HomeThemeSettings, SectionKey, ReelItem } from '../types/theme';
 import { productService } from '../services/productService';
+import { useProducts } from '../hooks/queries/products';
+import { useCategories } from '../hooks/queries/categories';
+import { useBrands } from '../hooks/queries/brands';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { useNavigate, Link } from 'react-router-dom';
@@ -46,11 +49,13 @@ export const StoreCatalog: React.FC = () => {
   const navigate = useNavigate();
   const { addToCart, setIsCartOpen, language, activeTranslations } = useCart();
   
-  // Theme & Products state
+  // Theme & Query state
   const [theme, setTheme] = useState<HomeThemeSettings>(themeService.getHomeTheme());
-  const [products, setProducts] = useState<Product[]>([]);
+  const { data: products = [], isLoading } = useProducts();
+  const { data: categories = CATEGORIES } = useCategories();
+  const { data: brandsData } = useBrands();
+
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedBrand, setSelectedBrand] = useState('All');
@@ -74,13 +79,13 @@ export const StoreCatalog: React.FC = () => {
 
   // Available brands list combining static catalog & active store products with case deduplication
   const availableBrands = useMemo(() => {
-    return getUniqueBrandList(products);
-  }, [products]);
+    return brandsData?.brands || getUniqueBrandList(products);
+  }, [brandsData, products]);
 
   // Product counts per brand for badges (case-insensitive keys)
   const brandProductCounts = useMemo(() => {
-    return getBrandProductCounts(products);
-  }, [products]);
+    return brandsData?.counts || getBrandProductCounts(products);
+  }, [brandsData, products]);
 
   // Filtered brands for brand modal/search
   const filteredBrandList = useMemo(() => {
@@ -143,28 +148,18 @@ export const StoreCatalog: React.FC = () => {
     const unsubscribeTheme = themeService.subscribe((data) => {
       setTheme(data);
     });
-    const initialProds = productService.getProducts();
-    if (initialProds && initialProds.length > 0) {
-      setProducts(initialProds);
-      setIsLoading(false);
-      if (!hasTrackedItemListRef.current) {
-        hasTrackedItemListRef.current = true;
-        analytics.trackViewItemList(initialProds, 'Store Catalog Home');
-      }
-    }
-    const unsubscribeProducts = productService.subscribe((prods) => {
-      setProducts([...prods]);
-      setIsLoading(false);
-      if (!hasTrackedItemListRef.current && prods.length > 0) {
-        hasTrackedItemListRef.current = true;
-        analytics.trackViewItemList(prods, 'Store Catalog Home');
-      }
-    });
     return () => {
       unsubscribeTheme();
-      unsubscribeProducts();
     };
   }, []);
+
+  // Track view item list once products are loaded
+  useEffect(() => {
+    if (!hasTrackedItemListRef.current && products.length > 0) {
+      hasTrackedItemListRef.current = true;
+      analytics.trackViewItemList(products, 'Store Catalog Home');
+    }
+  }, [products]);
 
   // Community Live Auto Slide Timer
   useEffect(() => {

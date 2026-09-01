@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { collection, doc, setDoc, updateDoc, onSnapshot, query, deleteDoc, writeBatch, getDoc } from 'firebase/firestore';
-import { db } from '../services/firebase';
+import { db, sanitizeForFirestore } from '../services/firebase';
 import { productService } from '../services/productService';
 import { addProductToSession } from '../services/posService';
 import { posDiscoveryService } from '../services/posDiscoveryService';
@@ -364,6 +364,24 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       };
     });
   }, [scans, products]);
+
+  // Sync live cart items & scan count to pos_sessions Firestore doc for live admin monitoring
+  useEffect(() => {
+    if (!sessionId) return;
+    const itemsPayload = cartItems.map((it) => ({
+      productId: it.product.id,
+      name: it.product.name,
+      price: it.product.discountPrice || it.product.price,
+      quantity: it.quantity
+    }));
+    const nowIso = new Date().toISOString();
+    updateDoc(doc(db, 'pos_sessions', sessionId), sanitizeForFirestore({
+      items: itemsPayload,
+      totalScannedItems: scans.length,
+      lastSeenAt: nowIso,
+      updated_at: nowIso
+    })).catch(() => {});
+  }, [sessionId, cartItems, scans.length]);
 
   const cartQuantitiesMap = useMemo(() => {
     const map: Record<string, number> = {};
@@ -895,7 +913,19 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 staffName={operatorName}
               />
             ) : activeTab === 'history' ? (
-              <PosHistory orders={orders} />
+              <PosHistory
+                orders={orders}
+                userRole={userRole}
+                initialSelectedLiveSessionId={targetLiveSessionId}
+                onClearSelectedLiveSession={() => {
+                  setTargetLiveSessionId(null);
+                  if (searchParams.has('session')) {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete('session');
+                    setSearchParams(next, { replace: true });
+                  }
+                }}
+              />
             ) : activeTab === 'scan' ? (
               <div className="max-w-2xl mx-auto space-y-4">
                 <div className="flex items-center justify-between bg-pink-50/50 p-4 rounded-2xl border border-pink-100">
