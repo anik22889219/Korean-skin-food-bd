@@ -89,8 +89,9 @@ onSnapshot(query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc'),
   });
   inventoryLogsCache = logs;
   try {
+    queryClient.setQueryData(queryKeys.inventory.logsRecent(), logs);
     queryClient.setQueryData(queryKeys.inventory.logs(), logs);
-    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.logsAll() });
   } catch {
     // Safe guard
   }
@@ -109,8 +110,9 @@ onSnapshot(query(collection(db, 'stock_movements'), orderBy('createdAt', 'desc')
   });
   stockMovementsCache = movements;
   try {
+    queryClient.setQueryData(queryKeys.inventory.movementsRecent(), movements);
     queryClient.setQueryData(queryKeys.inventory.movements(), movements);
-    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.movements() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.movementsAll() });
   } catch {
     // Safe guard
   }
@@ -127,8 +129,9 @@ onSnapshot(query(collection(db, 'stock_receipts'), orderBy('createdAt', 'desc'),
   stockReceiptsCache = receipts;
   notifyReceiptSubscribers();
   try {
+    queryClient.setQueryData(queryKeys.inventory.receiptsRecent(), receipts);
     queryClient.setQueryData(queryKeys.inventory.receipts(), receipts);
-    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.receipts() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.receiptsAll() });
   } catch {
     // Safe guard
   }
@@ -373,8 +376,10 @@ export const productService = {
     limitCount?: number;
     startAfterCreatedAt?: string;
     productId?: string;
+    startDate?: string;
+    endDate?: string;
   } = {}): Promise<InventoryLog[]> {
-    const { limitCount = 50, startAfterCreatedAt, productId } = options;
+    const { limitCount = 50, startAfterCreatedAt, productId, startDate, endDate } = options;
     try {
       let q = query(collection(db, 'inventory_logs'), orderBy('createdAt', 'desc'));
       if (startAfterCreatedAt) {
@@ -385,7 +390,11 @@ export const productService = {
       const logs: InventoryLog[] = [];
       snap.forEach((d) => {
         const item = d.data() as InventoryLog;
-        if (!productId || item.productId === productId) {
+        let match = true;
+        if (productId && item.productId !== productId) match = false;
+        if (startDate && new Date(item.createdAt).getTime() < new Date(startDate).getTime()) match = false;
+        if (endDate && new Date(item.createdAt).getTime() > new Date(endDate).getTime()) match = false;
+        if (match) {
           logs.push(item);
         }
       });
@@ -393,6 +402,68 @@ export const productService = {
     } catch (err) {
       console.warn('[ProductService] fetchHistoricalInventoryLogs error:', err);
       return [];
+    }
+  },
+
+  async fetchHistoricalStockMovements(options?: {
+    productId?: string;
+    type?: string;
+    source?: string;
+    limitCount?: number;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<StockMovement[]> {
+    try {
+      const q = query(
+        collection(db, 'stock_movements'),
+        orderBy('createdAt', 'desc'),
+        limit(options?.limitCount || 200)
+      );
+      const snap = await getDocs(q);
+      const movements: StockMovement[] = [];
+      snap.forEach((d) => {
+        const item = d.data() as StockMovement;
+        let match = true;
+        if (options?.productId && item.productId !== options.productId) match = false;
+        if (options?.type && item.type !== options.type) match = false;
+        if (options?.source && item.source !== options.source) match = false;
+        if (options?.startDate && new Date(item.createdAt).getTime() < new Date(options.startDate).getTime()) match = false;
+        if (options?.endDate && new Date(item.createdAt).getTime() > new Date(options.endDate).getTime()) match = false;
+        if (match) movements.push(item);
+      });
+      return movements;
+    } catch (err) {
+      console.warn('[ProductService] fetchHistoricalStockMovements error:', err);
+      return stockMovementsCache;
+    }
+  },
+
+  async fetchHistoricalStockReceipts(options?: {
+    supplier?: string;
+    limitCount?: number;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<StockReceipt[]> {
+    try {
+      const q = query(
+        collection(db, 'stock_receipts'),
+        orderBy('createdAt', 'desc'),
+        limit(options?.limitCount || 200)
+      );
+      const snap = await getDocs(q);
+      const receipts: StockReceipt[] = [];
+      snap.forEach((d) => {
+        const item = d.data() as StockReceipt;
+        let match = true;
+        if (options?.supplier && item.supplier?.toLowerCase() !== options.supplier.toLowerCase()) match = false;
+        if (options?.startDate && new Date(item.createdAt).getTime() < new Date(options.startDate).getTime()) match = false;
+        if (options?.endDate && new Date(item.createdAt).getTime() > new Date(options.endDate).getTime()) match = false;
+        if (match) receipts.push(item);
+      });
+      return receipts;
+    } catch (err) {
+      console.warn('[ProductService] fetchHistoricalStockReceipts error:', err);
+      return stockReceiptsCache;
     }
   },
 

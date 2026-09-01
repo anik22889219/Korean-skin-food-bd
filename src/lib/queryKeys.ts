@@ -14,18 +14,52 @@ export const queryKeys = {
   },
   inventory: {
     all: ['inventory'] as const,
-    movements: (filters?: Record<string, any>) => [...queryKeys.inventory.all, 'movements', filters ? JSON.stringify(filters) : 'all'] as const,
-    logs: (productId?: string) => [...queryKeys.inventory.all, 'logs', productId || 'all'] as const,
-    receipts: () => [...queryKeys.inventory.all, 'receipts'] as const,
+    // Movements: distinguish realtime recent (200 limit window) vs paginated historical vs filtered
+    movementsAll: () => [...queryKeys.inventory.all, 'movements'] as const,
+    movementsRecent: (filters?: Record<string, any>) => [...queryKeys.inventory.movementsAll(), 'recent', filters ? JSON.stringify(filters) : 'all'] as const,
+    movementsPaginated: (params?: Record<string, any>) => [...queryKeys.inventory.movementsAll(), 'paginated', params ? JSON.stringify(params) : 'all'] as const,
+    movementsHistorical: (params?: Record<string, any>) => [...queryKeys.inventory.movementsAll(), 'historical', params ? JSON.stringify(params) : 'all'] as const,
+    movements: (filters?: Record<string, any>) => [...queryKeys.inventory.movementsAll(), 'list', filters ? JSON.stringify(filters) : 'all'] as const,
+    
+    // Logs: distinguish realtime recent (200 limit window) vs paginated historical
+    logsAll: () => [...queryKeys.inventory.all, 'logs'] as const,
+    logsRecent: (productId?: string) => [...queryKeys.inventory.logsAll(), 'recent', productId || 'all'] as const,
+    logsPaginated: (params?: Record<string, any>) => [...queryKeys.inventory.logsAll(), 'paginated', params ? JSON.stringify(params) : 'all'] as const,
+    logsHistorical: (params?: Record<string, any>) => [...queryKeys.inventory.logsAll(), 'historical', params ? JSON.stringify(params) : 'all'] as const,
+    logs: (productId?: string) => [...queryKeys.inventory.logsAll(), 'list', productId || 'all'] as const,
+
+    // Receipts: distinguish realtime recent (200 limit window) vs paginated historical
+    receiptsAll: () => [...queryKeys.inventory.all, 'receipts'] as const,
+    receiptsRecent: () => [...queryKeys.inventory.receiptsAll(), 'recent'] as const,
+    receiptsPaginated: (params?: Record<string, any>) => [...queryKeys.inventory.receiptsAll(), 'paginated', params ? JSON.stringify(params) : 'all'] as const,
+    receiptsHistorical: (params?: Record<string, any>) => [...queryKeys.inventory.receiptsAll(), 'historical', params ? JSON.stringify(params) : 'all'] as const,
+    receipts: () => [...queryKeys.inventory.receiptsAll(), 'list'] as const,
+
     stock: (productId?: string) => [...queryKeys.inventory.all, 'stock', productId || ''] as const,
   },
   orders: {
     all: ['orders'] as const,
+    // Realtime / Recent 200-item listener window
+    recent: () => [...queryKeys.orders.all, 'recent'] as const,
+    realtime: () => [...queryKeys.orders.all, 'realtime'] as const,
+
+    // Paginated / Historical records beyond 200-item window
+    paginated: (params?: Record<string, any>) => [...queryKeys.orders.all, 'paginated', params ? JSON.stringify(params) : 'all'] as const,
+    historical: (params?: Record<string, any>) => [...queryKeys.orders.all, 'historical', params ? JSON.stringify(params) : 'all'] as const,
+
+    // Standard list / filtered queries
     lists: () => [...queryKeys.orders.all, 'list'] as const,
     list: (filters?: Record<string, any>) => [...queryKeys.orders.lists(), filters ? JSON.stringify(filters) : 'all'] as const,
+
+    // Details
     details: () => [...queryKeys.orders.all, 'detail'] as const,
     detail: (orderId?: string) => [...queryKeys.orders.details(), orderId || ''] as const,
-    drafts: () => [...queryKeys.orders.all, 'drafts'] as const,
+
+    // Draft orders
+    draftsAll: () => [...queryKeys.orders.all, 'drafts'] as const,
+    draftsRecent: () => [...queryKeys.orders.draftsAll(), 'recent'] as const,
+    draftsPaginated: (params?: Record<string, any>) => [...queryKeys.orders.draftsAll(), 'paginated', params ? JSON.stringify(params) : 'all'] as const,
+    drafts: () => [...queryKeys.orders.draftsAll(), 'list'] as const,
   },
   users: {
     all: ['users'] as const,
@@ -50,7 +84,16 @@ export const queryKeys = {
   agents: {
     all: ['agents'] as const,
     logs: () => [...queryKeys.agents.all, 'logs'] as const,
+    runsRecent: (limitCount?: number) => [...queryKeys.agents.all, 'runs', 'recent', limitCount ?? 'default'] as const,
+    runsPaginated: (params?: Record<string, any>) => [...queryKeys.agents.all, 'runs', 'paginated', params ? JSON.stringify(params) : 'all'] as const,
     runs: (agentType?: string) => [...queryKeys.agents.all, 'runs', agentType || 'all'] as const,
+  },
+  finance: {
+    all: ['finance'] as const,
+    transactionsRecent: () => [...queryKeys.finance.all, 'transactions', 'recent'] as const,
+    transactionsPaginated: (params?: Record<string, any>) => [...queryKeys.finance.all, 'transactions', 'paginated', params ? JSON.stringify(params) : 'all'] as const,
+    paymentsRecent: () => [...queryKeys.finance.all, 'payments', 'recent'] as const,
+    paymentsPaginated: (params?: Record<string, any>) => [...queryKeys.finance.all, 'payments', 'paginated', params ? JSON.stringify(params) : 'all'] as const,
   },
   pos: {
     all: ['pos'] as const,
@@ -58,3 +101,4 @@ export const queryKeys = {
     barcode: (code?: string) => [...queryKeys.pos.all, 'barcode', code || ''] as const,
   },
 };
+

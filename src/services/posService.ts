@@ -194,6 +194,7 @@ onSnapshot(query(collection(db, 'draft_orders'), orderBy('createdAt', 'desc'), l
   });
   draftOrdersCache = drafts;
   try {
+    queryClient.setQueryData(queryKeys.orders.draftsRecent(), drafts);
     queryClient.setQueryData(queryKeys.orders.drafts(), drafts);
   } catch {
     // Safe guard
@@ -221,7 +222,9 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(2
     ordersCache = ords;
     notifyOrderSubscribers();
     try {
-      queryClient.setQueryData(queryKeys.orders.all, ords);
+      // Store 200-item realtime window in dedicated recent keys so older paginated records are not corrupted
+      queryClient.setQueryData(queryKeys.orders.recent(), ords);
+      queryClient.setQueryData(queryKeys.orders.realtime(), ords);
       queryClient.invalidateQueries({ queryKey: queryKeys.orders.lists() });
     } catch {
       // Safe guard
@@ -1416,15 +1419,19 @@ export const posService = {
     startAfterCreatedAt?: string;
     status?: string;
     sessionType?: 'POS' | 'ONLINE';
+    source?: string;
+    startDate?: string;
+    endDate?: string;
   } = {}): Promise<Order[]> {
-    const { limitCount = 50, startAfterCreatedAt, status, sessionType } = options;
+    const { limitCount = 50, startAfterCreatedAt, status, sessionType, source, startDate, endDate } = options;
     try {
       let q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
       if (status && status !== 'all') {
         q = query(q, where('status', '==', status));
       }
-      if (sessionType) {
-        q = query(q, where('sessionType', '==', sessionType));
+      const resolvedSessionType = sessionType || (source === 'POS' ? 'POS' : (source === 'WEBSITE' || source === 'ONLINE' ? 'ONLINE' : undefined));
+      if (resolvedSessionType) {
+        q = query(q, where('sessionType', '==', resolvedSessionType));
       }
       if (startAfterCreatedAt) {
         q = query(q, startAfter(startAfterCreatedAt));
@@ -1434,16 +1441,21 @@ export const posService = {
       const list: Order[] = [];
       snap.forEach((d) => {
         const raw = d.data() as Order;
-        list.push({
-          ...raw,
-          id: d.id || raw.id,
-          order_source: raw.order_source || (raw.sessionType === 'POS' ? 'POS' : 'WEBSITE'),
-          stock_deducted: raw.stock_deducted ?? (raw.status === 'delivered' || raw.status === 'processing' || raw.status === 'shipped'),
-          items: (raw.items || []).map(item => ({
-            ...item,
-            scannedQuantity: item.scannedQuantity ?? (raw.status === 'delivered' ? item.quantity : 0)
-          }))
-        });
+        let match = true;
+        if (startDate && new Date(raw.createdAt).getTime() < new Date(startDate).getTime()) match = false;
+        if (endDate && new Date(raw.createdAt).getTime() > new Date(endDate).getTime()) match = false;
+        if (match) {
+          list.push({
+            ...raw,
+            id: d.id || raw.id,
+            order_source: raw.order_source || (raw.sessionType === 'POS' ? 'POS' : 'WEBSITE'),
+            stock_deducted: raw.stock_deducted ?? (raw.status === 'delivered' || raw.status === 'processing' || raw.status === 'shipped'),
+            items: (raw.items || []).map(item => ({
+              ...item,
+              scannedQuantity: item.scannedQuantity ?? (raw.status === 'delivered' ? item.quantity : 0)
+            }))
+          });
+        }
       });
       return list;
     } catch (err) {

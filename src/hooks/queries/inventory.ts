@@ -10,8 +10,91 @@ export interface StockMovementFilters {
   limit?: number;
 }
 
+export interface HistoricalStockMovementOptions {
+  productId?: string;
+  type?: string;
+  source?: string;
+  limitCount?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface HistoricalInventoryLogOptions {
+  productId?: string;
+  limitCount?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface HistoricalStockReceiptOptions {
+  supplier?: string;
+  limitCount?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
 /**
- * useStockMovements - Cached stock movements with 2-minute stale time
+ * useRecentStockMovements - Realtime 200-item listener window for stock movements.
+ */
+export function useRecentStockMovements(filters?: StockMovementFilters) {
+  return useQuery<StockMovement[]>({
+    queryKey: queryKeys.inventory.movementsRecent(filters),
+    queryFn: async () => {
+      let movements = productService.getStockMovements();
+      if (filters?.productId) {
+        movements = movements.filter((m) => m.productId === filters.productId);
+      }
+      if (filters?.type) {
+        movements = movements.filter((m) => m.type === filters.type);
+      }
+      if (filters?.source) {
+        movements = movements.filter((m) => m.source === filters.source);
+      }
+      if (filters?.limit && filters.limit > 0) {
+        movements = movements.slice(0, filters.limit);
+      }
+      return movements;
+    },
+    staleTime: 30 * 1000, // 30 seconds
+    gcTime: 15 * 60 * 1000,
+    initialData: () => {
+      let movements = productService.getStockMovements();
+      if (filters?.productId) {
+        movements = movements.filter((m) => m.productId === filters.productId);
+      }
+      if (filters?.type) {
+        movements = movements.filter((m) => m.type === filters.type);
+      }
+      if (filters?.source) {
+        movements = movements.filter((m) => m.source === filters.source);
+      }
+      if (filters?.limit && filters.limit > 0) {
+        movements = movements.slice(0, filters.limit);
+      }
+      return movements;
+    },
+  });
+}
+
+/**
+ * useHistoricalStockMovements / usePaginatedStockMovements - Queries historical records beyond the 200-item window.
+ * Uses isolated cache keys (queryKeys.inventory.movementsPaginated) to prevent cache corruption with the realtime window.
+ */
+export function useHistoricalStockMovements(options?: HistoricalStockMovementOptions) {
+  return useQuery<StockMovement[]>({
+    queryKey: queryKeys.inventory.movementsPaginated(options),
+    queryFn: async () => {
+      return productService.fetchHistoricalStockMovements(options);
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
+  });
+}
+
+export const usePaginatedStockMovements = useHistoricalStockMovements;
+
+/**
+ * useStockMovements - Filtered stock movements query
  */
 export function useStockMovements(filters?: StockMovementFilters) {
   return useQuery({
@@ -54,6 +137,47 @@ export function useStockMovements(filters?: StockMovementFilters) {
 }
 
 /**
+ * useRecentInventoryLogs - Realtime 200-item listener window for inventory logs
+ */
+export function useRecentInventoryLogs(productId?: string) {
+  return useQuery<InventoryLog[]>({
+    queryKey: queryKeys.inventory.logsRecent(productId),
+    queryFn: async () => {
+      const logs = productService.getInventoryLogs();
+      if (productId) {
+        return logs.filter((log) => log.productId === productId);
+      }
+      return logs;
+    },
+    staleTime: 30 * 1000, // 30 seconds
+    gcTime: 15 * 60 * 1000,
+    initialData: () => {
+      const logs = productService.getInventoryLogs();
+      if (productId) {
+        return logs.filter((log) => log.productId === productId);
+      }
+      return logs;
+    },
+  });
+}
+
+/**
+ * useHistoricalInventoryLogs / usePaginatedInventoryLogs - Historical logs queried independently from the realtime window
+ */
+export function useHistoricalInventoryLogs(options?: HistoricalInventoryLogOptions) {
+  return useQuery<InventoryLog[]>({
+    queryKey: queryKeys.inventory.logsPaginated(options),
+    queryFn: async () => {
+      return productService.fetchHistoricalInventoryLogs(options);
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+export const usePaginatedInventoryLogs = useHistoricalInventoryLogs;
+
+/**
  * useInventoryLogs - Cached audit logs for inventory with 5-minute stale time
  */
 export function useInventoryLogs(productId?: string) {
@@ -77,6 +201,37 @@ export function useInventoryLogs(productId?: string) {
     },
   });
 }
+
+/**
+ * useRecentStockReceipts - Realtime 200-item listener window for stock receipts
+ */
+export function useRecentStockReceipts() {
+  return useQuery<StockReceipt[]>({
+    queryKey: queryKeys.inventory.receiptsRecent(),
+    queryFn: async () => {
+      return productService.getStockReceipts();
+    },
+    staleTime: 30 * 1000,
+    gcTime: 15 * 60 * 1000,
+    initialData: () => productService.getStockReceipts(),
+  });
+}
+
+/**
+ * useHistoricalStockReceipts / usePaginatedStockReceipts - Historical receipts queried without corrupting the realtime cache
+ */
+export function useHistoricalStockReceipts(options?: HistoricalStockReceiptOptions) {
+  return useQuery<StockReceipt[]>({
+    queryKey: queryKeys.inventory.receiptsPaginated(options),
+    queryFn: async () => {
+      return productService.fetchHistoricalStockReceipts(options);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+export const usePaginatedStockReceipts = useHistoricalStockReceipts;
 
 /**
  * useStockReceipts - Cached supplier batch receipts with 5-minute stale time
@@ -170,3 +325,4 @@ export function useInventoryMutations() {
     isProcessingBatch: batchStockInMutation.isPending,
   };
 }
+

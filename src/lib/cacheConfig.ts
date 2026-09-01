@@ -21,13 +21,23 @@ export const CACHE_TTL = {
   SETTINGS_STALE: 30 * 60 * 1000, // 30 minutes
   SETTINGS_GC: 60 * 60 * 1000, // 60 minutes
 
-  // Historical Orders & Receipts - medium cache
-  HISTORICAL_ORDERS_STALE: 2 * 60 * 1000, // 2 minutes
-  HISTORICAL_ORDERS_GC: 30 * 60 * 1000, // 30 minutes
+  // Realtime listener windows (200-item stream)
+  REALTIME_ORDERS_STALE: 30 * 1000, // 30 seconds
+  REALTIME_ORDERS_GC: 15 * 60 * 1000, // 15 minutes
+  RECENT_MOVEMENTS_STALE: 30 * 1000, // 30 seconds
+  RECENT_LOGS_STALE: 30 * 1000, // 30 seconds
+  RECENT_RECEIPTS_STALE: 30 * 1000, // 30 seconds
+
+  // Historical & Paginated records (beyond 200-item window)
+  HISTORICAL_ORDERS_STALE: 5 * 60 * 1000, // 5 minutes
+  HISTORICAL_ORDERS_GC: 60 * 60 * 1000, // 60 minutes
+  HISTORICAL_MOVEMENTS_STALE: 5 * 60 * 1000, // 5 minutes
+  HISTORICAL_LOGS_STALE: 5 * 60 * 1000, // 5 minutes
+  HISTORICAL_RECEIPTS_STALE: 5 * 60 * 1000, // 5 minutes
+
+  // Filtered lists & details
   ORDER_DETAIL_STALE: 60 * 1000, // 1 minute
   ORDER_DETAIL_GC: 15 * 60 * 1000, // 15 minutes
-
-  // Inventory audit & logs - medium cache
   INVENTORY_LOGS_STALE: 5 * 60 * 1000, // 5 minutes
   INVENTORY_MOVEMENTS_STALE: 2 * 60 * 1000, // 2 minutes
 
