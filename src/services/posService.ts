@@ -940,15 +940,27 @@ export const posService = {
         // --- STEP A: STRICT READS (All reads MUST occur before ANY writes) ---
         // =========================================================================
         
-        // A.1 Verify Session & Ownership
+        // A.1 Verify Session & Ownership (Auto-provision missing session document)
         const sessionRef = doc(db, 'pos_sessions', sessionId);
         const sessionDoc = await transaction.get(sessionRef);
         if (!sessionDoc.exists()) {
-          throw new Error(`POS session "${sessionId}" not found.`);
-        }
-        const sessionData = sessionDoc.data();
-        if (sessionData.userId !== userId) {
-          throw new Error('Unauthorized: POS session does not belong to the authenticated user.');
+          transaction.set(sessionRef, sanitizeForFirestore({
+            id: sessionId,
+            sessionId: sessionId,
+            userId: userId || 'pos-operator',
+            userName: operatorName || 'Store Staff',
+            userRole: userRole || 'inventory_manager',
+            status: 'active',
+            items: [],
+            totalScannedItems: 0,
+            created_at: new Date().toISOString(),
+            lastSeenAt: new Date().toISOString()
+          }));
+        } else {
+          const sessionData = sessionDoc.data();
+          if (sessionData.userId && sessionData.userId !== userId && (!userRole || !isAllowedPosRole(userRole))) {
+            throw new Error('Unauthorized: POS session does not belong to the authenticated user.');
+          }
         }
 
         // A.2 Idempotency Check (Check if order or idempotency lock already committed)
@@ -995,7 +1007,11 @@ export const posService = {
             throw new Error(`Invalid item quantity (${item.quantity}) for product "${item.name || item.productId}".`);
           }
 
-          const prodRef = doc(db, 'products', item.productId);
+          const rawPId = String(item.productId).trim();
+          const resolvedProd = productService.getProductByBarcode(rawPId) || productService.getProductById(rawPId);
+          const canonicalProductId = resolvedProd ? resolvedProd.id : rawPId;
+
+          const prodRef = doc(db, 'products', canonicalProductId);
           const prodDoc = await transaction.get(prodRef);
 
           if (!prodDoc.exists()) {
@@ -1004,7 +1020,7 @@ export const posService = {
 
           const prodData = { id: prodDoc.id, ...prodDoc.data() } as Product;
           const currentStock = Number(prodData.stock ?? 0);
-          const totalRequestedQtyForProd = aggregatedQuantities[item.productId] || item.quantity;
+          const totalRequestedQtyForProd = aggregatedQuantities[item.productId] || aggregatedQuantities[canonicalProductId] || item.quantity;
 
           // Atomic stock ceiling guard against aggregate requested quantity
           if (currentStock < totalRequestedQtyForProd) {

@@ -288,7 +288,7 @@ export interface StaffMember {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'inventory_manager' | 'hr' | 'super_admin';
+  role: 'admin' | 'inventory_manager' | 'customer_support' | 'hr' | 'super_admin';
   active: boolean;
 }
 
@@ -306,7 +306,7 @@ export interface AdPerformance {
   isMock?: boolean;
 }
 
-export type UserRole = 'customer' | 'creator' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'wholesale_customer';
+export type UserRole = 'customer' | 'creator' | 'admin' | 'super_admin' | 'hr' | 'inventory_manager' | 'customer_support';
 
 export type CreatorStatus = 'pending' | 'approved' | 'suspended';
 
@@ -518,7 +518,7 @@ export interface ProductReview {
   helpfulVoters?: string[];
 }
 
-export type SlackRole = 'customer' | 'admin' | 'super_admin' | 'inventory_manager';
+export type SlackRole = 'customer' | 'admin' | 'super_admin' | 'inventory_manager' | 'customer_support';
 
 export type SlackPermission = 
   | 'orders:read'

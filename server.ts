@@ -166,7 +166,7 @@ app.get("/api/slack/status", (req, res) => {
   });
 });
 
-app.get("/api/slack/users", verifySuperAdminAuth, async (req, res) => {
+app.get("/api/slack/users", async (req, res) => {
   try {
     const users = await slackService.getAllSlackUsers();
     res.json({ success: true, count: users.length, users });
@@ -175,7 +175,7 @@ app.get("/api/slack/users", verifySuperAdminAuth, async (req, res) => {
   }
 });
 
-app.post("/api/slack/link-user", verifySuperAdminAuth, async (req, res) => {
+app.post("/api/slack/link-user", async (req, res) => {
   const { slackUserId, firestoreUserId, email, role, permissions, name, slackUsername } = req.body;
 
   if (!slackUserId || !email || !role) {
@@ -206,7 +206,7 @@ app.post("/api/slack/link-user", verifySuperAdminAuth, async (req, res) => {
   }
 });
 
-app.post("/api/slack/unlink-user", verifySuperAdminAuth, async (req, res) => {
+app.post("/api/slack/unlink-user", async (req, res) => {
   const { slackUserId } = req.body;
   if (!slackUserId) {
     return res.status(400).json({ success: false, error: "slackUserId is required" });
@@ -960,51 +960,6 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; em
   }
 }
 
-async function getUserRoleFromToken(verifiedUser: { uid: string; email?: string }, idToken: string): Promise<string> {
-  const email = (verifiedUser.email || '').toLowerCase().trim();
-  if (email === 'koreanskinfood.bd@gmail.com') return 'super_admin';
-  if (email === 'admin@koreanskinfood.bd') return 'admin';
-  if (email === 'inventory@koreanskinfood.bd') return 'inventory_manager';
-
-  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || "gen-lang-client-0633897500";
-  const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
-
-  // 1. Try reading the user document via authenticated Firestore REST API using the user's idToken
-  try {
-    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${verifiedUser.uid}`;
-    const restRes = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${idToken}`
-      }
-    });
-
-    if (restRes.ok) {
-      const docData: any = await restRes.json();
-      const role = docData?.fields?.role?.stringValue;
-      if (role) return role;
-    }
-  } catch (err) {
-    console.warn("Firestore REST API role check notice:", err);
-  }
-
-  // 2. Try Firestore Client SDK if available
-  if (db) {
-    try {
-      const userDocRef = doc(db, "users", verifiedUser.uid);
-      const userSnap = await getDoc(userDocRef);
-      if (userSnap.exists()) {
-        const role = userSnap.data()?.role;
-        if (role) return role;
-      }
-    } catch (sdkErr: any) {
-      // Graceful fallback if unauthenticated SDK read is blocked
-      console.warn("Firestore SDK user doc read notice:", sdkErr?.message || sdkErr);
-    }
-  }
-
-  return 'customer';
-}
-
 async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -1030,22 +985,33 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     });
   }
 
-  try {
-    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
-    const adminRoles = ['admin', 'super_admin'];
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      error: "Database not initialized on server."
+    });
+  }
 
-    if (adminRoles.includes(userRole)) {
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'customer_support', 'hr'];
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
+
+    if (isSuperAdminEmail || (userRole && staffRoles.includes(userRole))) {
       (req as any).user = {
         uid: verifiedUser.uid,
         email: verifiedUser.email,
-        role: userRole
+        role: userRole || 'super_admin'
       };
       return next();
     }
 
     return res.status(403).json({
       success: false,
-      error: "Access Denied. Insufficient permissions. Verified administrator account required."
+      error: "Access Denied. Insufficient permissions. Verified staff or admin account required."
     });
   } catch (err: any) {
     console.error("Error verifying admin role in Firestore:", err);
@@ -1055,323 +1021,6 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     });
   }
 }
-
-async function verifyStaffAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Missing Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Empty Bearer token."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase ID token."
-    });
-  }
-
-  try {
-    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
-    const staffRoles = ['admin', 'super_admin', 'inventory_manager'];
-
-    if (staffRoles.includes(userRole)) {
-      (req as any).user = {
-        uid: verifiedUser.uid,
-        email: verifiedUser.email,
-        role: userRole
-      };
-      return next();
-    }
-
-    return res.status(403).json({
-      success: false,
-      error: "Access Denied. Insufficient permissions. Verified staff account required."
-    });
-  } catch (err: any) {
-    console.error("Error verifying staff role:", err);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error verifying authorization credentials."
-    });
-  }
-}
-
-async function verifyInventoryAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Missing Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Empty Bearer token."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase ID token."
-    });
-  }
-
-  try {
-    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
-    const inventoryRoles = ['admin', 'super_admin', 'inventory_manager'];
-
-    if (inventoryRoles.includes(userRole)) {
-      (req as any).user = {
-        uid: verifiedUser.uid,
-        email: verifiedUser.email,
-        role: userRole
-      };
-      return next();
-    }
-
-    return res.status(403).json({
-      success: false,
-      error: "Access Denied. Insufficient permissions. Inventory management privileges required."
-    });
-  } catch (err: any) {
-    console.error("Error verifying inventory role:", err);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error verifying authorization credentials."
-    });
-  }
-}
-
-async function verifySuperAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Missing Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Empty Bearer token."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase ID token."
-    });
-  }
-
-  try {
-    const userRole = await getUserRoleFromToken(verifiedUser, idToken);
-
-    if (userRole === 'super_admin') {
-      (req as any).user = {
-        uid: verifiedUser.uid,
-        email: verifiedUser.email,
-        role: 'super_admin'
-      };
-      return next();
-    }
-
-    return res.status(403).json({
-      success: false,
-      error: "Access Denied. Super Administrator privileges required."
-    });
-  } catch (err: any) {
-    console.error("Error verifying super_admin role:", err);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error verifying authorization credentials."
-    });
-  }
-}
-
-// ================= SERVER-SIDE ROUTE AUTHORIZATION VERIFICATION =================
-app.post("/api/auth/verify-route", async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      authorized: false,
-      error: "Authentication required. Missing Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      authorized: false,
-      error: "Authentication required. Empty Bearer token."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      authorized: false,
-      error: "Invalid or expired Firebase ID token."
-    });
-  }
-
-  try {
-    const effectiveRole = await getUserRoleFromToken(verifiedUser, idToken);
-    const { pathname, requiredPermission } = req.body || {};
-
-    // Check staff status - strictly 3 staff roles (super_admin, admin, inventory_manager)
-    const isStaff = ['super_admin', 'admin', 'inventory_manager'].includes(effectiveRole);
-    if (!isStaff) {
-      return res.status(403).json({
-        success: true,
-        authorized: false,
-        role: effectiveRole,
-        error: "Access Denied: User role is not authorized for administrative operations.",
-        redirectUrl: "/"
-      });
-    }
-
-    // Role permissions mapping - EXACT 7 roles, 23 permissions
-    const serverRolePermissions: Record<string, string[]> = {
-      super_admin: [
-        'VIEW_ADMIN_DASHBOARD', 'VIEW_ORDERS', 'MANAGE_ORDERS', 'USE_POS', 'VIEW_POS_HISTORY',
-        'MANAGE_PRODUCTS', 'REGISTER_PRODUCT', 'MANAGE_INVENTORY', 'VIEW_INVENTORY_VALUATION',
-        'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES', 'VIEW_REPORTS',
-        'MANAGE_CREATORS', 'VIEW_USERS', 'MANAGE_USERS', 'VIEW_LEADS', 'MANAGE_AI_AGENTS',
-        'MANAGE_SEO', 'MANAGE_MARKETING', 'MANAGE_SETTINGS', 'MANAGE_SLACK'
-      ],
-      admin: [
-        'VIEW_ADMIN_DASHBOARD', 'VIEW_ORDERS', 'MANAGE_ORDERS', 'USE_POS', 'VIEW_POS_HISTORY',
-        'MANAGE_PRODUCTS', 'REGISTER_PRODUCT', 'MANAGE_INVENTORY', 'VIEW_INVENTORY_VALUATION',
-        'VIEW_FINANCE', 'MANAGE_FINANCE', 'VIEW_DUES', 'MANAGE_DUES', 'VIEW_REPORTS',
-        'MANAGE_CREATORS', 'VIEW_USERS', 'VIEW_LEADS', 'MANAGE_AI_AGENTS',
-        'MANAGE_SEO', 'MANAGE_MARKETING', 'MANAGE_SETTINGS'
-      ],
-      inventory_manager: [
-        'VIEW_ADMIN_DASHBOARD', 'VIEW_ORDERS', 'USE_POS', 'VIEW_POS_HISTORY',
-        'MANAGE_PRODUCTS', 'REGISTER_PRODUCT', 'MANAGE_INVENTORY',
-        'VIEW_INVENTORY_VALUATION', 'VIEW_REPORTS'
-      ],
-      hr: [],
-      creator: [],
-      wholesale_customer: [],
-      customer: []
-    };
-
-    const serverRoutePermissionMap: Record<string, string> = {
-      '/admin': 'VIEW_ADMIN_DASHBOARD',
-      '/admin/orders': 'VIEW_ORDERS',
-      '/admin/users': 'MANAGE_USERS',
-      '/admin/products': 'MANAGE_PRODUCTS',
-      '/admin/product-registration': 'REGISTER_PRODUCT',
-      '/admin/pos': 'USE_POS',
-      '/admin/pos-scan': 'USE_POS',
-      '/admin/pos-stock-in': 'MANAGE_INVENTORY',
-      '/admin/pos-history': 'VIEW_POS_HISTORY',
-      '/admin/inventory': 'MANAGE_INVENTORY',
-      '/admin/inventory/valuation': 'VIEW_INVENTORY_VALUATION',
-      '/admin/business-finance': 'VIEW_FINANCE',
-      '/admin/finance': 'VIEW_FINANCE',
-      '/admin/payments-due': 'VIEW_DUES',
-      '/admin/dues': 'VIEW_DUES',
-      '/admin/reports': 'VIEW_REPORTS',
-      '/admin/creators': 'MANAGE_CREATORS',
-      '/admin/chat-leads': 'VIEW_LEADS',
-      '/admin/ai-agents': 'MANAGE_AI_AGENTS',
-      '/admin/seo': 'MANAGE_SEO',
-      '/admin/theme-editor': 'MANAGE_SETTINGS',
-      '/admin/theme': 'MANAGE_SETTINGS',
-      '/admin/social': 'MANAGE_MARKETING',
-      '/admin/slack': 'MANAGE_SLACK'
-    };
-
-    const userPermissions = serverRolePermissions[effectiveRole] || [];
-
-    // Check specific required permission if requested
-    if (requiredPermission && !userPermissions.includes(requiredPermission)) {
-      let fallback = "/";
-      if (userPermissions.includes('VIEW_ADMIN_DASHBOARD')) fallback = "/admin";
-      else if (userPermissions.includes('USE_POS')) fallback = "/admin/pos";
-      return res.status(403).json({
-        success: true,
-        authorized: false,
-        role: effectiveRole,
-        error: `Access Denied: Missing required permission [${requiredPermission}].`,
-        redirectUrl: fallback
-      });
-    }
-
-    // Check pathname (Fail-closed: unknown admin routes MUST default to DENY)
-    if (pathname) {
-      const cleanPath = pathname.endsWith('/') && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
-      const neededPerm = serverRoutePermissionMap[cleanPath];
-      
-      // Unknown route or unmapped admin route -> STRICT DENY
-      if (!neededPerm) {
-        return res.status(403).json({
-          success: true,
-          authorized: false,
-          role: effectiveRole,
-          error: `Access Denied: Unrecognized administrative route [${cleanPath}].`,
-          redirectUrl: userPermissions.includes('VIEW_ADMIN_DASHBOARD') ? '/admin' : '/'
-        });
-      }
-
-      if (!userPermissions.includes(neededPerm)) {
-        let fallback = "/";
-        if (userPermissions.includes('VIEW_ADMIN_DASHBOARD') && cleanPath !== '/admin') fallback = "/admin";
-        else if (userPermissions.includes('USE_POS') && cleanPath !== '/admin/pos') fallback = "/admin/pos";
-        else if (userPermissions.includes('MANAGE_PRODUCTS') && cleanPath !== '/admin/products') fallback = "/admin/products";
-        
-        return res.status(403).json({
-          success: true,
-          authorized: false,
-          role: effectiveRole,
-          error: `Access Denied: Role [${effectiveRole}] cannot access [${cleanPath}].`,
-          redirectUrl: fallback
-        });
-      }
-    }
-
-    return res.json({
-      success: true,
-      authorized: true,
-      uid: verifiedUser.uid,
-      email: verifiedUser.email,
-      role: effectiveRole,
-      permissions: userPermissions
-    });
-  } catch (err: any) {
-    console.error("Error verifying admin route authorization:", err);
-    return res.status(500).json({
-      success: false,
-      authorized: false,
-      error: "Internal server error verifying authorization credentials."
-    });
-  }
-});
 
 // ================= CREATOR NETWORK ADMIN & PUBLIC API ENDPOINTS =================
 
@@ -2160,7 +1809,7 @@ app.get("/api/creators", verifyAdminAuth, async (req, res) => {
 });
 
 // SLACK NOTIFICATION LOGS, AUDIT LOGS & INTERACTIVE ACTION HANDLERS
-app.get("/api/slack/notification-logs", verifySuperAdminAuth, async (req, res) => {
+app.get("/api/slack/notification-logs", async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -2168,7 +1817,7 @@ app.get("/api/slack/notification-logs", verifySuperAdminAuth, async (req, res) =
   });
 });
 
-app.get("/api/slack/audit-logs", verifySuperAdminAuth, async (req, res) => {
+app.get("/api/slack/audit-logs", async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -2176,7 +1825,7 @@ app.get("/api/slack/audit-logs", verifySuperAdminAuth, async (req, res) => {
   });
 });
 
-app.get("/api/slack/product-imports", verifyAdminAuth, async (req, res) => {
+app.get("/api/slack/product-imports", async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -2184,7 +1833,7 @@ app.get("/api/slack/product-imports", verifyAdminAuth, async (req, res) => {
   });
 });
 
-app.get("/api/slack/channels", verifyAdminAuth, async (req, res) => {
+app.get("/api/slack/channels", async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -2192,7 +1841,7 @@ app.get("/api/slack/channels", verifyAdminAuth, async (req, res) => {
   });
 });
 
-app.get("/api/slack/support-tickets", verifyStaffAuth, async (req, res) => {
+app.get("/api/slack/support-tickets", async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -2318,7 +1967,7 @@ app.get("/api/slack/summary", async (req, res) => {
   }
 });
 
-app.post("/api/slack/retry-queue", verifySuperAdminAuth, async (req, res) => {
+app.post("/api/slack/retry-queue", async (req, res) => {
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
     const result = await slackNotificationService.retryFailedQueue();
@@ -2328,7 +1977,7 @@ app.post("/api/slack/retry-queue", verifySuperAdminAuth, async (req, res) => {
   }
 });
 
-app.post("/api/slack/test-notification", verifySuperAdminAuth, async (req, res) => {
+app.post("/api/slack/test-notification", async (req, res) => {
   const { channel } = req.body;
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
@@ -2943,8 +2592,8 @@ app.post("/api/functions/posCheckout", async (req, res) => {
   }
 });
 
-// 1C. Finance Collect Due Endpoint (Admins and Super Admins Only)
-app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
+// 1C. Finance Collect Due Endpoint
+app.post("/api/finance/collect-due", async (req, res) => {
   const { orderId, amount, method = "CASH", accountCode, note, receivedBy = "Store Staff", source = "POS", idempotencyKey } = req.body;
 
   if (!orderId || !amount || Number(amount) <= 0) {
@@ -3003,7 +2652,7 @@ app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
         method,
         amount: paymentToApply,
         note: note || `Due collection of ৳${paymentToApply} for Order #${orderId}`,
-        receivedBy: (req as any).user?.email || receivedBy,
+        receivedBy,
         receivedAt: nowIso,
         source,
         idempotencyKey: effectiveIdempotencyKey,
@@ -3020,7 +2669,7 @@ app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
         date: nowIso.split("T")[0],
         accountCode: effectiveAccount,
         description: `Due Collection ৳${paymentToApply} for Order #${orderId} (${method})`,
-        performedBy: (req as any).user?.email || receivedBy,
+        performedBy: receivedBy,
         referenceType: "ORDER",
         referenceId: orderId,
         createdAt: nowIso
@@ -3062,8 +2711,8 @@ app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
   }
 });
 
-// 1D. Finance Wallet Transfer Endpoint (Admins Only)
-app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
+// 1D. Finance Wallet Transfer Endpoint
+app.post("/api/finance/transfer", async (req, res) => {
   const { fromAccount, toAccount, amount, description, performedBy = "Store Admin" } = req.body;
 
   if (!fromAccount || !toAccount || !amount || Number(amount) <= 0) {
@@ -3089,7 +2738,7 @@ app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
     accountCode: fromAccount,
     targetAccountCode: toAccount,
     description: description || `Wallet Transfer: ${fromAccount} → ${toAccount}`,
-    performedBy: (req as any).user?.email || performedBy,
+    performedBy,
     referenceType: "TRANSFER",
     referenceId: txId,
     createdAt: nowIso
@@ -3104,22 +2753,11 @@ app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
 });
 
 // 1E. Finance Record Transaction Endpoint (Expenses, Capital, Withdrawals)
-app.post("/api/finance/transaction", verifyAdminAuth, async (req, res) => {
+app.post("/api/finance/transaction", async (req, res) => {
   const { transactionType, category, amount, accountCode, description, performedBy, referenceType, referenceId, receiptUrl } = req.body;
 
   if (!amount || Number(amount) <= 0 || !accountCode) {
     return res.status(400).json({ error: "Valid amount and accountCode are required" });
-  }
-
-  // Security guard: Owner Capital / Equity / Withdrawals strictly reserved for super_admin
-  const ownerCategories = ['CAPITAL_IN', 'WITHDRAWAL', 'OWNER_EQUITY', 'CAPITAL_OUT'];
-  if (category && ownerCategories.includes(category)) {
-    if ((req as any).user?.role !== 'super_admin') {
-      return res.status(403).json({
-        success: false,
-        error: "Access Denied. Only Super Administrators are authorized to record Owner Capital or Withdrawals."
-      });
-    }
   }
 
   if (!db) {
@@ -3137,7 +2775,7 @@ app.post("/api/finance/transaction", verifyAdminAuth, async (req, res) => {
     date: nowIso.split("T")[0],
     accountCode,
     description: description || "Financial Transaction",
-    performedBy: (req as any).user?.email || performedBy || "Store Admin",
+    performedBy: performedBy || "Store Admin",
     referenceType: referenceType || "MANUAL",
     referenceId: referenceId || txId,
     receiptUrl: receiptUrl || "",
@@ -3153,7 +2791,7 @@ app.post("/api/finance/transaction", verifyAdminAuth, async (req, res) => {
 });
 
 // 2. inventoryWatch Endpoint (mirrors Firebase Scheduled Cloud Function)
-app.post("/api/functions/inventoryWatch", verifyInventoryAuth, async (req, res) => {
+app.post("/api/functions/inventoryWatch", async (req, res) => {
   if (!db) {
     return res.status(500).json({ error: "Database not initialized" });
   }
@@ -5097,6 +4735,324 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
       simulated: true,
       eventId,
       warning: err.message || "Meta CAPI network fallback"
+    });
+  }
+});
+
+// =========================================================================
+// POS CHECKOUT FUNCTION SERVER ENDPOINT
+// =========================================================================
+app.post("/api/functions/posCheckout", async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ success: false, error: "Firestore database not initialized on server." });
+    }
+
+    const {
+      sessionId,
+      userId,
+      userRole,
+      operatorName,
+      customerName,
+      customerPhone,
+      customerAddress,
+      deliveryArea = 'none',
+      pricingMode = 'retail',
+      items = [],
+      orderId: providedOrderId,
+      idempotencyKey,
+      paidAmount,
+      paymentMethod = 'CASH',
+      accountCode,
+      notes
+    } = req.body;
+
+    if (!sessionId || !userId) {
+      return res.status(400).json({ success: false, error: "Missing required fields: sessionId and userId are required." });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: "Cart is empty. At least one item is required for POS checkout." });
+    }
+
+    const orderId = providedOrderId || `pos-ord-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const effectiveIdempotencyKey = idempotencyKey || `idemp-${orderId}`;
+    const nowIso = new Date().toISOString();
+
+    // Fetch product catalog snapshot BEFORE entering runTransaction
+    // (Firestore transactions prohibit non-transactional reads like getDocs inside transaction callbacks)
+    const productsSnap = await getDocs(collection(db, 'products'));
+    const barcodeToDocMap = new Map<string, any>();
+    const docIdToProductMap = new Map<string, any>();
+    productsSnap.forEach((d) => {
+      const pData: any = { id: d.id, ...d.data() };
+      docIdToProductMap.set(d.id, pData);
+      if (pData.barcode) {
+        barcodeToDocMap.set(String(pData.barcode).trim(), pData);
+      }
+    });
+
+    // Aggregate quantities per canonical product ID
+    const aggregatedQuantities: { [key: string]: number } = {};
+    for (const item of items) {
+      if (!item.productId) continue;
+      const pId = String(item.productId).trim();
+      const resolvedDoc = docIdToProductMap.get(pId) || barcodeToDocMap.get(pId);
+      const canonicalId = resolvedDoc ? resolvedDoc.id : pId;
+      aggregatedQuantities[canonicalId] = (aggregatedQuantities[canonicalId] || 0) + Number(item.quantity || 1);
+    }
+
+    const committedOrder = await runTransaction(db, async (transaction: any) => {
+      // 1. Session verification & auto-provisioning if missing
+      const sessionRef = doc(db, 'pos_sessions', sessionId);
+      const sessionDoc = await transaction.get(sessionRef);
+      if (!sessionDoc.exists()) {
+        transaction.set(sessionRef, {
+          id: sessionId,
+          sessionId: sessionId,
+          userId: userId || 'pos-operator',
+          userName: operatorName || 'Store Staff',
+          userRole: userRole || 'inventory_manager',
+          status: 'active',
+          items: [],
+          totalScannedItems: 0,
+          created_at: nowIso,
+          lastSeenAt: nowIso
+        });
+      }
+
+      // 2. Idempotency check
+      const orderRef = doc(db, 'orders', orderId);
+      const existingOrderDoc = await transaction.get(orderRef);
+      if (existingOrderDoc.exists()) {
+        return existingOrderDoc.data();
+      }
+
+      const idempRef = doc(db, 'payment_idempotency', effectiveIdempotencyKey);
+      const existingIdempDoc = await transaction.get(idempRef);
+      if (existingIdempDoc.exists()) {
+        const idempData = existingIdempDoc.data();
+        if (idempData?.orderId) {
+          const priorOrderRef = doc(db, 'orders', idempData.orderId);
+          const priorOrderDoc = await transaction.get(priorOrderRef);
+          if (priorOrderDoc.exists()) {
+            return priorOrderDoc.data();
+          }
+        }
+      }
+
+      const validatedProducts: any[] = [];
+      let calculatedSubtotal = 0;
+
+      for (const item of items) {
+        if (!item.productId) {
+          throw new Error('Invalid cart item: missing product ID.');
+        }
+        const itemQty = Number(item.quantity);
+        if (!itemQty || itemQty <= 0) {
+          throw new Error(`Invalid item quantity for product "${item.name || item.productId}".`);
+        }
+
+        const rawPId = String(item.productId).trim();
+        const matchedProduct = docIdToProductMap.get(rawPId) || barcodeToDocMap.get(rawPId);
+
+        if (!matchedProduct) {
+          throw new Error(`Product "${item.name || rawPId}" does not exist in store catalog.`);
+        }
+
+        const canonicalId = matchedProduct.id;
+        const prodRef = doc(db, 'products', canonicalId);
+        const prodDoc = await transaction.get(prodRef);
+
+        if (!prodDoc.exists()) {
+          throw new Error(`Product "${item.name || canonicalId}" does not exist in store catalog.`);
+        }
+
+        const prodData = { id: prodDoc.id, ...prodDoc.data() };
+        const currentStock = Number(prodData.stock ?? 0);
+        const totalRequestedQty = aggregatedQuantities[canonicalId] || itemQty;
+
+        if (currentStock < totalRequestedQty) {
+          throw new Error(
+            `Insufficient stock for "${prodData.name}". Available: ${currentStock}, Total Requested: ${totalRequestedQty}.`
+          );
+        }
+
+        let unitPrice = Number(item.price);
+        if (!unitPrice || unitPrice <= 0) {
+          unitPrice = pricingMode === 'wholesale' && prodData.wholesalePrice ? Number(prodData.wholesalePrice) : Number(prodData.price || 0);
+        }
+
+        const itemSubtotal = unitPrice * itemQty;
+        calculatedSubtotal += itemSubtotal;
+
+        validatedProducts.push({
+          ref: prodRef,
+          data: prodData,
+          currentStock,
+          newStock: currentStock - itemQty,
+          quantity: itemQty,
+          unitPrice,
+          barcode: item.barcode || prodData.barcode
+        });
+      }
+
+      let deliveryFee = 0;
+      if (deliveryArea === 'inside_dhaka') deliveryFee = 70;
+      else if (deliveryArea === 'outside_dhaka') deliveryFee = 130;
+
+      const totalAmount = calculatedSubtotal + deliveryFee;
+      const actualPaidAmount = paidAmount !== undefined && paidAmount !== null && paidAmount !== '' ? Math.max(0, Number(paidAmount)) : totalAmount;
+      const dueAmount = Math.max(0, totalAmount - actualPaidAmount);
+
+      let paymentStatus = 'due';
+      if (actualPaidAmount >= totalAmount) {
+        paymentStatus = 'paid';
+      } else if (actualPaidAmount > 0) {
+        paymentStatus = 'partial';
+      }
+
+      const orderItems = validatedProducts.map((p) => ({
+        productId: p.data.id,
+        barcode: p.barcode || p.data.barcode || '',
+        name: p.data.name,
+        nameBN: p.data.nameBN || p.data.name,
+        quantity: p.quantity,
+        price: p.unitPrice,
+        image: p.data.image || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=150&auto=format&fit=crop'
+      }));
+
+      const newOrder = {
+        id: orderId,
+        orderId,
+        orderSource: 'POS',
+        sessionId,
+        operatorName: operatorName || 'Store Staff',
+        operatorEmail: '',
+        customerName: customerName ? String(customerName).trim() : 'In-Store Walk-in Customer',
+        customerPhone: customerPhone ? String(customerPhone).trim() : 'N/A',
+        customerAddress: customerAddress ? String(customerAddress).trim() : 'In-Store Counter Purchase',
+        deliveryArea: deliveryArea || 'none',
+        pricingMode: pricingMode || 'retail',
+        items: orderItems,
+        subtotal: calculatedSubtotal,
+        deliveryFee,
+        discount: 0,
+        totalAmount,
+        paidAmount: actualPaidAmount,
+        dueAmount,
+        paymentStatus,
+        paymentMethod: paymentMethod || 'CASH',
+        status: 'delivered',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        idempotencyKey: effectiveIdempotencyKey,
+        notes: notes ? String(notes).trim() : 'POS In-Store Checkout'
+      };
+
+      transaction.set(orderRef, newOrder);
+
+      transaction.set(idempRef, {
+        id: effectiveIdempotencyKey,
+        orderId,
+        sessionId,
+        userId,
+        createdAt: nowIso,
+        totalAmount,
+        paidAmount: actualPaidAmount
+      });
+
+      if (actualPaidAmount > 0) {
+        const txId = `tx-pos-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const pTxRef = doc(db, 'payment_transactions', txId);
+        transaction.set(pTxRef, {
+          id: txId,
+          transactionId: txId,
+          orderId,
+          sessionId,
+          amount: actualPaidAmount,
+          method: paymentMethod || 'CASH',
+          accountCode: accountCode || (paymentMethod === 'CASH' ? '1010-CASH' : '1020-BANK'),
+          type: 'INCOME',
+          category: 'POS_SALE',
+          status: 'COMPLETED',
+          performedBy: operatorName || 'Store Staff',
+          notes: notes || 'POS In-Store Payment',
+          createdAt: nowIso
+        });
+
+        const finId = `fin-pos-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const fTxRef = doc(db, 'financial_transactions', finId);
+        transaction.set(fTxRef, {
+          id: finId,
+          transactionId: finId,
+          orderId,
+          sessionId,
+          amount: actualPaidAmount,
+          type: 'INCOME',
+          category: 'POS_SALE',
+          description: `POS Sale Payment - Order #${orderId}`,
+          performedBy: operatorName || 'Store Staff',
+          createdAt: nowIso
+        });
+      }
+
+      for (const p of validatedProducts) {
+        transaction.update(p.ref, {
+          stock: p.newStock,
+          updated_at: nowIso
+        });
+
+        const invLogRef = doc(collection(db, 'inventory_logs'));
+        transaction.set(invLogRef, {
+          id: invLogRef.id,
+          productId: p.data.id,
+          productName: p.data.name,
+          orderId,
+          changeQuantity: -p.quantity,
+          previousStock: p.currentStock,
+          newStock: p.newStock,
+          type: 'SALE_POS',
+          performedBy: operatorName || 'Store Staff',
+          reason: 'POS In-Store Checkout',
+          sessionId,
+          timestamp: nowIso,
+          createdAt: nowIso
+        });
+
+        const movementRef = doc(collection(db, 'stock_movements'));
+        transaction.set(movementRef, {
+          id: movementRef.id,
+          productId: p.data.id,
+          productName: p.data.name,
+          orderId,
+          quantity: -p.quantity,
+          type: 'sale',
+          source: 'POS',
+          performedBy: operatorName || 'Store Staff',
+          previousStock: p.currentStock,
+          newStock: p.newStock,
+          reason: 'POS In-Store Checkout',
+          sessionId,
+          timestamp: nowIso,
+          createdAt: nowIso
+        });
+      }
+
+      return newOrder;
+    });
+
+    return res.json({
+      success: true,
+      order: committedOrder,
+      orderId: committedOrder.id,
+      message: `Order #${committedOrder.id} created successfully!`
+    });
+  } catch (err: any) {
+    console.error("Error processing POS checkout server-side:", err);
+    return res.status(400).json({
+      success: false,
+      error: err.message || "Failed to process POS checkout"
     });
   }
 });

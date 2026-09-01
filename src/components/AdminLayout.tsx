@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart3, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
@@ -11,7 +11,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
 import { AdminNotificationBell } from './AdminNotificationBell';
 import { posService } from '../services/posService';
-import { canAccessAdminRoute } from '../utils/permissions';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
@@ -93,10 +92,19 @@ export const AdminLayout: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const location = useLocation();
+  const isInventoryManager = profile?.role === 'inventory_manager';
+
   const navItems = [
-    { to: '/admin', label: 'Dashboard', badge: 'Live', icon: BarChart3, end: true },
-    { to: '/admin/orders', label: 'Orders', badge: 'Orders', icon: Package },
-    { to: '/admin/products', label: 'Products', badge: 'Catalog', icon: Boxes },
+    { to: '/admin', label: 'Dashboard Overview', badge: 'Live', icon: BarChart3, end: true },
+    { to: '/admin/business-finance', label: 'Business Banking & Dues', badge: 'Finance', icon: Landmark },
+    { to: '/admin/payments-due', label: 'Due Payments', badge: 'Receivables', icon: Receipt },
+    { to: '/admin/reports', label: 'All Reports & Analytics', badge: 'Reports', icon: FileText },
+    { to: '/admin/creators', label: 'Creators Hub', badge: 'Hub', icon: Sparkles },
+    { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
+    { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
+    { to: '/admin/orders', label: 'Order Fulfillment', badge: 'Orders', icon: Package },
+    { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
     { 
       to: '/admin/pos', 
       label: 'POS Register', 
@@ -104,21 +112,44 @@ export const AdminLayout: React.FC = () => {
       icon: CreditCard,
       highlight: isAdminOrSuperAdmin && activePosCount > 0
     },
-    { to: '/admin/reports', label: 'Reports', badge: 'Analytics', icon: FileText },
-    // Other admin modules (hidden for inventory_manager)
-    { to: '/admin/business-finance', label: 'Business Banking & Dues', badge: 'Finance', icon: Landmark },
-    { to: '/admin/payments-due', label: 'Due Payments', badge: 'Receivables', icon: Receipt },
-    { to: '/admin/creators', label: 'Creators Hub', badge: 'Hub', icon: Sparkles },
-    { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
-    { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
-    { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
+    { to: '/admin/products', label: 'Skincare Catalog', badge: 'Stock', icon: Boxes },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
   ];
 
-  const visibleNavItems = navItems.filter(item => profile?.role === 'super_admin' || canAccessAdminRoute(profile?.role, item.to));
+  // Inventory Manager user gets access to Dashboard Overview, Skincare Catalog, All Reports & Analytics, Order Fulfillment, WhatsApp Leads, POS Register
+  const inventoryManagerAllowedPaths = [
+    '/admin',
+    '/admin/products',
+    '/admin/reports',
+    '/admin/orders',
+    '/admin/chat-leads',
+    '/admin/pos',
+  ];
+
+  const visibleNavItems = navItems.filter((item) => {
+    if (isInventoryManager) {
+      return inventoryManagerAllowedPaths.includes(item.to);
+    }
+    return true;
+  });
+
+  // Redirect Inventory Manager if trying to access unauthorized dashboard pages
+  useEffect(() => {
+    if (isInventoryManager) {
+      const isAllowed = inventoryManagerAllowedPaths.some((path) => {
+        if (path === '/admin') {
+          return location.pathname === '/admin';
+        }
+        return location.pathname === path || location.pathname.startsWith(path + '/');
+      });
+      if (!isAllowed) {
+        navigate('/admin', { replace: true });
+      }
+    }
+  }, [isInventoryManager, location.pathname, navigate]);
 
   const handleSignOut = async () => {
     try {

@@ -2207,6 +2207,7 @@ export const AdminSlackSettings: React.FC = () => {
                       <option value="super_admin">Super Admin (Master)</option>
                       <option value="admin">Administrator</option>
                       <option value="inventory_manager">Inventory Manager</option>
+                      <option value="customer_support">Customer Support</option>
                     </select>
                   </div>
                 </div>

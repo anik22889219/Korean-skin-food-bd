@@ -14,6 +14,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<SlackRole, SlackPermission[]> = {
   super_admin: ['admin:all', 'orders:read', 'orders:write', 'inventory:read', 'inventory:write', 'users:manage', 'reports:view'],
   admin: ['admin:all', 'orders:read', 'orders:write', 'inventory:read', 'inventory:write', 'users:manage', 'reports:view'],
   inventory_manager: ['inventory:read', 'inventory:write', 'orders:read', 'reports:view'],
+  customer_support: ['orders:read', 'orders:write', 'inventory:read'],
   customer: []
 };
 
