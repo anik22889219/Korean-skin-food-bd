@@ -1,11 +1,12 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store, FileText, Landmark, Receipt } from 'lucide-react';
+import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store, FileText, Landmark, Receipt, Building2 } from 'lucide-react';
 
 interface AdminNavCard { title: string; description: string; to: string; icon: React.ElementType; tone: string; iconTone: string; badge?: string; }
 
 const navCards: AdminNavCard[] = [
+  { title: 'Wholesale Management', description: 'Wholesale customers, credit ledgers, bulk orders & financials.', to: '/admin/wholesale', icon: Building2, tone: 'from-blue-50 to-indigo-50 border-blue-100', iconTone: 'bg-indigo-100 text-indigo-600', badge: 'B2B' },
   { title: 'Command Overview', description: 'Sales, inventory, AI and operations at a glance.', to: '/admin', icon: BarChart3, tone: 'from-violet-50 to-indigo-50 border-violet-100', iconTone: 'bg-violet-100 text-violet-600', badge: 'LIVE' },
   { title: 'Business Banking & Dues', description: 'Cash flow, multi-wallet accounts, COGS, P&L and expenses.', to: '/admin/business-finance', icon: Landmark, tone: 'from-emerald-50 to-teal-50 border-emerald-100', iconTone: 'bg-emerald-100 text-emerald-600', badge: 'FINANCE' },
   { title: 'Due Payments & Receivables', description: 'Track unpaid customer balances, collect dues, and view overdue aging.', to: '/admin/payments-due', icon: Receipt, tone: 'from-amber-50 to-orange-50 border-amber-100', iconTone: 'bg-amber-100 text-amber-600', badge: 'DUES' },
@@ -13,7 +14,7 @@ const navCards: AdminNavCard[] = [
   { title: 'Creator Hub', description: 'Approve creators, moderate reels, manage points, tiers & leaderboard.', to: '/admin/creators', icon: Sparkles, tone: 'from-pink-50 to-rose-50 border-pink-100', iconTone: 'bg-pink-100 text-pink-600', badge: 'CREATORS' },
   { title: 'User Management', description: 'Super Admin & HR user accounts and access control.', to: '/admin/users', icon: Users, tone: 'from-indigo-50 to-purple-50 border-indigo-100', iconTone: 'bg-indigo-100 text-indigo-600', badge: 'HR' },
   { title: 'AI Agent Manager', description: 'Manage AI agents, permissions, quotas and activity.', to: '/admin/ai-agents', icon: Bot, tone: 'from-purple-50 to-indigo-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'AI' },
-  { title: 'Skincare Catalog', description: 'Products, stock, barcode tools and product intelligence.', to: '/admin/products', icon: Boxes, tone: 'from-emerald-50 to-teal-50 border-emerald-100', iconTone: 'bg-emerald-100 text-emerald-600', badge: 'STOCK' },
+  { title: 'Product List', description: 'Products, stock, barcode tools and product intelligence.', to: '/admin/products', icon: Boxes, tone: 'from-emerald-50 to-teal-50 border-emerald-100', iconTone: 'bg-emerald-100 text-emerald-600', badge: 'STOCK' },
   { title: 'Order Fulfillment', description: 'Review orders and manage the fulfillment workflow.', to: '/admin/orders', icon: ShoppingBag, tone: 'from-amber-50 to-yellow-50 border-amber-100', iconTone: 'bg-amber-100 text-amber-600', badge: 'OPS' },
   { title: 'SEO Optimizer', description: 'Generate and refine search-friendly product content.', to: '/admin/seo', icon: Search, tone: 'from-blue-50 to-cyan-50 border-blue-100', iconTone: 'bg-blue-100 text-blue-600', badge: 'AI' },
   { title: 'Social Copy Studio', description: 'Create campaign-ready social media content with AI.', to: '/admin/social', icon: Megaphone, tone: 'from-fuchsia-50 to-pink-50 border-fuchsia-100', iconTone: 'bg-fuchsia-100 text-fuchsia-600', badge: 'AI' },

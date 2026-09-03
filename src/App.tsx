@@ -4,12 +4,16 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
+import { WholesaleCartProvider } from './context/WholesaleCartContext';
 import { MainLayout } from './components/MainLayout';
 import { StoreCatalog } from './components/StoreCatalog';
 import { ShopCategoryPage } from './components/ShopCategoryPage';
 import { ProductDetail } from './components/ProductDetail';
 import { Login } from './components/Login';
 import { Profile } from './components/Profile';
+import { WholesaleProfilePage } from './components/WholesaleProfilePage';
+import { WholesaleDashboard } from './components/WholesaleDashboard';
+import { WholesaleCheckoutPage } from './components/WholesaleCheckoutPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminRoute } from './components/AdminRoute';
 import { AdminLayout } from './components/AdminLayout';
@@ -22,6 +26,8 @@ import { AdminThemeEditor } from './components/AdminThemeEditor';
 import { AdminOrders } from './components/AdminOrders';
 import { AdminSlackSettings } from './components/AdminSlackSettings';
 import { AdminAIAgents } from './components/AdminAIAgents';
+import { AdminWholesaleManagement } from './components/AdminWholesaleManagement';
+import { WholesaleCustomerDetailsPage } from './components/WholesaleCustomerDetailsPage';
 import { UserManagement } from './components/UserManagement';
 import { AdminCreators } from './components/AdminCreators';
 import { AdminReportsPage } from './components/AdminReportsPage';
@@ -151,38 +157,43 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <CartProvider>
-          <BrowserRouter>
-            <ScrollToTop />
-            <RouteTracker />
-            <Routes>
-              {/* PUBLIC SHOP PAGES */}
-              <Route path="/" element={<MainLayout />}>
-                <Route index element={<StoreCatalog />} />
-                <Route path="shop" element={<ShopCategoryPage />} />
-                <Route path="become-a-creator" element={<BecomeCreatorPage />} />
-                <Route path="creator/apply" element={<BecomeCreatorPage />} />
-                <Route path="about-us" element={<AboutUs />} />
-                <Route path="contact-us" element={<ContactUs />} />
-                <Route path="product/:id" element={<ProductDetail />} />
-                <Route path="login" element={<Login />} />
-                
-                {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
-                <Route element={<ProtectedRoute />}>
-                  <Route path="profile" element={<Profile />} />
-                </Route>
+          <WholesaleCartProvider>
+            <BrowserRouter>
+              <ScrollToTop />
+              <RouteTracker />
+              <Routes>
+                {/* PUBLIC SHOP PAGES */}
+                <Route path="/" element={<MainLayout />}>
+                  <Route index element={<StoreCatalog />} />
+                  <Route path="shop" element={<ShopCategoryPage />} />
+                  <Route path="become-a-creator" element={<BecomeCreatorPage />} />
+                  <Route path="creator/apply" element={<BecomeCreatorPage />} />
+                  <Route path="about-us" element={<AboutUs />} />
+                  <Route path="contact-us" element={<ContactUs />} />
+                  <Route path="product/:id" element={<ProductDetail />} />
+                  <Route path="login" element={<Login />} />
+                  <Route path="wholesale/checkout" element={<WholesaleCheckoutPage />} />
+                  <Route path="wholesale/cart" element={<WholesaleCheckoutPage />} />
+                  
+                  {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
+                  <Route element={<ProtectedRoute />}>
+                    <Route path="profile" element={<Profile />} />
+                    <Route path="wholesale/profile" element={<WholesaleProfilePage />} />
+                    <Route path="wholesale" element={<WholesaleDashboard />} />
+                  </Route>
 
-                {/* CREATOR SYSTEM ROUTES */}
-                <Route path="creator" element={<CreatorRoute />}>
-                  <Route element={<CreatorLayout />}>
-                    <Route index element={<Navigate to="dashboard" replace />} />
-                    <Route path="dashboard" element={<CreatorDashboard />} />
-                    <Route path="profile" element={<CreatorProfilePage />} />
-                    <Route path="reels" element={<CreatorReelsPage />} />
-                    <Route path="reels/upload" element={<CreatorReelUploadPage />} />
-                    <Route path="leaderboard" element={<CreatorLeaderboardPage />} />
+                  {/* CREATOR SYSTEM ROUTES */}
+                  <Route path="creator" element={<CreatorRoute />}>
+                    <Route element={<CreatorLayout />}>
+                      <Route index element={<Navigate to="dashboard" replace />} />
+                      <Route path="dashboard" element={<CreatorDashboard />} />
+                      <Route path="profile" element={<CreatorProfilePage />} />
+                      <Route path="reels" element={<CreatorReelsPage />} />
+                      <Route path="reels/upload" element={<CreatorReelUploadPage />} />
+                      <Route path="leaderboard" element={<CreatorLeaderboardPage />} />
+                    </Route>
                   </Route>
                 </Route>
-              </Route>
 
               {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
               <Route path="pos/scan" element={<PosScanRouteWrapper />} />
@@ -199,6 +210,8 @@ export default function App() {
                   <Route path="reports" element={<AdminReportsPage />} />
                   <Route path="creators" element={<AdminCreators />} />
                   <Route path="users" element={<UserManagement />} />
+                  <Route path="wholesale" element={<AdminWholesaleManagement />} />
+                   <Route path="wholesale/:customerId" element={<WholesaleCustomerDetailsPage />} />
                   <Route path="orders" element={<AdminOrders />} />
                   <Route path="theme-editor" element={<AdminThemeEditor />} />
                   <Route path="pos" element={<PosRegisterRouteWrapper />} />
@@ -215,6 +228,7 @@ export default function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
+          </WholesaleCartProvider>
         </CartProvider>
       </AuthProvider>
     </QueryClientProvider>

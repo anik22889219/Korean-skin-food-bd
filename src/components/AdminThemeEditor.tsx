@@ -8,9 +8,11 @@ import {
   Palette, Layout, Home, Info, ShoppingBag, Phone, Save, Globe, Type,
   RotateCcw, Eye, ArrowUp, ArrowDown, EyeOff, Check, Image as ImageIcon,
   Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
-  Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2
+  Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
+  Upload, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { uploadFileToCloudinary } from '../services/cloudinaryService';
 
 const SECTION_LABELS: Record<SectionKey, { name: string; desc: string }> = {
   hero: { name: 'Hero Banner & Shipping Calculator', desc: 'Main title, background image, CTAs, and live shipping calculator card' },
@@ -77,6 +79,12 @@ export const AdminThemeEditor: React.FC = () => {
   // Live Preview Modal state
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
+  // Direct Device Upload states for Favicon & Logo
+  const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const faviconInputRef = React.useRef<HTMLInputElement>(null);
+  const logoInputRef = React.useRef<HTMLInputElement>(null);
+
   // Products list for selection
   const [allProducts, setAllProducts] = useState<Product[]>([]);
 
@@ -140,6 +148,50 @@ export const AdminThemeEditor: React.FC = () => {
   const handleResetGlobal = async () => {
     if (confirm('Are you sure you want to reset all Global Settings (Favicon, Logo, Theme Color, Fonts, Contacts) to brand defaults?')) {
       await themeService.resetGlobalToDefault();
+    }
+  };
+
+  // Direct Device Upload for Favicon
+  const handleFaviconDeviceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingFavicon(true);
+    try {
+      const res = await uploadFileToCloudinary(file, {
+        folder: 'theme_favicons',
+        resourceType: 'image'
+      });
+      if (res?.secureUrl) {
+        setGlobalTheme((prev) => ({ ...prev, faviconUrl: res.secureUrl }));
+      }
+    } catch (err) {
+      console.error('Failed to upload favicon:', err);
+      alert('Failed to upload favicon from device. Please try again.');
+    } finally {
+      setIsUploadingFavicon(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  // Direct Device Upload for Brand Logo
+  const handleLogoDeviceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingLogo(true);
+    try {
+      const res = await uploadFileToCloudinary(file, {
+        folder: 'theme_logos',
+        resourceType: 'image'
+      });
+      if (res?.secureUrl) {
+        setGlobalTheme((prev) => ({ ...prev, logoUrl: res.secureUrl }));
+      }
+    } catch (err) {
+      console.error('Failed to upload logo:', err);
+      alert('Failed to upload logo from device. Please try again.');
+    } finally {
+      setIsUploadingLogo(false);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -411,6 +463,16 @@ export const AdminThemeEditor: React.FC = () => {
 
               <div className="space-y-3">
                 <label className="block text-xs font-bold text-slate-700">Favicon Image URL</label>
+                
+                {/* Hidden File Input for Favicon */}
+                <input
+                  type="file"
+                  ref={faviconInputRef}
+                  onChange={handleFaviconDeviceUpload}
+                  accept="image/png,image/jpeg,image/x-icon,image/svg+xml,image/webp"
+                  className="hidden"
+                />
+
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -420,8 +482,18 @@ export const AdminThemeEditor: React.FC = () => {
                     className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
                   />
                   <button
+                    type="button"
+                    onClick={() => faviconInputRef.current?.click()}
+                    disabled={isUploadingFavicon}
+                    className="px-3 py-2.5 bg-pink-50 text-[#E91E8C] hover:bg-pink-100 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
+                    title="Upload from local device"
+                  >
+                    <Upload size={14} className={isUploadingFavicon ? 'animate-bounce' : ''} />
+                    <span>{isUploadingFavicon ? 'Uploading...' : 'Device'}</span>
+                  </button>
+                  <button
                     onClick={() => openMediaPicker('global.faviconUrl')}
-                    className="px-3 py-2.5 bg-pink-50 text-[#E91E8C] hover:bg-pink-100 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
+                    className="px-3 py-2.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
                   >
                     <ImageIcon size={14} />
                     <span>Media</span>
@@ -468,6 +540,16 @@ export const AdminThemeEditor: React.FC = () => {
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Logo Image URL (Optional)</label>
+                  
+                  {/* Hidden File Input for Brand Logo */}
+                  <input
+                    type="file"
+                    ref={logoInputRef}
+                    onChange={handleLogoDeviceUpload}
+                    accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                    className="hidden"
+                  />
+
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -476,6 +558,16 @@ export const AdminThemeEditor: React.FC = () => {
                       placeholder="Leave blank to use Text Logo below"
                       className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
                     />
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={isUploadingLogo}
+                      className="px-3 py-2.5 bg-pink-50 text-[#E91E8C] hover:bg-pink-100 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
+                      title="Upload from local device"
+                    >
+                      <Upload size={14} className={isUploadingLogo ? 'animate-bounce' : ''} />
+                      <span>{isUploadingLogo ? 'Uploading...' : 'Device'}</span>
+                    </button>
                     <button
                       onClick={() => openMediaPicker('global.logoUrl')}
                       className="px-3 py-2.5 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"

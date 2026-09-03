@@ -12,12 +12,18 @@ export interface Product {
   wholesalePrice50Plus?: number;
   retailPrice?: number;
   discountRetailPrice?: number;
+  cashPrice?: number;
   // Legacy compatibility fields
   price: number;
   discountPrice?: number;
   ml?: string;
   image: string;
   images?: string[];
+  imageAltText?: string;
+  altText?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  seoTitle?: string;
   stock: number;
   description: string;
   descriptionBN: string;
@@ -67,6 +73,8 @@ export interface PaymentTransaction {
   orderId: string;
   type: 'POS_PAYMENT' | 'POS_DUE_COLLECTION' | 'ONLINE_PAYMENT' | 'COD_SETTLEMENT' | 'REFUND' | 'WHOLESALE_PAYMENT';
   method: PaymentMethodType;
+  previousDue?: number;
+  remainingDue?: number;
   amount: number;
   note?: string;
   receivedBy: string;
@@ -83,6 +91,8 @@ export interface FinancialTransaction {
   id: string;
   transactionType: 'MONEY_IN' | 'MONEY_OUT' | 'EXPENSE' | 'COGS' | 'REFUND' | 'TRANSFER' | 'CAPITAL_IN' | 'WITHDRAWAL';
   category: 'REVENUE' | 'COGS' | 'OPERATING_EXPENSE' | 'SALARY' | 'MARKETING' | 'RENT' | 'SUPPLIER_PAYMENT' | 'COURIER_CHARGE' | 'PACKAGING' | 'CAPITAL' | 'WITHDRAWAL' | 'TAX' | 'UTILITY' | 'TRANSFER' | 'OTHER';
+  previousDue?: number;
+  remainingDue?: number;
   amount: number;
   date: string; // ISO or YYYY-MM-DD
   referenceType?: 'ORDER' | 'STOCK_RECEIPT' | 'SUPPLIER_INVOICE' | 'EXPENSE_VOUCHER' | 'TRANSFER' | 'CAPITAL' | 'WITHDRAWAL' | 'MANUAL';
@@ -107,17 +117,152 @@ export interface InventoryCostLayer {
 }
 
 export interface WholesaleCustomer {
+  totalOrders?: number;
+  totalWholesalePurchase?: number;
+  totalPaid?: number;
+  totalDue?: number;
   id: string;
+  userId?: string;
+  // Personal Information
   name: string;
   phone: string;
+  altPhone?: string;
   email?: string;
-  storeName?: string;
-  address?: string;
+  logoUrl?: string;
+  businessLogoUrl?: string;
+  // Business Information
+  businessName?: string;
+  storeName?: string; // Legacy compatibility
+  pageName?: string;
+  businessType?: 'Retailer' | 'Online Reseller' | 'Salon / Spa' | 'Wholesaler / Distributor' | 'Super Shop' | 'Dermatology / Clinic' | 'Other' | string;
+  location?: string;
+  address?: string; // Legacy compatibility
+  businessAddress?: string;
+  facebookPageUrl?: string;
+  instagramUrl?: string;
+  whatsappNumber?: string;
+  websiteUrl?: string;
+  otherSocialInfo?: string;
   tradeLicenseNumber?: string;
+  // Wholesale Account & Privileged Fields (Managed by Admin)
+  wholesaleAccess?: boolean;
   creditLimit: number;
   currentDue: number;
+  tier?: 'standard' | 'silver' | 'gold' | 'platinum' | string;
+  defaultDiscountPct?: number;
+  paymentTerms?: string;
   status: 'active' | 'suspended' | 'pending';
+  notes?: string;
   totalPurchasedBDT: number;
+  customerSince?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WholesaleCheckoutType = 'COD_DIRECT' | 'PARCEL_COURIER';
+
+export interface WholesaleCartItem {
+  product: Product;
+  quantity: number;
+  wholesaleUnitPrice: number; // Tier unit price based on qty (1-49 vs 50+)
+  pricingTier: '1-49' | '50+';
+  customCodPrice?: number; // Optional wholesaler customer price
+}
+
+export interface WholesaleCodFormData {
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  codPrice: string; // The selling price the wholesaler enters to charge their end customer
+  orderNote?: string;
+}
+
+export interface WholesaleParcelFormData {
+  parcelId: string;
+  velouriaId: string;
+  customerName: string;
+  codPrice: string; // The selling price the wholesaler enters to charge their end customer
+}
+
+export interface WholesaleCheckoutFormState {
+  checkoutType: WholesaleCheckoutType;
+  codForm: WholesaleCodFormData;
+  parcelForm: WholesaleParcelFormData;
+}
+
+export type WholesaleOrderStatus = 'pending' | 'confirmed' | 'processing' | 'ready' | 'delivered' | 'cancelled';
+export type WholesaleOrderPaymentStatus = 'unpaid' | 'partial' | 'paid';
+
+export interface WholesaleOrderCustomer {
+  wholesaleCustomerId: string;
+  userId: string;
+  customerName: string;
+  businessName: string;
+  pageName: string;
+  contactNumber: string;
+}
+
+export interface WholesaleOrderProduct {
+  productId: string;
+  productName: string;
+  sku?: string;
+  barcode?: string;
+  image?: string;
+  quantity: number;
+  wholesaleTier: '1-49' | '50+' | 'tier1_49' | 'tier50_plus' | string;
+  wholesaleUnitPrice: number;
+  CODUnitPrice: number;
+  wholesaleCost: number;
+  CODValue: number;
+  profit: number;
+}
+
+export interface WholesaleOrderCheckoutInfoCOD {
+  checkoutType: 'COD';
+  deliveryName: string;
+  deliveryPhone: string;
+  deliveryAddress: string;
+  codPrice: number;
+  orderNote?: string;
+}
+
+export interface WholesaleOrderCheckoutInfoParcel {
+  checkoutType: 'PARCEL';
+  parcelId: string;
+  velouriaId: string;
+  deliveryName: string;
+  codPrice: number;
+  orderNote?: string;
+}
+
+export type WholesaleOrderCheckoutInfo = WholesaleOrderCheckoutInfoCOD | WholesaleOrderCheckoutInfoParcel;
+
+export interface WholesaleOrder {
+  id: string;
+  orderNumber: string;
+  customer: WholesaleOrderCustomer;
+  items: WholesaleOrderProduct[];
+  totalUnits: number;
+  totalWholesaleCost: number;
+  totalCODValue: number;
+  totalProfit: number;
+  deliveryCharge: number;
+  finalAmount: number;
+  paidAmount: number;
+  dueAmount: number;
+  checkoutInfo: WholesaleOrderCheckoutInfo;
+  status: WholesaleOrderStatus;
+  paymentStatus: WholesaleOrderPaymentStatus;
+  stock_deducted?: boolean;
+  stockDeducted?: boolean;
+  stock_restored?: boolean;
+  stockRestored?: boolean;
+  cancelReason?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  idempotencyKey?: string;
+  orderSource?: 'wholesale_portal' | 'wholesale_web' | 'POS' | string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -149,6 +294,7 @@ export interface Order {
   changeAmount?: number;
   cogsAmount?: number;
   grossProfit?: number;
+  notes?: string;
   paymentTransactions?: PaymentTransaction[];
   courier?: CourierData;
   attribution?: {
@@ -176,14 +322,19 @@ export interface StockMovement {
   productId: string;
   productName: string;
   orderId?: string;
+  wholesaleOrderId?: string;
+  orderType?: 'wholesale' | 'retail' | 'pos' | string;
   quantity: number; // Negative for sale/deduction, positive for return/restock
   type: 'sale' | 'return' | 'restock' | 'adjustment' | 'stock_in';
-  source: OrderSource;
+  source: OrderSource | string;
   createdAt: string;
   performedBy: string;
   previousStock?: number;
   newStock?: number;
   reason?: string;
+  customer?: string;
+  userId?: string;
+  timestamp?: string;
 }
 
 export interface InventoryLog {
@@ -192,11 +343,21 @@ export interface InventoryLog {
   productName: string;
   type: 'stock_in' | 'sale' | 'adjustment';
   quantity: number;
+  change?: number;
   previousStock: number;
   newStock: number;
+  prevStock?: number;
   reason: string;
   performedBy: string;
   createdAt: string;
+  timestamp?: string;
+  orderId?: string;
+  orderNumber?: string;
+  orderType?: 'wholesale' | 'retail' | 'pos' | string;
+  source?: string;
+  customer?: string;
+  userId?: string;
+  note?: string;
 }
 
 export interface StockReceiptItem {
@@ -470,6 +631,7 @@ export interface PublicCreatorProfile {
 export interface UserProfile {
   uid: string;
   phone?: string;
+  altPhone?: string;
   email?: string;
   name: string;
   role: UserRole;
@@ -481,6 +643,22 @@ export interface UserProfile {
   status?: 'active' | 'suspended';
   creatorId?: string;
   wholesaleAccess?: boolean;
+  logoUrl?: string;
+  businessLogoUrl?: string;
+  // Wholesale customer fields
+  businessName?: string;
+  pageName?: string;
+  businessType?: string;
+  location?: string;
+  businessAddress?: string;
+  facebookPageUrl?: string;
+  instagramUrl?: string;
+  whatsappNumber?: string;
+  websiteUrl?: string;
+  otherSocialInfo?: string;
+  wholesaleStatus?: 'active' | 'suspended' | 'pending';
+  customerSince?: string;
+  notes?: string;
 }
 
 export interface ChatLeadItem {
@@ -626,3 +804,19 @@ export interface SlashCommandPayload {
 }
 
 
+
+export type WholesalePaymentMethod = 'Cash' | 'bKash' | 'Bank' | 'Other';
+
+export interface WholesalePayment {
+  id: string;
+  wholesaleCustomerId: string;
+  orderId?: string;
+  previousDue?: number;
+  remainingDue?: number;
+  amount: number;
+  paymentMethod: WholesalePaymentMethod;
+  reference?: string;
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+}

@@ -445,7 +445,7 @@ export const AboutUs: React.FC = () => {
               >
                 <div className="aspect-[3/4] bg-[#f5ece7] mb-5 overflow-hidden relative border border-[#c5c7c1]/20">
                   <img
-                    src={prod.image}
+                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
                     alt={prod.name}
                     className="w-full h-full object-cover mix-blend-multiply opacity-90 group-hover:scale-105 transition-transform duration-700"
                     referrerPolicy="no-referrer"
@@ -637,7 +637,7 @@ export const AboutUs: React.FC = () => {
               >
                 <div className="aspect-square bg-[#fff8f5] mb-6 overflow-hidden relative shadow-sm border border-[#c5c7c1]/20">
                   <img
-                    src={prod.image}
+                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
                     alt={prod.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                     referrerPolicy="no-referrer"
@@ -756,7 +756,7 @@ export const AboutUs: React.FC = () => {
               >
                 <div className="aspect-[4/5] bg-[#efe6e2] mb-4 overflow-hidden relative border border-[#c5c7c1]/30">
                   <img
-                    src={prod.image}
+                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
                     alt={prod.name}
                     className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
                     referrerPolicy="no-referrer"
@@ -983,7 +983,7 @@ export const AboutUs: React.FC = () => {
               >
                 <div className="aspect-square bg-[#fff8f5] mb-6 overflow-hidden relative shadow-sm border border-[#c5c7c1]/20">
                   <img
-                    src={prod.image}
+                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
                     alt={prod.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                     referrerPolicy="no-referrer"

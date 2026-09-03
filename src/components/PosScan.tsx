@@ -1258,7 +1258,7 @@ export default function PosScan({
                   title="Click to view product details & adjust quantity"
                 >
                   <img 
-                    src={lastScannedProduct.image} 
+                    src={lastScannedProduct.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
                     alt={lastScannedProduct.name}
                     className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-xs flex-shrink-0"
                     referrerPolicy="no-referrer"
@@ -1376,7 +1376,7 @@ export default function PosScan({
                       className="w-full bg-white hover:bg-pink-100/60 p-2 rounded-xl border border-pink-100 text-left flex items-center justify-between gap-2 transition"
                     >
                       <img 
-                        src={p.image} 
+                        src={p.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
                         alt={p.name}
                         className="w-8 h-8 object-cover rounded-lg border border-pink-100 flex-shrink-0 cursor-pointer"
                         referrerPolicy="no-referrer"
@@ -1479,7 +1479,7 @@ export default function PosScan({
                 {mobileCartItems.map((item) => (
                   <div key={item.product.id} className="p-3 bg-pink-50/30 rounded-2xl border border-pink-100 flex items-center justify-between gap-3">
                     <img 
-                      src={item.product.image} 
+                      src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
                       alt={item.product.name} 
                       className="w-10 h-10 object-cover rounded-xl border border-pink-100 flex-shrink-0 cursor-pointer"
                       referrerPolicy="no-referrer"

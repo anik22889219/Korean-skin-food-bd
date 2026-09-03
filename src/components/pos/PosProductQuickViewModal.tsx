@@ -25,7 +25,8 @@ import {
   getRetailOriginalPrice, 
   hasRetailDiscount, 
   getRetailDiscountPercentage,
-  getWholesalePrice 
+  getWholesalePrice,
+  getCashPrice
 } from '../../utils/pricing';
 
 interface PosProductQuickViewModalProps {
@@ -75,6 +76,7 @@ export const PosProductQuickViewModal: React.FC<PosProductQuickViewModalProps> =
 
   const wholesaleTier1 = useMemo(() => product ? getWholesalePrice(product, 1) : 0, [product]);
   const wholesaleTier2 = useMemo(() => product ? getWholesalePrice(product, 50) : 0, [product]);
+  const cashPriceVal = useMemo(() => product ? getCashPrice(product) : 0, [product]);
   const importCost = product?.importPrice || 0;
 
   // Active unit price based on quantity for wholesale
@@ -271,7 +273,7 @@ export const PosProductQuickViewModal: React.FC<PosProductQuickViewModalProps> =
             </div>
 
             {/* 4. MULTI-TIER PRICING MATRIX */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-left">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-left">
               {/* Retail Selling Price Card */}
               <div className={`p-2.5 rounded-2xl border transition ${
                 activeUnitPrice === retailPrice 
@@ -307,7 +309,7 @@ export const PosProductQuickViewModal: React.FC<PosProductQuickViewModalProps> =
               </div>
 
               {/* Wholesale Tier 2 Card (50+) */}
-              <div className={`p-2.5 rounded-2xl border transition col-span-2 sm:col-span-1 ${
+              <div className={`p-2.5 rounded-2xl border transition ${
                 quantity >= 50 && wholesaleTier2 > 0
                   ? 'bg-purple-50 border-purple-500 ring-1 ring-purple-400' 
                   : 'bg-white border-pink-100'
@@ -324,6 +326,17 @@ export const PosProductQuickViewModal: React.FC<PosProductQuickViewModalProps> =
                   </span>
                 </div>
                 <span className="text-[8px] text-gray-400 block mt-0.5">Bulk volume rate</span>
+              </div>
+
+              {/* Cash Price Card */}
+              <div className="p-2.5 rounded-2xl bg-emerald-50/50 border border-emerald-200/70">
+                <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider block">Cash Price</span>
+                <div className="mt-1">
+                  <span className="text-sm font-black text-emerald-700 font-mono">
+                    {product?.cashPrice ? `৳${product.cashPrice}` : `৳${retailPrice}`}
+                  </span>
+                </div>
+                <span className="text-[8px] text-emerald-600 block mt-0.5">Instant cash checkout</span>
               </div>
             </div>
 

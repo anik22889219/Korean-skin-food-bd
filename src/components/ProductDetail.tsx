@@ -7,6 +7,7 @@ import { posService } from '../services/posService';
 import { Product, ProductReview, Order } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useWholesaleCart } from '../context/WholesaleCartContext';
 import { db } from '../services/firebase';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
@@ -28,6 +29,7 @@ export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { language, addToCart } = useCart();
+  const { addToWholesaleCart } = useWholesaleCart();
   const { user, profile, signInWithGoogle, isAdmin } = useAuth();
 
   const { data: product, isLoading: isProductLoading, isError } = useProduct(id);
@@ -290,6 +292,19 @@ export const ProductDetail: React.FC = () => {
     if (product && trackedProductIdRef.current !== product.id) {
       trackedProductIdRef.current = product.id;
       analytics.trackViewItem(product);
+    }
+    if (product) {
+      const pageTitle = product.metaTitle || (product as any).seoTitle || `${product.name} | Korean Skin Food BD`;
+      document.title = pageTitle;
+      if (product.metaDescription) {
+        let metaTag = document.querySelector('meta[name="description"]');
+        if (!metaTag) {
+          metaTag = document.createElement('meta');
+          metaTag.setAttribute('name', 'description');
+          document.head.appendChild(metaTag);
+        }
+        metaTag.setAttribute('content', product.metaDescription);
+      }
     }
   }, [product]);
 
@@ -563,8 +578,8 @@ export const ProductDetail: React.FC = () => {
         <div className="space-y-4">
           <div className="relative aspect-square bg-pink-50/5 border border-pink-100 rounded-2xl overflow-hidden p-4 group">
             <img 
-              src={selectedMainImage || product.image} 
-              alt={product.name} 
+              src={selectedMainImage || product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=600'} 
+              alt={product.imageAltText || product.name} 
               className="w-full h-full object-cover rounded-xl shadow-sm transition group-hover:scale-105 duration-300"
               referrerPolicy="no-referrer"
             />
@@ -587,7 +602,7 @@ export const ProductDetail: React.FC = () => {
                     : 'border-pink-100 hover:border-pink-300'
                 }`}
               >
-                <img src={product.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                <img src={product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               </button>
               {product.images.map((imgUrl, idx) => (
                 <button
@@ -600,7 +615,7 @@ export const ProductDetail: React.FC = () => {
                       : 'border-pink-100 hover:border-pink-300'
                   }`}
                 >
-                  <img src={imgUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <img src={imgUrl || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 </button>
               ))}
             </div>
@@ -616,7 +631,7 @@ export const ProductDetail: React.FC = () => {
             {/* Top Brand Logo & Share Title */}
             <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-pink-100/60">
               <div className="flex items-center gap-2.5">
-                {globalTheme.logoUrl ? (
+                {globalTheme.logoUrl && globalTheme.logoUrl.trim() !== '' ? (
                   <img 
                     src={globalTheme.logoUrl} 
                     alt={globalTheme.logoText || "Korean Skin Food BD"} 
@@ -1029,6 +1044,26 @@ export const ProductDetail: React.FC = () => {
 
           {/* Add to Basket CTA */}
           <div className="space-y-3 pt-1">
+            {profile?.wholesaleAccess && product && (
+              <button
+                type="button"
+                id="btn_add_to_wholesale_cart"
+                onClick={() => {
+                  addToWholesaleCart(product, quantity);
+                  navigate('/wholesale/checkout');
+                }}
+                disabled={product.stock <= 0}
+                className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-2xl cursor-pointer transition shadow-md shadow-amber-200/50 flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm active:scale-[0.99]"
+              >
+                <Building2 size={18} />
+                <span>
+                  {language === 'bn' 
+                    ? `হোলসেল কার্টে যোগ ও চেকআউট করুন (${quantity} পিস)` 
+                    : `Order Wholesale & Proceed to Checkout (${quantity} pcs)`}
+                </span>
+              </button>
+            )}
+
             <button
               onClick={() => addToCart(product, quantity)}
               disabled={product.stock <= 0}
@@ -1058,7 +1093,7 @@ export const ProductDetail: React.FC = () => {
             {/* Top Brand Logo & Share Title */}
             <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-pink-100/60">
               <div className="flex items-center gap-2.5">
-                {globalTheme.logoUrl ? (
+                {globalTheme.logoUrl && globalTheme.logoUrl.trim() !== '' ? (
                   <img 
                     src={globalTheme.logoUrl} 
                     alt={globalTheme.logoText || "Korean Skin Food BD"} 

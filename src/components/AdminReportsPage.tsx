@@ -706,7 +706,7 @@ export const AdminReportsPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-black text-slate-900">Skincare Catalog & Stock Valuation Reports</h3>
+                <h3 className="text-base font-black text-slate-900">Product List & Stock Valuation Reports</h3>
                 <p className="text-xs text-slate-500">Monitor stock levels, low-stock warnings, and warehouse asset valuation.</p>
               </div>
               <div className="flex gap-2">

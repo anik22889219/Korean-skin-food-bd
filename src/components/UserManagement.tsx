@@ -1,9 +1,11 @@
+import { WholesaleLedgerModal } from './WholesaleLedgerModal';
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
 import { doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from '../types';
 import { useUsers } from '../hooks/queries/users';
+import { wholesaleService } from '../services/wholesaleService';
 import { 
   Users, ShieldAlert, Search, Filter, UserCheck, Shield, UserPlus, 
   Edit3, Trash2, Award, Mail, Phone, Lock, Sparkles, CheckCircle2, 
@@ -20,6 +22,7 @@ export const UserManagement: React.FC = () => {
   
   // Modals state
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [ledgerCustomerId, setLedgerCustomerId] = useState<string | null>(null);
   const [isAddUserOpen, setIsAddUserOpen] = useState<boolean>(false);
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -102,6 +105,13 @@ export const UserManagement: React.FC = () => {
         wholesaleAccess: nextStatus,
         updatedAt: serverTimestamp() 
       });
+
+      // Synchronize wholesale_customers collection record
+      await wholesaleService.adminUpdateWholesaleCustomer(targetUid, {
+        wholesaleAccess: nextStatus,
+        status: nextStatus ? 'active' : 'pending'
+      });
+
       showToast('success', `Wholesale access ${nextStatus ? 'GRANTED' : 'REVOKED'} for user.`);
     } catch (err) {
       console.error('Failed to toggle wholesale access:', err);
@@ -140,6 +150,15 @@ export const UserManagement: React.FC = () => {
         status: formStatus,
         wholesaleAccess: formWholesaleAccess,
         updatedAt: serverTimestamp()
+      });
+
+      // Synchronize wholesale_customers collection record
+      await wholesaleService.adminUpdateWholesaleCustomer(editingUser.uid, {
+        name: formName,
+        email: formEmail,
+        phone: formPhone,
+        wholesaleAccess: formWholesaleAccess,
+        status: formWholesaleAccess ? 'active' : formStatus
       });
 
       showToast('success', `User profile for "${formName}" updated successfully.`);
@@ -561,7 +580,7 @@ export const UserManagement: React.FC = () => {
                   {/* Avatar, Name & UID */}
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow-xs overflow-hidden text-sm">
-                      {u.photoURL ? (
+                      {u.photoURL && u.photoURL.trim() !== '' ? (
                         <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
                       ) : (
                         u.name?.slice(0, 2).toUpperCase() || 'US'
@@ -632,6 +651,15 @@ export const UserManagement: React.FC = () => {
                         <span className="text-[10px] font-black uppercase tracking-wider block text-slate-700">
                           Wholesale Access
                         </span>
+                        {u.wholesaleAccess && (
+                          <button 
+                            onClick={() => setLedgerCustomerId(u.uid)}
+                            className="ml-2 px-2 py-0.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-[10px] rounded-md font-bold cursor-pointer transition"
+                          >
+                            Ledger
+                          </button>
+                        )}
+
                         <span className={`text-[10px] font-bold ${u.wholesaleAccess ? 'text-amber-700' : 'text-slate-400'}`}>
                           {u.wholesaleAccess ? 'Authorized (Tier 1 & 2 Active)' : 'Standard Retail Only'}
                         </span>
@@ -685,6 +713,13 @@ export const UserManagement: React.FC = () => {
 
       {/* EDIT USER MODAL */}
       <AnimatePresence>
+      {ledgerCustomerId && (
+        <WholesaleLedgerModal 
+          wholesaleCustomerId={ledgerCustomerId}
+          onClose={() => setLedgerCustomerId(null)}
+        />
+      )}
+
         {editingUser && (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div

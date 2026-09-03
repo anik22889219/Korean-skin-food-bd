@@ -18,6 +18,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isCreator: boolean;
   isApprovedCreator: boolean;
   creatorStatus: CreatorStatus | null;
@@ -153,6 +154,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ? (profile.role === 'admin' || profile.role === 'super_admin' || profile.role === 'hr' || profile.role === 'inventory_manager' || profile.role === 'customer_support') 
     : false;
 
+  const isSuperAdmin = profile?.role === 'super_admin' || user?.email === 'koreanskinfood.bd@gmail.com';
+
   const isCreator = !!creatorProfile || profile?.role === 'creator';
   const isApprovedCreator = creatorProfile?.status === 'approved';
   const creatorStatus = creatorProfile?.status || null;
@@ -166,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       signInWithGoogle,
       signOut,
       isAdmin,
+      isSuperAdmin,
       isCreator,
       isApprovedCreator,
       creatorStatus

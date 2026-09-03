@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Product } from '../../types';
 import { Search, X, Plus, Package, Check, Sparkles, Filter, ScanLine } from 'lucide-react';
-import { getRetailPrice } from '../../utils/pricing';
+import { getProductUnitPrice, getRetailPrice } from '../../utils/pricing';
+import { PricingMode } from './types';
 
 interface PosProductSearchProps {
   products: Product[];
@@ -9,6 +10,7 @@ interface PosProductSearchProps {
   onAddToStockIn?: (product: Product) => void;
   onOpenScanner?: () => void;
   mode?: 'sale' | 'stock_in';
+  pricingMode?: PricingMode;
   cartQuantities?: Record<string, number>;
   stockInQuantities?: Record<string, number>;
 }
@@ -19,6 +21,7 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
   onAddToStockIn,
   onOpenScanner,
   mode = 'sale',
+  pricingMode = 'retail',
   cartQuantities = {},
   stockInQuantities = {}
 }) => {
@@ -201,7 +204,7 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
                 }`}
               >
                 <img
-                  src={p.image}
+                  src={p.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
                   alt={p.name}
                   className="w-12 h-12 object-cover rounded-xl border border-pink-100 shrink-0 group-hover:scale-105 transition shadow-2xs"
                   referrerPolicy="no-referrer"
@@ -225,7 +228,7 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
 
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-[#E91E8C] font-black font-mono text-xs">
-                      ৳{getRetailPrice(p)}
+                      ৳{mode === 'sale' ? getProductUnitPrice(p, (pricingMode || 'retail') as PricingMode, 1) : (p.importPrice || getRetailPrice(p))}
                     </span>
 
                     <div className="flex items-center gap-1.5">

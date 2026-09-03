@@ -1,6 +1,8 @@
 import { 
   PosSession, 
   Order, 
+  OrderItem,
+  OrderStatus,
   Product, 
   PosAllowedRole, 
   PosDeviceType, 
@@ -37,7 +39,7 @@ export interface PosCheckoutParams {
   customerPhone?: string;
   customerAddress?: string;
   deliveryArea?: 'inside' | 'outside' | 'pickup' | 'none';
-  pricingMode?: 'retail' | 'wholesale';
+  pricingMode?: 'retail' | 'wholesale' | 'cash';
   items: PosCheckoutItemInput[];
   orderId?: string;
   idempotencyKey?: string;
@@ -167,6 +169,91 @@ const DEFAULT_ORDERS: Order[] = [
   }
 ];
 
+export function mapWholesaleOrderToOrder(ws: any): Order {
+  const businessName = ws.customer?.businessName || '';
+  const clientName = ws.customer?.customerName || ws.customer?.name || '';
+  const deliveryName = ws.checkoutInfo?.deliveryName || '';
+  
+  let customerName = '';
+  if (businessName && clientName && businessName.toLowerCase() !== clientName.toLowerCase()) {
+    customerName = `${businessName} (${clientName})`;
+  } else if (businessName) {
+    customerName = businessName;
+  } else if (clientName) {
+    customerName = clientName;
+  } else if (deliveryName) {
+    customerName = `${deliveryName} (Wholesale)`;
+  } else {
+    customerName = 'Wholesale Customer';
+  }
+
+  const customerPhone = ws.customer?.contactNumber || ws.customer?.phone || ws.checkoutInfo?.deliveryPhone || '';
+  const customerEmail = ws.customer?.email || '';
+  const address = ws.checkoutInfo?.deliveryAddress || ws.customer?.businessAddress || ws.customer?.location || ws.customer?.address || 'Wholesale Delivery';
+
+  const totalAmount = Number(ws.finalAmount ?? ((ws.totalWholesaleCost || 0) + (ws.deliveryCharge || 0)));
+  const paidAmount = Number(ws.paidAmount ?? (ws.paymentStatus === 'paid' ? totalAmount : 0));
+  const dueAmount = Number(ws.dueAmount ?? Math.max(0, totalAmount - paidAmount));
+  const isPaid = dueAmount <= 0 || ws.paymentStatus === 'paid';
+
+  const items: OrderItem[] = (ws.items || []).map((it: any) => {
+    const qty = Math.max(1, Number(it.quantity || 1));
+    const unitPrice = Number(
+      it.wholesaleUnitPrice ?? 
+      it.unitWholesalePrice ?? 
+      it.wholesalePrice ?? 
+      it.price ?? 
+      (it.totalPrice ? it.totalPrice / qty : 0)
+    );
+    return {
+      productId: it.productId,
+      name: it.productName || it.name || 'Wholesale Item',
+      price: unitPrice,
+      quantity: qty,
+      scannedQuantity: Number(it.scannedQuantity ?? (ws.status === 'delivered' ? qty : 0)),
+      barcode: it.barcode || ''
+    };
+  });
+
+  const rawStatus = String(ws.status || 'pending').toLowerCase();
+  let normalizedStatus: OrderStatus = 'pending';
+  if (rawStatus === 'confirmed' || rawStatus === 'processing') normalizedStatus = 'processing';
+  else if (rawStatus === 'ready' || rawStatus === 'packing') normalizedStatus = 'packing';
+  else if (rawStatus === 'shipped') normalizedStatus = 'shipped';
+  else if (rawStatus === 'delivered') normalizedStatus = 'delivered';
+  else if (rawStatus === 'cancelled') normalizedStatus = 'cancelled';
+  else normalizedStatus = 'pending';
+
+  return {
+    id: ws.id || ws.orderNumber,
+    customerName,
+    customerPhone,
+    customerEmail,
+    customer_uid: ws.customer?.userId || ws.customer?.wholesaleCustomerId || ws.userId || '',
+    address,
+    items,
+    totalAmount,
+    discountAmount: 0,
+    status: normalizedStatus,
+    order_source: 'WHOLESALE',
+    stock_deducted: ws.stock_deducted ?? ws.stockDeducted ?? true,
+    stock_restored: ws.stock_restored ?? ws.stockRestored ?? false,
+    cancelReason: ws.cancelReason,
+    createdAt: ws.createdAt || new Date().toISOString(),
+    paymentMethod: (ws.checkoutInfo?.checkoutType === 'COD' ? 'COD' : 'CREDIT_DUE') as any,
+    sessionType: 'Online',
+    isPaid,
+    paymentStatus: isPaid ? 'PAID' : paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID',
+    totalPaid: paidAmount,
+    dueAmount,
+    paymentTransactions: ws.paymentTransactions || [],
+    courier: ws.courier,
+    notes: ws.notes || ws.checkoutInfo?.orderNote
+  };
+}
+
+let retailOrdersCache: Order[] = [...DEFAULT_ORDERS];
+let wholesaleOrdersCache: Order[] = [];
 let ordersCache: Order[] = [...DEFAULT_ORDERS];
 // Pure in-memory cache synchronized from Firestore — NOT the source of truth, NO hardcoded singleton pos-main
 let sessionsCache: PosSession[] = [];
@@ -176,6 +263,20 @@ let draftOrdersCache: Order[] = [];
 
 // Subscribers for real-time order synchronization
 const orderSubscribers = new Set<(orders: Order[]) => void>();
+
+function rebuildAndPublishOrders() {
+  const merged = [...retailOrdersCache, ...wholesaleOrdersCache];
+  merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  ordersCache = merged;
+  notifyOrderSubscribers();
+  try {
+    queryClient.setQueryData(queryKeys.orders.recent(), merged);
+    queryClient.setQueryData(queryKeys.orders.realtime(), merged);
+    queryClient.invalidateQueries({ queryKey: queryKeys.orders.lists() });
+  } catch {
+    // Safe guard
+  }
+}
 
 function notifyOrderSubscribers() {
   orderSubscribers.forEach(cb => {
@@ -209,6 +310,7 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(2
     const raw = docSnap.data() as Order;
     const normOrder: Order = {
       ...raw,
+      id: docSnap.id || raw.id,
       order_source: raw.order_source || (raw.sessionType === 'POS' ? 'POS' : 'WEBSITE'),
       stock_deducted: raw.stock_deducted ?? (raw.status === 'delivered' || raw.status === 'processing' || raw.status === 'shipped'),
       items: (raw.items || []).map(item => ({
@@ -219,22 +321,45 @@ onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(2
     ords.push(normOrder);
   });
   if (ords.length > 0) {
-    ordersCache = ords;
-    notifyOrderSubscribers();
-    try {
-      // Store 200-item realtime window in dedicated recent keys so older paginated records are not corrupted
-      queryClient.setQueryData(queryKeys.orders.recent(), ords);
-      queryClient.setQueryData(queryKeys.orders.realtime(), ords);
-      queryClient.invalidateQueries({ queryKey: queryKeys.orders.lists() });
-    } catch {
-      // Safe guard
-    }
+    retailOrdersCache = ords;
+    rebuildAndPublishOrders();
   }
 }, (err) => {
   console.warn('[Firebase] orders onSnapshot warning:', err);
   if (err?.code === 'permission-denied' || err?.message?.includes('permission') || err?.message?.includes('Permission')) {
     handleFirestoreError(err, OperationType.GET, 'orders', false);
   }
+});
+
+// Real-time synchronization for Wholesale Orders
+onSnapshot(query(collection(db, 'wholesale_orders'), orderBy('createdAt', 'desc'), limit(200)), (snapshot) => {
+  const wsOrds: Order[] = [];
+  snapshot.forEach((docSnap) => {
+    const raw = { id: docSnap.id, ...docSnap.data() };
+    const normOrder = mapWholesaleOrderToOrder(raw);
+    wsOrds.push(normOrder);
+  });
+  wholesaleOrdersCache = wsOrds;
+  rebuildAndPublishOrders();
+}, (err) => {
+  console.warn('[Firebase] wholesale_orders onSnapshot warning:', err);
+  if (err?.code === 'permission-denied' || err?.message?.includes('permission') || err?.message?.includes('Permission')) {
+    handleFirestoreError(err, OperationType.GET, 'wholesale_orders', false);
+  }
+});
+
+// Initial fast bootstrap of wholesale orders
+getDocs(query(collection(db, 'wholesale_orders'), orderBy('createdAt', 'desc'), limit(100))).then((snapshot) => {
+  if (!snapshot.empty) {
+    const wsOrds: Order[] = [];
+    snapshot.forEach(docSnap => {
+      wsOrds.push(mapWholesaleOrderToOrder({ id: docSnap.id, ...docSnap.data() }));
+    });
+    wholesaleOrdersCache = wsOrds;
+    rebuildAndPublishOrders();
+  }
+}).catch((err) => {
+  console.warn('[posService] Initial wholesale_orders fetch warning:', err);
 });
 
 onSnapshot(collection(db, 'pos_sessions'), (snapshot) => {
@@ -1543,7 +1668,15 @@ export const posService = {
     }));
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    if (order.order_source === 'WHOLESALE') {
+      updateDoc(doc(db, 'wholesale_orders', order.id), {
+        status: 'packing',
+        items: order.items,
+        updatedAt: new Date().toISOString()
+      }).catch(console.error);
+    } else {
+      setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    }
     notifyOrderSubscribers();
 
     return { success: true, message: 'Fulfillment started! Order status updated to PACKING.', order };
@@ -1613,7 +1746,14 @@ export const posService = {
     const isComplete = order.items.every(it => (it.scannedQuantity || 0) === it.quantity);
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    if (order.order_source === 'WHOLESALE') {
+      updateDoc(doc(db, 'wholesale_orders', order.id), {
+        items: order.items,
+        updatedAt: new Date().toISOString()
+      }).catch(console.error);
+    } else {
+      setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    }
     notifyOrderSubscribers();
 
     return {
@@ -1633,9 +1773,10 @@ export const posService = {
     }
 
     const order = { ...ordersCache[idx] };
+    const isWholesale = order.order_source === 'WHOLESALE';
 
     // Strict safety check 1: Duplicate stock deduction prevention
-    if (order.stock_deducted) {
+    if (order.stock_deducted && !isWholesale) {
       return { success: false, message: 'Stock has already been deducted for this order. Duplicate deduction prevented.' };
     }
 
@@ -1648,63 +1789,95 @@ export const posService = {
       };
     }
 
-    // Strict safety check 3: Database stock availability re-verification
-    const products = productService.getProducts();
-    for (const item of order.items) {
-      const prod = products.find(p => p.id === item.productId);
-      if (!prod) {
-        return { success: false, message: `Product "${item.name}" not found in inventory catalog.` };
+    if (!isWholesale) {
+      // Strict safety check 3: Database stock availability re-verification
+      const products = productService.getProducts();
+      for (const item of order.items) {
+        const prod = products.find(p => p.id === item.productId);
+        if (!prod) {
+          return { success: false, message: `Product "${item.name}" not found in inventory catalog.` };
+        }
+        if (prod.stock < item.quantity) {
+          return {
+            success: false,
+            message: `Insufficient stock for "${prod.name}". Available in stock: ${prod.stock}, Required: ${item.quantity}. Fulfillment blocked.`
+          };
+        }
       }
-      if (prod.stock < item.quantity) {
-        return {
-          success: false,
-          message: `Insufficient stock for "${prod.name}". Available in stock: ${prod.stock}, Required: ${item.quantity}. Fulfillment blocked.`
-        };
+
+      // All checks passed! Deduct stock atomically and log movements
+      for (const item of order.items) {
+        const prod = products.find(p => p.id === item.productId)!;
+        const prevStock = prod.stock;
+        prod.stock -= item.quantity;
+        productService.updateProduct(prod);
+
+        productService.logInventory(
+          prod.id,
+          'sale',
+          item.quantity,
+          prevStock,
+          prod.stock,
+          `Website Order Fulfillment - Order #${order.id}`
+        );
+
+        productService.logStockMovement({
+          productId: prod.id,
+          productName: prod.name,
+          orderId: order.id,
+          quantity: -item.quantity,
+          type: 'sale',
+          source: 'WEBSITE',
+          performedBy: staffName,
+          previousStock: prevStock,
+          newStock: prod.stock,
+          reason: `Website Order Verification & Fulfillment`
+        });
       }
-    }
-
-    // All checks passed! Deduct stock atomically and log movements
-    for (const item of order.items) {
-      const prod = products.find(p => p.id === item.productId)!;
-      const prevStock = prod.stock;
-      prod.stock -= item.quantity;
-      productService.updateProduct(prod);
-
-      productService.logInventory(
-        prod.id,
-        'sale',
-        item.quantity,
-        prevStock,
-        prod.stock,
-        `Website Order Fulfillment - Order #${order.id}`
-      );
-
+    } else {
+      // For wholesale orders, stock was already deducted at order creation.
+      // Log fulfillment confirmation
       productService.logStockMovement({
-        productId: prod.id,
-        productName: prod.name,
+        productId: order.items[0]?.productId || 'WHOLESALE',
+        productName: order.items[0]?.name || 'Wholesale Package',
         orderId: order.id,
-        quantity: -item.quantity,
-        type: 'sale',
-        source: 'WEBSITE',
+        quantity: 0,
+        type: 'adjustment',
+        source: 'WHOLESALE',
         performedBy: staffName,
-        previousStock: prevStock,
-        newStock: prod.stock,
-        reason: `Website Order Verification & Fulfillment`
+        previousStock: 0,
+        newStock: 0,
+        reason: `Wholesale Order Verification & Fulfillment Confirmed`
       });
     }
 
-    // Mark order as fulfilled & stock deducted
+    // Mark order as fulfilled & verified
     order.stock_deducted = true;
     order.status = 'delivered';
-    order.isPaid = true;
+    if (!isWholesale) {
+      order.isPaid = true;
+    }
 
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    if (isWholesale) {
+      updateDoc(doc(db, 'wholesale_orders', order.id), {
+        status: 'delivered',
+        stock_deducted: true,
+        items: order.items,
+        fulfilledAt: new Date().toISOString(),
+        fulfilledBy: staffName,
+        updatedAt: new Date().toISOString()
+      }).catch(console.error);
+    } else {
+      setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    }
     notifyOrderSubscribers();
 
     return {
       success: true,
-      message: `Order #${order.id} verified and fulfilled successfully! Stock deducted and logged.`,
+      message: isWholesale
+        ? `Wholesale Order #${order.id} verified and fulfilled successfully!`
+        : `Order #${order.id} verified and fulfilled successfully! Stock deducted and logged.`,
       order
     };
   },
@@ -1769,7 +1942,36 @@ export const posService = {
     order.status = 'cancelled';
     order.cancelReason = reason;
     ordersCache[idx] = order;
-    setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+
+    if (order.order_source === 'WHOLESALE') {
+      updateDoc(doc(db, 'wholesale_orders', order.id), {
+        status: 'cancelled',
+        cancelReason: reason,
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: staffName,
+        stock_restored: true,
+        stock_deducted: false,
+        updatedAt: new Date().toISOString()
+      }).catch(console.error);
+
+      const custId = order.customer_uid;
+      if (custId) {
+        getDoc(doc(db, 'wholesale_customers', custId)).then(snap => {
+          if (snap.exists()) {
+            const cData = snap.data();
+            const newPurchase = Math.max(0, Number(cData.totalWholesalePurchase || 0) - order.totalAmount);
+            const newDue = Math.max(0, newPurchase - Number(cData.totalPaid || 0));
+            updateDoc(doc(db, 'wholesale_customers', custId), {
+              totalWholesalePurchase: newPurchase,
+              totalDue: newDue,
+              updatedAt: new Date().toISOString()
+            }).catch(console.error);
+          }
+        }).catch(console.error);
+      }
+    } else {
+      setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+    }
     notifyOrderSubscribers();
 
     // Trigger Refund analytics only if website order and actually cancelled
@@ -1802,7 +2004,15 @@ export const posService = {
         updatedOrder.isPaid = true;
       }
       ordersCache[index] = updatedOrder;
-      setDoc(doc(db, 'orders', updatedOrder.id), sanitizeForFirestore(updatedOrder)).catch(console.error);
+
+      if (updatedOrder.order_source === 'WHOLESALE') {
+        updateDoc(doc(db, 'wholesale_orders', cleanId), {
+          status,
+          updatedAt: new Date().toISOString()
+        }).catch(console.error);
+      } else {
+        setDoc(doc(db, 'orders', updatedOrder.id), sanitizeForFirestore(updatedOrder)).catch(console.error);
+      }
       notifyOrderSubscribers();
 
       if (previousStatus !== status) {
@@ -1821,7 +2031,15 @@ export const posService = {
     if (index !== -1) {
       const updatedOrder = { ...ordersCache[index], courier: courierData };
       ordersCache[index] = updatedOrder;
-      setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(updatedOrder)).catch(console.error);
+
+      if (updatedOrder.order_source === 'WHOLESALE') {
+        updateDoc(doc(db, 'wholesale_orders', orderId), {
+          courier: courierData,
+          updatedAt: new Date().toISOString()
+        }).catch(console.error);
+      } else {
+        setDoc(doc(db, 'orders', orderId), sanitizeForFirestore(updatedOrder)).catch(console.error);
+      }
       notifyOrderSubscribers();
       return updatedOrder;
     }

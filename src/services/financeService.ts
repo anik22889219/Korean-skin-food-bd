@@ -478,16 +478,30 @@ export const financeService = {
           };
         }
 
-        const orderRef = doc(db, 'orders', orderId);
-        const orderDoc = await transaction.get(orderRef);
+        let isWholesale = false;
+        let orderRef = doc(db, 'orders', orderId);
+        let orderDoc = await transaction.get(orderRef);
         if (!orderDoc.exists()) {
-          throw new Error(`Order #${orderId} not found.`);
+          orderRef = doc(db, 'wholesale_orders', orderId);
+          orderDoc = await transaction.get(orderRef);
+          if (!orderDoc.exists()) {
+            throw new Error(`Order #${orderId} not found in retail or wholesale orders.`);
+          }
+          isWholesale = true;
         }
 
-        const currentOrder = orderDoc.data() as Order;
-        const totalAmount = currentOrder.totalAmount || 0;
-        const currentPaid = currentOrder.totalPaid ?? (currentOrder.isPaid ? totalAmount : 0);
-        const currentDue = currentOrder.dueAmount ?? Math.max(0, totalAmount - currentPaid);
+        const rawData = orderDoc.data() as any;
+        const totalAmount = isWholesale
+          ? Number(rawData.finalAmount ?? ((rawData.totalWholesaleCost || 0) + (rawData.deliveryCharge || 0)))
+          : Number(rawData.totalAmount || 0);
+
+        const currentPaid = isWholesale
+          ? Number(rawData.paidAmount ?? (rawData.paymentStatus === 'paid' ? totalAmount : 0))
+          : Number(rawData.totalPaid ?? (rawData.isPaid ? totalAmount : 0));
+
+        const currentDue = isWholesale
+          ? Number(rawData.dueAmount ?? Math.max(0, totalAmount - currentPaid))
+          : Number(rawData.dueAmount ?? Math.max(0, totalAmount - currentPaid));
 
         if (currentDue <= 0) {
           throw new Error(`Order #${orderId} is already fully paid. No outstanding due.`);
@@ -496,22 +510,34 @@ export const financeService = {
         const effectivePayment = Math.min(amount, currentDue);
         const newTotalPaid = currentPaid + effectivePayment;
         const newDueAmount = Math.max(0, totalAmount - newTotalPaid);
-        const newPaymentStatus: PaymentStatus = newDueAmount === 0 ? 'PAID' : 'PARTIALLY_PAID';
+        const newPaymentStatus = newDueAmount === 0 
+          ? (isWholesale ? 'paid' : 'PAID') 
+          : (isWholesale ? 'partial' : 'PARTIALLY_PAID');
+
+        const custPhone = isWholesale
+          ? (rawData.customer?.contactNumber || (rawData.checkoutInfo as any)?.deliveryPhone || '')
+          : (rawData.customerPhone || '');
+
+        const custName = isWholesale
+          ? (rawData.customer?.businessName 
+              ? `${rawData.customer.businessName} (${rawData.customer.customerName || 'Wholesale'})` 
+              : (rawData.customer?.customerName || 'Wholesale Customer'))
+          : (rawData.customerName || '');
 
         const paymentTx: PaymentTransaction = {
           id: payTxId,
           orderId,
-          type: 'POS_DUE_COLLECTION',
+          type: (isWholesale ? 'WHOLESALE_PAYMENT' : 'POS_DUE_COLLECTION') as any,
           method,
           amount: effectivePayment,
-          note: note || `Due collection of ৳${effectivePayment} for Order #${orderId}`,
+          note: note || `Due collection of ৳${effectivePayment} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId}`,
           receivedBy,
           receivedAt: nowIso,
-          source,
+          source: isWholesale ? 'WHOLESALE' : source,
           idempotencyKey: effectiveIdempotencyKey,
           accountCode,
-          customerPhone: currentOrder.customerPhone,
-          customerName: currentOrder.customerName
+          customerPhone: custPhone,
+          customerName: custName
         };
 
         const finTx: FinancialTransaction = {
@@ -521,25 +547,70 @@ export const financeService = {
           amount: effectivePayment,
           date: nowIso.split('T')[0],
           accountCode: accountCode as any,
-          description: `Due Collection ৳${effectivePayment} for Order #${orderId} (${method})`,
+          description: `Due Collection ৳${effectivePayment} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId} (${method})`,
           performedBy: receivedBy,
-          referenceType: 'ORDER',
+          referenceType: isWholesale ? ('WHOLESALE_ORDER' as any) : 'ORDER',
           referenceId: orderId,
           createdAt: nowIso
         };
 
         // Writes
-        const existingTxList = currentOrder.paymentTransactions || [];
-        const updatedOrder: Order = {
-          ...currentOrder,
-          totalPaid: newTotalPaid,
-          dueAmount: newDueAmount,
-          paymentStatus: newPaymentStatus,
-          isPaid: newPaymentStatus === 'PAID',
-          paymentTransactions: [...existingTxList, paymentTx]
-        };
+        const existingTxList = rawData.paymentTransactions || [];
+        let updatedOrder: any;
 
-        transaction.set(orderRef, sanitizeForFirestore(updatedOrder));
+        if (isWholesale) {
+          updatedOrder = {
+            ...rawData,
+            paidAmount: newTotalPaid,
+            dueAmount: newDueAmount,
+            paymentStatus: newPaymentStatus,
+            paymentTransactions: [...existingTxList, paymentTx],
+            updatedAt: nowIso
+          };
+          transaction.set(orderRef, sanitizeForFirestore(updatedOrder));
+
+          const cleanUserId = rawData.customer?.userId || rawData.customer?.wholesaleCustomerId;
+          if (cleanUserId) {
+            const customerLedgerRef = doc(db, 'wholesale_customers', String(cleanUserId).trim());
+            const customerSnap = await transaction.get(customerLedgerRef);
+            if (customerSnap.exists()) {
+              const custData = customerSnap.data();
+              const currentWholesalePaid = Number(custData.totalPaid || 0);
+              const newWholesalePaid = currentWholesalePaid + effectivePayment;
+              const currentWholesalePurchase = Number(custData.totalWholesalePurchase || 0);
+              const newWholesaleDue = Math.max(0, currentWholesalePurchase - newWholesalePaid);
+              transaction.update(customerLedgerRef, {
+                totalPaid: newWholesalePaid,
+                totalDue: newWholesaleDue,
+                updatedAt: nowIso
+              });
+            }
+          }
+
+          const wsPaymentDoc = {
+            id: payTxId,
+            wholesaleCustomerId: cleanUserId || orderId,
+            orderId,
+            amount: effectivePayment,
+            paymentMethod: method,
+            accountCode,
+            reference: `Order #${orderId} Due Payment`,
+            notes: note || `Due collection via ${method}`,
+            collectedBy: receivedBy,
+            createdAt: nowIso
+          };
+          transaction.set(doc(db, 'wholesale_payments', payTxId), sanitizeForFirestore(wsPaymentDoc));
+        } else {
+          updatedOrder = {
+            ...rawData,
+            totalPaid: newTotalPaid,
+            dueAmount: newDueAmount,
+            paymentStatus: newPaymentStatus,
+            isPaid: newPaymentStatus === 'PAID',
+            paymentTransactions: [...existingTxList, paymentTx]
+          };
+          transaction.set(orderRef, sanitizeForFirestore(updatedOrder));
+        }
         transaction.set(doc(db, 'payment_transactions', payTxId), sanitizeForFirestore(paymentTx));
         transaction.set(doc(db, 'financial_transactions', finTxId), sanitizeForFirestore(finTx));
         transaction.set(idempRef, sanitizeForFirestore({

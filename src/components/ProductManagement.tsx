@@ -26,9 +26,11 @@ import {
   Trash2, Edit, AlertCircle, CheckCircle, X, 
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
   Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info,
-  LayoutGrid, List, Package, AlertTriangle, Layers, Copy, DollarSign, ArrowUpDown
+  LayoutGrid, List, Package, AlertTriangle, Layers, Copy, DollarSign, ArrowUpDown,
+  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { KOREAN_BRANDS, getUniqueBrandList, isSameBrand, getCanonicalBrandName } from '../data/brands';
 import { normalizeProductPricing, getRetailPrice, getWholesalePrice } from '../utils/pricing';
 
@@ -52,6 +54,9 @@ const CATEGORIES = [
 
 export const ProductManagement: React.FC = () => {
   const navigate = useNavigate();
+  const { profile, user, isSuperAdmin } = useAuth();
+  const hasSuperAdminAccess = isSuperAdmin || profile?.role === 'super_admin' || user?.email === 'koreanskinfood.bd@gmail.com';
+
   const { data: products = [], isLoading: isProductsLoading } = useProducts();
   const { data: categories = CATEGORIES } = useCategories();
   const { data: brandsData } = useBrands();
@@ -91,6 +96,126 @@ export const ProductManagement: React.FC = () => {
       setTimeout(() => setCopiedBarcode(null), 2000);
     } catch (err) {
       console.warn('Copy failed:', err);
+    }
+  };
+
+  // CSV Export for Super Admin
+  const handleDownloadCSV = () => {
+    if (!hasSuperAdminAccess) {
+      setAlertMsg({ type: 'error', text: 'Access Denied: Only Super Admin is authorized to export the product catalog CSV.' });
+      setTimeout(() => setAlertMsg(null), 4000);
+      return;
+    }
+
+    if (!products || products.length === 0) {
+      setAlertMsg({ type: 'warning', text: 'No products available to export.' });
+      setTimeout(() => setAlertMsg(null), 4000);
+      return;
+    }
+
+    try {
+      const escapeCsvCell = (val: any): string => {
+        if (val === null || val === undefined) return '""';
+        const str = String(val).replace(/"/g, '""');
+        return `"${str}"`;
+      };
+
+      const headers = [
+        'Product ID',
+        'Product Name',
+        'Product Name (Bangla)',
+        'Brand',
+        'Category',
+        'Barcode',
+        'SKU',
+        'Volume / Size',
+        'Current Stock',
+        'Stock Status',
+        'Low Stock Alert Threshold',
+        'Import Cost (BDT)',
+        'Wholesale Market Price 50+ (BDT)',
+        'Page Owner Price 1-49 (BDT)',
+        'Website / Retail Price (BDT)',
+        'Discount Retail Price (BDT)',
+        'Cash Price (BDT)',
+        'Total Inventory Valuation (BDT)',
+        'Rating',
+        'Reviews Count',
+        'Skin Types',
+        'Image URL',
+        'SEO / Meta Title',
+        'SEO / Meta Description',
+        'Product Description (English)',
+        'Product Description (Bangla)'
+      ];
+
+      const rows = products.map((p) => {
+        const np = normalizeProductPricing(p);
+        const stockQty = Number(p.stock) || 0;
+        const retailP = getRetailPrice(np);
+        const threshold = p.lowStockThreshold ?? 5;
+        const stockStatus = stockQty === 0 
+          ? 'Out of Stock' 
+          : stockQty <= threshold 
+            ? 'Low Stock' 
+            : 'In Stock';
+        const totalValuation = stockQty * retailP;
+
+        return [
+          escapeCsvCell(p.id),
+          escapeCsvCell(p.name),
+          escapeCsvCell(p.nameBN || ''),
+          escapeCsvCell(p.brand || ''),
+          escapeCsvCell(p.category || ''),
+          escapeCsvCell(p.barcode || ''),
+          escapeCsvCell(p.sku || ''),
+          escapeCsvCell(p.ml || ''),
+          escapeCsvCell(stockQty),
+          escapeCsvCell(stockStatus),
+          escapeCsvCell(threshold),
+          escapeCsvCell(np.importPrice ?? ''),
+          escapeCsvCell(np.wholesalePrice50Plus ?? ''),
+          escapeCsvCell(np.wholesalePrice ?? ''),
+          escapeCsvCell(retailP),
+          escapeCsvCell(np.discountRetailPrice ?? ''),
+          escapeCsvCell(np.cashPrice ?? ''),
+          escapeCsvCell(totalValuation),
+          escapeCsvCell(p.rating ?? 5),
+          escapeCsvCell(p.reviewsCount ?? 0),
+          escapeCsvCell(Array.isArray(p.skinTypes) ? p.skinTypes.join(', ') : ''),
+          escapeCsvCell(p.image || ''),
+          escapeCsvCell(p.metaTitle || p.seoTitle || ''),
+          escapeCsvCell(p.metaDescription || ''),
+          escapeCsvCell(p.description || ''),
+          escapeCsvCell(p.descriptionBN || '')
+        ].join(',');
+      });
+
+      // Prepend UTF-8 BOM so Excel and Google Sheets render Bangla font without encoding issues
+      const csvContent = '\uFEFF' + [headers.map(escapeCsvCell).join(','), ...rows].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.setAttribute('download', `ksf_product_catalog_${dateStr}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setAlertMsg({
+        type: 'success',
+        text: `✅ Product catalog CSV downloaded successfully (${products.length} products).`
+      });
+      setTimeout(() => setAlertMsg(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to export CSV:', err);
+      setAlertMsg({
+        type: 'error',
+        text: 'Failed to export CSV: ' + (err?.message || 'Unknown error')
+      });
+      setTimeout(() => setAlertMsg(null), 4000);
     }
   };
 
@@ -760,9 +885,10 @@ export const ProductManagement: React.FC = () => {
       brand: '',
       category: 'Cleanser',
       importPrice: 800,
-      wholesalePrice: 1000,
       wholesalePrice50Plus: 900,
+      wholesalePrice: 1000,
       retailPrice: 1200,
+      cashPrice: undefined,
       discountRetailPrice: undefined,
       price: 1200,
       discountPrice: undefined,
@@ -770,6 +896,9 @@ export const ProductManagement: React.FC = () => {
       stock: 20,
       image: 'https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?q=80&w=600&auto=format&fit=crop',
       images: [],
+      imageAltText: '',
+      metaTitle: '',
+      metaDescription: '',
       description: '',
       descriptionBN: '',
       skinTypes: ['All'],
@@ -789,6 +918,10 @@ export const ProductManagement: React.FC = () => {
     setEditingProduct({ 
       ...np,
       images: np.images || [],
+      imageAltText: np.imageAltText || (np as any).altText || '',
+      metaTitle: np.metaTitle || (np as any).seoTitle || '',
+      metaDescription: np.metaDescription || '',
+      cashPrice: np.cashPrice,
       sku: np.sku || '',
       lowStockThreshold: np.lowStockThreshold ?? 5
     });
@@ -800,30 +933,38 @@ export const ProductManagement: React.FC = () => {
 
     // Pricing validation
     const impPrice = Number(editingProduct.importPrice);
-    const wsPrice = Number(editingProduct.wholesalePrice);
     const ws50Price = Number(editingProduct.wholesalePrice50Plus);
+    const wsPrice = Number(editingProduct.wholesalePrice);
     const retPrice = Number(editingProduct.retailPrice ?? editingProduct.price);
     const discPrice = editingProduct.discountRetailPrice !== undefined && editingProduct.discountRetailPrice !== null && String(editingProduct.discountRetailPrice).trim() !== ''
       ? Number(editingProduct.discountRetailPrice)
       : undefined;
+    const cashPrice = editingProduct.cashPrice !== undefined && editingProduct.cashPrice !== null && String(editingProduct.cashPrice).trim() !== ''
+      ? Number(editingProduct.cashPrice)
+      : undefined;
 
     if (isNaN(impPrice) || impPrice < 0) {
-      setAlertMsg({ type: 'error', text: 'Import price is required and must be a valid number >= 0.' });
-      setTimeout(() => setAlertMsg(null), 4000);
-      return;
-    }
-    if (isNaN(wsPrice) || wsPrice < 0) {
-      setAlertMsg({ type: 'error', text: 'Wholesale price (1–49) is required and must be a valid number >= 0.' });
+      setAlertMsg({ type: 'error', text: 'Import Cost is required and must be a valid number >= 0.' });
       setTimeout(() => setAlertMsg(null), 4000);
       return;
     }
     if (isNaN(ws50Price) || ws50Price < 0) {
-      setAlertMsg({ type: 'error', text: 'Wholesale price (50+) is required and must be a valid number >= 0.' });
+      setAlertMsg({ type: 'error', text: 'Wholesale Market Price (50+) is required and must be a valid number >= 0.' });
+      setTimeout(() => setAlertMsg(null), 4000);
+      return;
+    }
+    if (isNaN(wsPrice) || wsPrice < 0) {
+      setAlertMsg({ type: 'error', text: 'Page Owner Price (1–49) is required and must be a valid number >= 0.' });
       setTimeout(() => setAlertMsg(null), 4000);
       return;
     }
     if (isNaN(retPrice) || retPrice < 0) {
-      setAlertMsg({ type: 'error', text: 'Retail price is required and must be a valid number >= 0.' });
+      setAlertMsg({ type: 'error', text: 'Website Price is required and must be a valid number >= 0.' });
+      setTimeout(() => setAlertMsg(null), 4000);
+      return;
+    }
+    if (cashPrice !== undefined && (isNaN(cashPrice) || cashPrice < 0)) {
+      setAlertMsg({ type: 'error', text: 'Cash Price must be a valid number >= 0.' });
       setTimeout(() => setAlertMsg(null), 4000);
       return;
     }
@@ -856,15 +997,25 @@ export const ProductManagement: React.FC = () => {
 
       const normBc = normalizeBarcode(rawBc);
       const normBrand = getCanonicalBrandName(editingProduct.brand) || editingProduct.brand;
+      const cleanMetaTitle = (editingProduct.metaTitle || editingProduct.seoTitle || '').trim();
+      const cleanMetaDesc = (editingProduct.metaDescription || '').trim();
+      const cleanAltText = (editingProduct.imageAltText || editingProduct.altText || '').trim();
+
       const updatedProd: Product = {
         ...editingProduct,
         importPrice: impPrice,
-        wholesalePrice: wsPrice,
         wholesalePrice50Plus: ws50Price,
+        wholesalePrice: wsPrice,
         retailPrice: retPrice,
+        cashPrice: cashPrice,
         discountRetailPrice: discPrice,
         price: retPrice,
         discountPrice: discPrice,
+        metaTitle: cleanMetaTitle,
+        seoTitle: cleanMetaTitle,
+        metaDescription: cleanMetaDesc,
+        imageAltText: cleanAltText,
+        altText: cleanAltText,
         brand: normBrand,
         barcode: rawBc,
         barcodeNormalized: normBc
@@ -1102,13 +1253,25 @@ export const ProductManagement: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#E91E8C]">
             <Package size={13} />
-            <span>Skincare Catalog & Operations</span>
+            <span>Product List & Operations</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Product & Inventory Management</h2>
           <p className="text-xs text-slate-500 mt-1">Live store catalog, physical barcode auditing, multi-warehouse stock levels, and Gemini AI copywriting.</p>
         </div>
 
         <div className="flex gap-2 flex-wrap items-center">
+          {hasSuperAdminAccess && (
+            <button 
+              type="button"
+              onClick={handleDownloadCSV}
+              className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-2xl text-xs font-extrabold cursor-pointer transition flex items-center gap-2 shadow-sm"
+              title="Download complete product list as CSV (Super Admin Only)"
+            >
+              <Download size={14} className="text-emerald-600" />
+              <span>Download CSV</span>
+            </button>
+          )}
+
           <button 
             type="button"
             onClick={handleRunBarcodeAudit}
@@ -1790,7 +1953,33 @@ export const ProductManagement: React.FC = () => {
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 p-3 bg-gray-50 rounded-2xl border border-gray-100/50">
                       <div>
-                        <span className="text-[9px] text-gray-400 block uppercase font-bold">Base Retail Price</span>
+                        <span className="text-[9px] text-gray-400 block uppercase font-bold">1. Import Cost</span>
+                        <span className="font-bold font-mono text-slate-700 text-xs sm:text-sm">
+                          ৳{(selectedProductForPopup.importPrice ?? Math.round(selectedProductForPopup.price * 0.7)).toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-gray-400 block uppercase font-bold">2. Wholesale Market</span>
+                        <span className="font-black font-mono text-indigo-700 text-xs sm:text-sm">
+                          ৳{(selectedProductForPopup.wholesalePrice50Plus ?? Math.round(selectedProductForPopup.price * 0.78)).toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-gray-400 block uppercase font-bold">3. Cash Price</span>
+                        <span className="font-black font-mono text-slate-800 text-xs sm:text-sm">
+                          {selectedProductForPopup.cashPrice 
+                            ? `৳${selectedProductForPopup.cashPrice.toLocaleString()}` 
+                            : 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-gray-400 block uppercase font-bold">4. Page Owner Price</span>
+                        <span className="font-bold font-mono text-blue-700 text-xs sm:text-sm">
+                          ৳{(selectedProductForPopup.wholesalePrice ?? Math.round(selectedProductForPopup.price * 0.85)).toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-gray-400 block uppercase font-bold">5. Website Price</span>
                         <span className="font-black font-mono text-gray-900 text-xs sm:text-sm">৳{(selectedProductForPopup.retailPrice || selectedProductForPopup.price).toLocaleString()}</span>
                       </div>
                       <div>
@@ -1801,27 +1990,9 @@ export const ProductManagement: React.FC = () => {
                             : 'No Promo'}
                         </span>
                       </div>
-                      <div>
-                        <span className="text-[9px] text-gray-400 block uppercase font-bold">Import Cost (Admin)</span>
-                        <span className="font-bold font-mono text-slate-700 text-xs sm:text-sm">
-                          ৳{(selectedProductForPopup.importPrice ?? Math.round(selectedProductForPopup.price * 0.7)).toLocaleString()}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-gray-400 block uppercase font-bold">Wholesale (1–49)</span>
-                        <span className="font-bold font-mono text-blue-700 text-xs sm:text-sm">
-                          ৳{(selectedProductForPopup.wholesalePrice ?? Math.round(selectedProductForPopup.price * 0.85)).toLocaleString()}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-gray-400 block uppercase font-bold">Wholesale (50+)</span>
-                        <span className="font-black font-mono text-indigo-700 text-xs sm:text-sm">
-                          ৳{(selectedProductForPopup.wholesalePrice50Plus ?? Math.round(selectedProductForPopup.price * 0.78)).toLocaleString()}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-gray-400 block uppercase font-bold">Current Stock Level</span>
-                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-black ${selectedProductForPopup.stock <= 5 ? 'bg-rose-50 text-rose-700 border border-rose-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
+                      <div className="col-span-2 sm:col-span-3 pt-1 border-t border-gray-200/60 flex items-center justify-between">
+                        <span className="text-[9px] text-gray-400 uppercase font-bold">Warehouse Stock</span>
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-mono font-black ${selectedProductForPopup.stock <= 5 ? 'bg-rose-50 text-rose-700 border border-rose-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
                           {selectedProductForPopup.stock} Units
                         </span>
                       </div>
@@ -2207,138 +2378,21 @@ export const ProductManagement: React.FC = () => {
                     />
                   </div>
                 </div>
-
-                <div>
-                  <label className="block text-gray-600 font-bold mb-1">
-                    Low Stock Alert Threshold (Units)
-                  </label>
-                  <input 
-                    type="number" 
-                    min="1"
-                    value={editingProduct.lowStockThreshold ?? 5}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, lowStockThreshold: Number(e.target.value) })}
-                    className="w-28 bg-white text-gray-800 px-3 py-1.5 rounded-lg border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold"
-                  />
-                  <span className="text-[9px] text-gray-400 ml-2">Triggers low stock alert in inventory management.</span>
-                </div>
               </div>
 
-              {/* Product Pricing System (BDT ৳) & Warehouse Stock */}
-              <div className="bg-pink-50/10 p-4 rounded-2xl border border-pink-100 space-y-3">
+              {/* 1: Warehouse Stock & Inventory Section */}
+              <div className="bg-blue-50/20 p-4 rounded-2xl border border-blue-100 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <DollarSign size={14} className="text-[#E91E8C]" />
-                    <span>Product Pricing & Wholesale Tiers (BDT ৳)</span>
+                    <Package size={14} className="text-blue-600" />
+                    <span>Warehouse Stock & Inventory (Units)</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-semibold">Tier-based dynamic pricing</span>
+                  <span className="text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                    Physical Stock
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {/* 1. Import Cost Price */}
-                  <div>
-                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
-                      Import / Purchase Cost (৳) *
-                    </label>
-                    <input 
-                      type="number" 
-                      required
-                      min="0"
-                      step="any"
-                      placeholder="e.g. 800"
-                      value={editingProduct.importPrice ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
-                        setEditingProduct({ ...editingProduct, importPrice: val });
-                      }}
-                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
-                    />
-                    <span className="text-[9px] text-gray-400 block mt-0.5">Confidential cost per unit</span>
-                  </div>
-
-                  {/* 2. Wholesale Price 1-49 */}
-                  <div>
-                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
-                      Wholesale Price (1–49 Qty) (৳) *
-                    </label>
-                    <input 
-                      type="number" 
-                      required
-                      min="0"
-                      step="any"
-                      placeholder="e.g. 1000"
-                      value={editingProduct.wholesalePrice ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
-                        setEditingProduct({ ...editingProduct, wholesalePrice: val });
-                      }}
-                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
-                    />
-                    <span className="text-[9px] text-gray-400 block mt-0.5">Wholesale unit price for small bulk</span>
-                  </div>
-
-                  {/* 3. Wholesale Price 50+ */}
-                  <div>
-                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
-                      Wholesale Price (50+ Qty) (৳) *
-                    </label>
-                    <input 
-                      type="number" 
-                      required
-                      min="0"
-                      step="any"
-                      placeholder="e.g. 900"
-                      value={editingProduct.wholesalePrice50Plus ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
-                        setEditingProduct({ ...editingProduct, wholesalePrice50Plus: val });
-                      }}
-                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
-                    />
-                    <span className="text-[9px] text-gray-400 block mt-0.5">Wholesale unit price for volume (50+)</span>
-                  </div>
-
-                  {/* 4. Retail Price */}
-                  <div>
-                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
-                      Retail Selling Price (৳) *
-                    </label>
-                    <input 
-                      type="number" 
-                      required
-                      min="0"
-                      step="any"
-                      placeholder="e.g. 1200"
-                      value={editingProduct.retailPrice ?? editingProduct.price ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
-                        setEditingProduct({ ...editingProduct, retailPrice: val, price: val });
-                      }}
-                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
-                    />
-                    <span className="text-[9px] text-gray-400 block mt-0.5">Normal retail selling price</span>
-                  </div>
-
-                  {/* 5. Discount Retail Price (Optional) */}
-                  <div>
-                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
-                      Discount Retail Price (৳ Promo)
-                    </label>
-                    <input 
-                      type="number" 
-                      min="0"
-                      step="any"
-                      placeholder="e.g. 1100 (Optional)"
-                      value={editingProduct.discountRetailPrice ?? editingProduct.discountPrice ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value === '' ? undefined : Number(e.target.value);
-                        setEditingProduct({ ...editingProduct, discountRetailPrice: val, discountPrice: val });
-                      }}
-                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
-                    />
-                    <span className="text-[9px] text-gray-400 block mt-0.5">Must be less than regular retail</span>
-                  </div>
-
-                  {/* 6. Warehouse Stock */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
                       Warehouse Stock (Units) *
@@ -2353,9 +2407,250 @@ export const ProductManagement: React.FC = () => {
                         const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
                         setEditingProduct({ ...editingProduct, stock: val });
                       }}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-blue-200 outline-none focus:border-blue-500 font-mono font-bold text-xs shadow-xs"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Available physical inventory units in warehouse</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      Low Stock Alert Threshold (Units)
+                    </label>
+                    <input 
+                      type="number" 
+                      min="1"
+                      value={editingProduct.lowStockThreshold ?? 5}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, lowStockThreshold: Number(e.target.value) })}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-blue-200 outline-none focus:border-blue-500 font-mono font-bold text-xs shadow-xs"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Triggers low stock alert when quantity drops below this</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2: Product Pricing & Wholesale Tiers (BDT ৳) */}
+              <div className="bg-pink-50/10 p-4 rounded-2xl border border-pink-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <DollarSign size={14} className="text-[#E91E8C]" />
+                    <span>Product Pricing & Wholesale Tiers (BDT ৳)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold">Tier-based dynamic pricing</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {/* 1: Import Cost */}
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      1. Import Cost (৳) *
+                    </label>
+                    <input 
+                      type="number" 
+                      required
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 800"
+                      value={editingProduct.importPrice ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, importPrice: val });
+                      }}
                       className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
                     />
-                    <span className="text-[9px] text-gray-400 block mt-0.5">Available physical inventory units</span>
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Confidential purchase/import cost</span>
+                  </div>
+
+                  {/* 2: Wholesale Market Price */}
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      2. Wholesale Market Price (৳) *
+                    </label>
+                    <input 
+                      type="number" 
+                      required
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 900"
+                      value={editingProduct.wholesalePrice50Plus ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, wholesalePrice50Plus: val });
+                      }}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Wholesale volume price (50+ units)</span>
+                  </div>
+
+                  {/* 3: Cash Price */}
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      3. Cash Price (৳)
+                    </label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 1150 (Optional)"
+                      value={editingProduct.cashPrice ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? undefined : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, cashPrice: val });
+                      }}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Instant cash / spot sale unit price</span>
+                  </div>
+
+                  {/* 4: Page Owner Price */}
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      4. Page Owner Price (৳) *
+                    </label>
+                    <input 
+                      type="number" 
+                      required
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 1000"
+                      value={editingProduct.wholesalePrice ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, wholesalePrice: val });
+                      }}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Wholesale price for page owners (1–49 units)</span>
+                  </div>
+
+                  {/* 5: Website Price */}
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      5. Website Price (৳) *
+                    </label>
+                    <input 
+                      type="number" 
+                      required
+                      min="0"
+                      step="any"
+                      placeholder="e.g. 1200"
+                      value={editingProduct.retailPrice ?? editingProduct.price ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                        setEditingProduct({ ...editingProduct, retailPrice: val, price: val });
+                      }}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">Standard website customer retail price</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Promotional Discount Price Section */}
+              <div className="bg-rose-50/20 p-4 rounded-2xl border border-rose-100/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Tag size={14} className="text-[#E91E8C]" />
+                    <span>Discount Retail Price (৳ Promo)</span>
+                  </span>
+                  <span className="text-[10px] text-pink-600 font-semibold bg-pink-50 px-2 py-0.5 rounded-md border border-pink-100">
+                    Promo Offer
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                    Discount Retail Price (৳ Promo)
+                  </label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    step="any"
+                    placeholder="e.g. 1100 (Optional promo discount price)"
+                    value={editingProduct.discountRetailPrice ?? editingProduct.discountPrice ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? undefined : Number(e.target.value);
+                      setEditingProduct({ ...editingProduct, discountRetailPrice: val, discountPrice: val });
+                    }}
+                    className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] font-mono font-bold text-xs"
+                  />
+                  <span className="text-[9px] text-gray-400 block mt-0.5">
+                    Leave blank if no promo discount is active. If set, must be strictly less than normal Retail Selling Price (৳).
+                  </span>
+                </div>
+              </div>
+
+              {/* 3: SEO Meta Title, Meta Description & Image Alt Text Section */}
+              <div className="bg-indigo-50/20 p-4 rounded-2xl border border-indigo-100/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Globe size={14} className="text-indigo-600" />
+                    <span>SEO Meta Title, Meta Description & Image Alt Text</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                    Search & Google SEO
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Meta Title */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-gray-700 font-extrabold text-[11px]">
+                        Product Meta Title (SEO Title)
+                      </label>
+                      <span className="text-[10px] text-gray-400 font-mono">
+                        {(editingProduct.metaTitle || editingProduct.seoTitle || '').length}/60 chars
+                      </span>
+                    </div>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Buy Authentic Beauty of Joseon Relief Sun Rice Sunscreen in Bangladesh"
+                      value={editingProduct.metaTitle || editingProduct.seoTitle || ''}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, metaTitle: e.target.value, seoTitle: e.target.value })}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-indigo-200 outline-none focus:border-indigo-600 text-xs font-medium"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">
+                      Recommended 50–60 characters for optimal Google search snippet display.
+                    </span>
+                  </div>
+
+                  {/* Meta Description */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-gray-700 font-extrabold text-[11px]">
+                        Product Meta Description
+                      </label>
+                      <span className="text-[10px] text-gray-400 font-mono">
+                        {(editingProduct.metaDescription || '').length}/160 chars
+                      </span>
+                    </div>
+                    <textarea 
+                      rows={2}
+                      placeholder="e.g. Shop 100% authentic Beauty of Joseon Sunscreen in BD. Infused with 30% rice extract and probiotics for lightweight, non-greasy UV protection. Fast delivery across Dhaka & BD."
+                      value={editingProduct.metaDescription || ''}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, metaDescription: e.target.value })}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-indigo-200 outline-none focus:border-indigo-600 text-xs leading-relaxed"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">
+                      Recommended 140–160 characters describing the product for search engine clicks.
+                    </span>
+                  </div>
+
+                  {/* Image Alt Text */}
+                  <div>
+                    <label className="block text-gray-700 font-extrabold text-[11px] mb-1">
+                      Image Alt Text (SEO Alt Tag)
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Beauty of Joseon Relief Sun Rice + Probiotics SPF50+ PA++++ 50ml bottle packaging"
+                      value={editingProduct.imageAltText || (editingProduct as any).altText || ''}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, imageAltText: e.target.value, altText: e.target.value })}
+                      className="w-full bg-white text-gray-900 px-3 py-2 rounded-xl border border-indigo-200 outline-none focus:border-indigo-600 text-xs font-medium"
+                    />
+                    <span className="text-[9px] text-gray-400 block mt-0.5">
+                      Describes image content for Google Image Search, SEO rankings, and accessibility.
+                    </span>
                   </div>
                 </div>
               </div>
@@ -3145,7 +3440,7 @@ export const ProductManagement: React.FC = () => {
               {/* Price & Stock Adjustment */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 bg-pink-50/10 p-3 rounded-2xl border border-pink-100">
                 <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Import Cost (৳) *</label>
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">1. Import Cost (৳) *</label>
                   <input
                     type="number"
                     min="0"
@@ -3163,7 +3458,62 @@ export const ProductManagement: React.FC = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Retail Price (৳) *</label>
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">2. Wholesale Market Price (৳) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={confirmationProductData.wholesalePrice50Plus ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        wholesalePrice50Plus: val
+                      });
+                    }}
+                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">3. Cash Price (৳)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="Optional"
+                    value={confirmationProductData.cashPrice ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? undefined : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        cashPrice: val
+                      });
+                    }}
+                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">4. Page Owner Price (৳) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={confirmationProductData.wholesalePrice ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
+                      setConfirmationProductData({
+                        ...confirmationProductData,
+                        wholesalePrice: val
+                      });
+                    }}
+                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">5. Website Price (৳) *</label>
                   <input
                     type="number"
                     min="0"
@@ -3182,43 +3532,7 @@ export const ProductManagement: React.FC = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Wholesale 1-49 (৳) *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={confirmationProductData.wholesalePrice ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
-                      setConfirmationProductData({
-                        ...confirmationProductData,
-                        wholesalePrice: val
-                      });
-                    }}
-                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Wholesale 50+ (৳) *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={confirmationProductData.wholesalePrice50Plus ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value === '' ? ('' as any) : Number(e.target.value);
-                      setConfirmationProductData({
-                        ...confirmationProductData,
-                        wholesalePrice50Plus: val
-                      });
-                    }}
-                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Discount Price (৳)</label>
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Discount Promo (৳)</label>
                   <input
                     type="number"
                     min="0"
@@ -3237,8 +3551,8 @@ export const ProductManagement: React.FC = () => {
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Initial Stock *</label>
+                <div className="space-y-1 sm:col-span-3">
+                  <label className="block text-[10px] uppercase font-extrabold text-gray-700">Warehouse Initial Stock (Units) *</label>
                   <input
                     type="number"
                     min="0"
@@ -3250,7 +3564,7 @@ export const ProductManagement: React.FC = () => {
                         stock: val
                       });
                     }}
-                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-pink-200 outline-none focus:border-[#E91E8C] text-xs"
+                    className="w-full bg-white text-gray-900 font-mono font-bold px-3 py-1.5 rounded-xl border border-blue-200 outline-none focus:border-blue-500 text-xs"
                   />
                 </div>
               </div>

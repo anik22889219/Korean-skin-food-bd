@@ -6,7 +6,7 @@ import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, doc, getDoc, setDoc, getDocs, runTransaction, query, where, deleteDoc } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, setDoc, getDocs, runTransaction, query, where, deleteDoc, orderBy } from "firebase/firestore";
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
 
@@ -2296,302 +2296,6 @@ app.post("/api/functions/placeOrder", async (req, res) => {
   }
 });
 
-// 1B. posCheckout Endpoint (Atomic POS in-store checkout with Payment Due Support)
-app.post("/api/functions/posCheckout", async (req, res) => {
-  const {
-    sessionId,
-    userId,
-    userRole,
-    operatorName,
-    customerName,
-    customerPhone,
-    customerAddress,
-    deliveryArea,
-    pricingMode = "retail",
-    items,
-    idempotencyKey,
-    paidAmount,
-    paymentMethod,
-    accountCode,
-    notes
-  } = req.body;
-
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: "Cart cannot be empty" });
-  }
-
-  if (!sessionId || !userId) {
-    return res.status(400).json({ error: "Missing sessionId or userId" });
-  }
-
-  if (!db) {
-    return res.status(500).json({ error: "Database not initialized" });
-  }
-
-  const orderId = req.body.orderId || ("POS-" + Math.floor(100000 + Math.random() * 900000));
-  const effectiveIdempotencyKey = idempotencyKey || `pos_${orderId}_${Date.now()}`;
-
-  try {
-    const committedOrder = await runTransaction(db, async (transaction) => {
-      // 1. Session verification & ownership
-      const sessionRef = doc(db, "pos_sessions", sessionId);
-      const sessionDoc = await transaction.get(sessionRef);
-      if (!sessionDoc.exists()) {
-        throw new Error(`POS session "${sessionId}" not found`);
-      }
-      const sessionData = sessionDoc.data();
-      if (sessionData.userId !== userId) {
-        throw new Error("Unauthorized POS session ownership");
-      }
-
-      // Wholesale role guard
-      const allowedRoles = ["admin", "super_admin", "inventory_manager"];
-      if (pricingMode === "wholesale" && !allowedRoles.includes(userRole || sessionData.role)) {
-        throw new Error("Unauthorized: Only Admins or Inventory Managers can initiate wholesale checkout");
-      }
-
-      // 2. Idempotency Check
-      const orderRef = doc(db, "orders", orderId);
-      const existingOrderDoc = await transaction.get(orderRef);
-      if (existingOrderDoc.exists()) {
-        return existingOrderDoc.data();
-      }
-
-      // 3. Aggregate item quantities per product to calculate tiered pricing and check aggregate stock
-      const aggregatedQtyMap: Record<string, number> = {};
-      for (const it of items) {
-        if (it.productId) {
-          aggregatedQtyMap[it.productId] = (aggregatedQtyMap[it.productId] || 0) + Number(it.quantity || 0);
-        }
-      }
-
-      const validatedProducts: Array<{
-        ref: any;
-        data: any;
-        currentStock: number;
-        newStock: number;
-        quantity: number;
-        unitPrice: number;
-        barcode?: string;
-      }> = [];
-
-      for (const item of items) {
-        const prodRef = doc(db, "products", item.productId);
-        const prodDoc = await transaction.get(prodRef);
-
-        if (!prodDoc.exists()) {
-          throw new Error(`Product "${item.name || item.productId}" does not exist.`);
-        }
-
-        const prodData: any = { id: prodDoc.id, ...prodDoc.data() };
-        const currentStock = Number(prodData.stock ?? 0);
-        const totalReqQty = aggregatedQtyMap[item.productId] || item.quantity;
-
-        if (currentStock < totalReqQty) {
-          throw new Error(`Insufficient stock for "${prodData.name}". Available: ${currentStock}, Total Requested: ${totalReqQty}`);
-        }
-
-        // Authoritative price calculation
-        let unitPrice = 0;
-        if (pricingMode === "wholesale") {
-          const ws1to49 = prodData.wholesalePrice ? Number(prodData.wholesalePrice) : 0;
-          const ws50Plus = prodData.wholesalePrice50Plus ? Number(prodData.wholesalePrice50Plus) : ws1to49;
-          if (ws1to49 <= 0 && ws50Plus <= 0) {
-            throw new Error(`Wholesale price not configured for "${prodData.name}".`);
-          }
-          unitPrice = totalReqQty >= 50 && ws50Plus > 0 ? ws50Plus : ws1to49;
-        } else {
-          const retail = Number(prodData.retailPrice ?? prodData.price ?? 0);
-          const discount = prodData.discountRetailPrice !== undefined && Number(prodData.discountRetailPrice) > 0 && Number(prodData.discountRetailPrice) < retail
-            ? Number(prodData.discountRetailPrice)
-            : undefined;
-          unitPrice = discount ?? retail;
-        }
-
-        validatedProducts.push({
-          ref: prodRef,
-          data: prodData,
-          currentStock,
-          newStock: currentStock - item.quantity,
-          quantity: item.quantity,
-          unitPrice,
-          barcode: item.barcode || prodData.barcode
-        });
-      }
-
-      // 4. Calculate final totals & Payment / Due breakdown
-      const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
-      const deliveryCharge = deliveryArea === "inside" ? 60 : deliveryArea === "outside" ? 120 : 0;
-      const totalAmount = itemsSubtotal + (validatedProducts.length > 0 ? deliveryCharge : 0);
-      const nowIso = new Date().toISOString();
-
-      const tendered = paidAmount !== undefined ? Number(paidAmount) : totalAmount;
-      const totalPaid = Math.max(0, Math.min(tendered, totalAmount));
-      const dueAmount = Math.max(0, totalAmount - totalPaid);
-      const changeAmount = Math.max(0, tendered - totalAmount);
-      const paymentStatus = dueAmount === 0 ? "PAID" : totalPaid > 0 ? "PARTIALLY_PAID" : "UNPAID";
-      const isPaid = paymentStatus === "PAID";
-      const effectiveMethod = paymentMethod || (dueAmount === totalAmount ? "CREDIT_DUE" : "CASH");
-      const effectiveAccount = accountCode || (
-        effectiveMethod === "BKASH" ? "BKASH_MERCHANT" :
-        effectiveMethod === "NAGAD" ? "NAGAD_MERCHANT" :
-        effectiveMethod === "CARD" || effectiveMethod === "BANK_TRANSFER" ? "BRAC_BANK" :
-        "CASH_REGISTER"
-      );
-
-      const cogsAmount = validatedProducts.reduce((sum, p) => {
-        const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
-        return sum + (cost * p.quantity);
-      }, 0);
-      const grossProfit = Math.max(0, totalAmount - cogsAmount);
-
-      const paymentTransactions: any[] = [];
-
-      // Record payment & financial transaction if money collected
-      if (totalPaid > 0) {
-        const payTxId = "PAY-" + Math.floor(100000 + Math.random() * 900000);
-        const payTx = {
-          id: payTxId,
-          orderId,
-          type: "POS_PAYMENT",
-          method: effectiveMethod,
-          amount: totalPaid,
-          note: notes || `POS Checkout tender ৳${totalPaid} (${effectiveMethod})`,
-          receivedBy: operatorName || "POS Operator",
-          receivedAt: nowIso,
-          source: "POS",
-          idempotencyKey: effectiveIdempotencyKey,
-          accountCode: effectiveAccount,
-          customerPhone: customerPhone || "Walk-In",
-          customerName: customerName || "In-Person Customer"
-        };
-        paymentTransactions.push(payTx);
-        transaction.set(doc(db, "payment_transactions", payTxId), payTx);
-
-        const finTxId = "FIN-REV-" + Math.floor(100000 + Math.random() * 900000);
-        const finTx = {
-          id: finTxId,
-          transactionType: "MONEY_IN",
-          category: "REVENUE",
-          amount: totalPaid,
-          date: nowIso.split("T")[0],
-          accountCode: effectiveAccount,
-          description: `POS Checkout Revenue - Order #${orderId} (${effectiveMethod})`,
-          performedBy: operatorName || "POS Operator",
-          referenceType: "ORDER",
-          referenceId: orderId,
-          createdAt: nowIso
-        };
-        transaction.set(doc(db, "financial_transactions", finTxId), finTx);
-
-        // Write Idempotency Lock
-        const idempRef = doc(db, "payment_idempotency", effectiveIdempotencyKey);
-        transaction.set(idempRef, {
-          idempotencyKey: effectiveIdempotencyKey,
-          orderId,
-          amount: totalPaid,
-          payTxId,
-          createdAt: nowIso
-        });
-      }
-
-      // 5. Construct POS Order
-      const newOrder = {
-        id: orderId,
-        customerName: (customerName || "").trim() || "In-Person Customer",
-        customerPhone: (customerPhone || "").trim() || "Walk-In",
-        address: (customerAddress || "").trim()
-          ? `${customerAddress.trim()} (${deliveryArea === "inside" ? "Inside Dhaka" : deliveryArea === "outside" ? "Outside Dhaka" : "In-Store Checkout"})`
-          : "In-Store Checkout Counter",
-        items: validatedProducts.map((p) => ({
-          productId: p.data.id,
-          name: p.data.name,
-          price: p.unitPrice,
-          quantity: p.quantity,
-          scannedQuantity: p.quantity,
-          barcode: p.barcode
-        })),
-        totalAmount,
-        totalPaid,
-        dueAmount,
-        changeAmount,
-        paymentStatus,
-        isPaid,
-        status: "delivered",
-        order_source: "POS",
-        stock_deducted: true,
-        createdAt: nowIso,
-        paymentMethod: effectiveMethod,
-        sessionType: "POS",
-        cogsAmount,
-        grossProfit,
-        paymentTransactions
-      };
-
-      // 6. Write Order
-      transaction.set(orderRef, newOrder);
-
-      // 7. Deduct stock & create logs/movements
-      for (const p of validatedProducts) {
-        transaction.update(p.ref, {
-          stock: p.newStock,
-          updated_at: nowIso
-        });
-
-        const logRef = doc(collection(db, "inventory_logs"));
-        transaction.set(logRef, {
-          id: logRef.id,
-          productId: p.data.id,
-          productName: p.data.name,
-          type: "sale",
-          quantity: p.newStock,
-          change: -p.quantity,
-          prevStock: p.currentStock,
-          newStock: p.newStock,
-          note: `POS Checkout - Order #${orderId}`,
-          source: "POS",
-          orderId,
-          sessionId,
-          userId,
-          performedBy: operatorName || "POS Operator",
-          timestamp: nowIso,
-          createdAt: nowIso
-        });
-
-        const movementRef = doc(collection(db, "stock_movements"));
-        transaction.set(movementRef, {
-          id: movementRef.id,
-          productId: p.data.id,
-          productName: p.data.name,
-          orderId,
-          quantity: -p.quantity,
-          type: "sale",
-          source: "POS",
-          performedBy: operatorName || "POS Operator",
-          previousStock: p.currentStock,
-          newStock: p.newStock,
-          reason: "POS In-Store Checkout",
-          sessionId,
-          timestamp: nowIso,
-          createdAt: nowIso
-        });
-      }
-
-      return newOrder;
-    });
-
-    res.json({
-      success: true,
-      order: committedOrder,
-      orderId,
-      message: `POS order ${orderId} completed successfully`
-    });
-  } catch (error: any) {
-    console.error("posCheckout transaction failed:", error);
-    res.status(400).json({ error: error.message || "Transaction aborted" });
-  }
-});
-
 // 1C. Finance Collect Due Endpoint
 app.post("/api/finance/collect-due", async (req, res) => {
   const { orderId, amount, method = "CASH", accountCode, note, receivedBy = "Store Staff", source = "POS", idempotencyKey } = req.body;
@@ -2625,16 +2329,30 @@ app.post("/api/finance/collect-due", async (req, res) => {
         return { isDuplicate: true, ...idempDoc.data() };
       }
 
-      const orderRef = doc(db, "orders", orderId);
-      const orderDoc = await transaction.get(orderRef);
+      let isWholesale = false;
+      let orderRef = doc(db, "orders", orderId);
+      let orderDoc = await transaction.get(orderRef);
       if (!orderDoc.exists()) {
-        throw new Error(`Order #${orderId} not found`);
+        orderRef = doc(db, "wholesale_orders", orderId);
+        orderDoc = await transaction.get(orderRef);
+        if (!orderDoc.exists()) {
+          throw new Error(`Order #${orderId} not found in retail or wholesale orders`);
+        }
+        isWholesale = true;
       }
 
       const orderData = orderDoc.data() as any;
-      const totalAmount = Number(orderData.totalAmount || 0);
-      const currentPaid = Number(orderData.totalPaid ?? (orderData.isPaid ? totalAmount : 0));
-      const currentDue = Number(orderData.dueAmount ?? Math.max(0, totalAmount - currentPaid));
+      const totalAmount = isWholesale
+        ? Number(orderData.finalAmount ?? ((orderData.totalWholesaleCost || 0) + (orderData.deliveryCharge || 0)))
+        : Number(orderData.totalAmount || 0);
+
+      const currentPaid = isWholesale
+        ? Number(orderData.paidAmount ?? (orderData.paymentStatus === 'paid' ? totalAmount : 0))
+        : Number(orderData.totalPaid ?? (orderData.isPaid ? totalAmount : 0));
+
+      const currentDue = isWholesale
+        ? Number(orderData.dueAmount ?? Math.max(0, totalAmount - currentPaid))
+        : Number(orderData.dueAmount ?? Math.max(0, totalAmount - currentPaid));
 
       if (currentDue <= 0) {
         throw new Error(`Order #${orderId} is already fully paid. No outstanding due.`);
@@ -2643,22 +2361,34 @@ app.post("/api/finance/collect-due", async (req, res) => {
       const paymentToApply = Math.min(Number(amount), currentDue);
       const newTotalPaid = currentPaid + paymentToApply;
       const newDueAmount = Math.max(0, totalAmount - newTotalPaid);
-      const newPaymentStatus = newDueAmount === 0 ? "PAID" : "PARTIALLY_PAID";
+      const newPaymentStatus = newDueAmount === 0 
+        ? (isWholesale ? "paid" : "PAID") 
+        : (isWholesale ? "partial" : "PARTIALLY_PAID");
+
+      const custPhone = isWholesale
+        ? (orderData.customer?.contactNumber || (orderData.checkoutInfo as any)?.deliveryPhone || "")
+        : (orderData.customerPhone || "");
+
+      const custName = isWholesale
+        ? (orderData.customer?.businessName 
+            ? `${orderData.customer.businessName} (${orderData.customer.customerName || 'Wholesale'})` 
+            : (orderData.customer?.customerName || "Wholesale Customer"))
+        : (orderData.customerName || "");
 
       const payTx = {
         id: payTxId,
         orderId,
-        type: "POS_DUE_COLLECTION",
+        type: isWholesale ? "WHOLESALE_PAYMENT" : "POS_DUE_COLLECTION",
         method,
         amount: paymentToApply,
-        note: note || `Due collection of ৳${paymentToApply} for Order #${orderId}`,
+        note: note || `Due collection of ৳${paymentToApply} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId}`,
         receivedBy,
         receivedAt: nowIso,
-        source,
+        source: isWholesale ? "WHOLESALE" : source,
         idempotencyKey: effectiveIdempotencyKey,
         accountCode: effectiveAccount,
-        customerPhone: orderData.customerPhone,
-        customerName: orderData.customerName
+        customerPhone: custPhone,
+        customerName: custName
       };
 
       const finTx = {
@@ -2668,23 +2398,69 @@ app.post("/api/finance/collect-due", async (req, res) => {
         amount: paymentToApply,
         date: nowIso.split("T")[0],
         accountCode: effectiveAccount,
-        description: `Due Collection ৳${paymentToApply} for Order #${orderId} (${method})`,
+        description: `Due Collection ৳${paymentToApply} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId} (${method})`,
         performedBy: receivedBy,
-        referenceType: "ORDER",
+        referenceType: isWholesale ? "WHOLESALE_ORDER" : "ORDER",
         referenceId: orderId,
         createdAt: nowIso
       };
 
-      const updatedOrder = {
-        ...orderData,
-        totalPaid: newTotalPaid,
-        dueAmount: newDueAmount,
-        paymentStatus: newPaymentStatus,
-        isPaid: newPaymentStatus === "PAID",
-        paymentTransactions: [...(orderData.paymentTransactions || []), payTx]
-      };
+      let updatedOrder: any;
+      if (isWholesale) {
+        updatedOrder = {
+          ...orderData,
+          paidAmount: newTotalPaid,
+          dueAmount: newDueAmount,
+          paymentStatus: newPaymentStatus,
+          paymentTransactions: [...(orderData.paymentTransactions || []), payTx],
+          updatedAt: nowIso
+        };
+        transaction.set(orderRef, updatedOrder);
 
-      transaction.set(orderRef, updatedOrder);
+        // Update wholesale customer ledger if customer userId is available
+        const cleanUserId = orderData.customer?.userId || orderData.customer?.wholesaleCustomerId;
+        if (cleanUserId) {
+          const customerLedgerRef = doc(db, "wholesale_customers", String(cleanUserId).trim());
+          const customerSnap = await transaction.get(customerLedgerRef);
+          if (customerSnap.exists()) {
+            const custData = customerSnap.data();
+            const currentWholesalePaid = Number(custData.totalPaid || 0);
+            const newWholesalePaid = currentWholesalePaid + paymentToApply;
+            const currentWholesalePurchase = Number(custData.totalWholesalePurchase || 0);
+            const newWholesaleDue = Math.max(0, currentWholesalePurchase - newWholesalePaid);
+            transaction.update(customerLedgerRef, {
+              totalPaid: newWholesalePaid,
+              totalDue: newWholesaleDue,
+              updatedAt: nowIso
+            });
+          }
+        }
+
+        // Also record a wholesale_payments document for customer ledger page
+        const wsPaymentDoc = {
+          id: payTxId,
+          wholesaleCustomerId: cleanUserId || orderId,
+          orderId,
+          amount: paymentToApply,
+          paymentMethod: method,
+          accountCode: effectiveAccount,
+          reference: `Order #${orderId} Due Payment`,
+          notes: note || `Due collection via ${method}`,
+          collectedBy: receivedBy,
+          createdAt: nowIso
+        };
+        transaction.set(doc(db, "wholesale_payments", payTxId), wsPaymentDoc);
+      } else {
+        updatedOrder = {
+          ...orderData,
+          totalPaid: newTotalPaid,
+          dueAmount: newDueAmount,
+          paymentStatus: newPaymentStatus,
+          isPaid: newPaymentStatus === "PAID",
+          paymentTransactions: [...(orderData.paymentTransactions || []), payTx]
+        };
+        transaction.set(orderRef, updatedOrder);
+      }
       transaction.set(doc(db, "payment_transactions", payTxId), payTx);
       transaction.set(doc(db, "financial_transactions", finTxId), finTx);
       transaction.set(idempRef, {
@@ -5053,6 +4829,1271 @@ app.post("/api/functions/posCheckout", async (req, res) => {
     return res.status(400).json({
       success: false,
       error: err.message || "Failed to process POS checkout"
+    });
+  }
+});
+
+// =========================================================================
+// STEP 5 — WHOLESALE ORDER BACKEND & DATA MODEL ENDPOINTS
+// =========================================================================
+
+/**
+ * Helper to generate unique human-readable Wholesale Order Number
+ * e.g. WS-260902-8492
+ */
+function generateWholesaleOrderNumber(): string {
+  const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `WS-${dateStr}-${rand}`;
+}
+
+/**
+ * POST /api/wholesale/orders/create
+ * Authoritative Wholesale Order Creation & Recalculation Engine
+ */
+
+// ====== WHOLESALE PAYMENTS API (Step 7) ======
+
+app.get("/api/wholesale/payments/:wholesaleCustomerId", async (req, res) => {
+
+  if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
+
+  const { wholesaleCustomerId } = req.params;
+
+  try {
+    const q = query(collection(db, "wholesale_payments"), where("wholesaleCustomerId", "==", wholesaleCustomerId));
+    const snap = await getDocs(q);
+    const payments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    payments.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    return res.json({ success: true, payments });
+  } catch (err: any) {
+
+    console.error("[Wholesale Payment Engine] Error fetching payments:", err);
+
+    return res.status(500).json({ success: false, error: err.message || "Failed to fetch payments" });
+
+  }
+
+});
+
+
+app.post("/api/wholesale/payments", async (req, res) => {
+
+  if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
+
+  const { wholesaleCustomerId, amount, paymentMethod, reference, note, createdBy, orderId } = req.body;
+
+  if (!wholesaleCustomerId || typeof amount !== "number" || amount <= 0 || !paymentMethod || !createdBy) {
+
+    return res.status(400).json({ success: false, error: "Missing required fields" });
+
+  }
+
+  try {
+
+    const customerRef = doc(db, "wholesale_customers", wholesaleCustomerId);
+
+    const nowIso = new Date().toISOString();
+
+    const paymentId = `wp-${Date.now()}-${Math.floor(100+Math.random()*900)}`;
+
+    const paymentRef = doc(db, "wholesale_payments", paymentId);
+
+
+
+    const newPayment = await runTransaction(db, async (transaction: any) => {
+
+      const custSnap = await transaction.get(customerRef);
+
+      if (!custSnap.exists()) throw new Error("Wholesale customer not found");
+
+
+
+      const custData = custSnap.data();
+
+      const currentPaid = Number(custData.totalPaid || 0);
+
+      const currentDue = Number(custData.totalDue || 0);
+
+      const newPaid = currentPaid + amount;
+
+      const newDue = currentDue - amount;
+
+
+
+      transaction.update(customerRef, {
+
+        totalPaid: newPaid,
+
+        totalDue: newDue
+
+      });
+
+
+
+      const paymentDoc = {
+        id: paymentId,
+        wholesaleCustomerId,
+        amount,
+        paymentMethod,
+        reference: reference || "",
+        note: note || "",
+        createdBy,
+        previousDue: currentDue,
+        remainingDue: newDue,
+        createdAt: nowIso
+      };
+
+      if (orderId) (paymentDoc as any).orderId = orderId;
+
+
+
+      transaction.set(paymentRef, paymentDoc);
+
+      return paymentDoc;
+
+    });
+
+
+
+    return res.json({ success: true, payment: newPayment });
+
+  } catch (err: any) {
+
+    console.error("[Wholesale Payment Engine] Error adding payment:", err);
+
+    return res.status(500).json({ success: false, error: err.message || "Failed to process payment" });
+
+  }
+
+});
+
+
+app.post("/api/wholesale/orders/create", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({
+      success: false,
+      error: "Firestore database is not initialized on the server."
+    });
+  }
+
+  const {
+    userId,
+    items,
+    checkoutInfo,
+    deliveryCharge = 0,
+    customer: customerOverride,
+    idempotencyKey,
+    notes,
+    orderSource = 'wholesale_portal'
+  } = req.body;
+
+  // 1. Authenticate user identifier
+  if (!userId || typeof userId !== 'string' || !userId.trim()) {
+    return res.status(401).json({
+      success: false,
+      error: "User authentication required. Missing or invalid userId."
+    });
+  }
+
+  const cleanUserId = String(userId).trim();
+
+  // 2. Validate Items & Checkout Info structure
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: "Wholesale cart cannot be empty. Please include at least one product."
+    });
+  }
+
+  if (!checkoutInfo || typeof checkoutInfo !== 'object') {
+    return res.status(400).json({
+      success: false,
+      error: "Checkout information is required."
+    });
+  }
+
+  const normalizedCheckoutType = String(checkoutInfo.checkoutType || '').toUpperCase().trim();
+  const isCOD = normalizedCheckoutType === 'COD' || normalizedCheckoutType === 'COD_DIRECT';
+  const isParcel = normalizedCheckoutType === 'PARCEL' || normalizedCheckoutType === 'PARCEL_COURIER';
+
+  if (!isCOD && !isParcel) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid checkoutType. Must be 'COD' or 'PARCEL'."
+    });
+  }
+
+  // Validate checkout-specific fields
+  if (isCOD) {
+    if (!checkoutInfo.deliveryName || !String(checkoutInfo.deliveryName).trim()) {
+      return res.status(400).json({ success: false, error: "deliveryName is required for COD orders." });
+    }
+    if (!checkoutInfo.deliveryPhone || !String(checkoutInfo.deliveryPhone).trim()) {
+      return res.status(400).json({ success: false, error: "deliveryPhone is required for COD orders." });
+    }
+    if (!checkoutInfo.deliveryAddress || !String(checkoutInfo.deliveryAddress).trim()) {
+      return res.status(400).json({ success: false, error: "deliveryAddress is required for COD orders." });
+    }
+  } else if (isParcel) {
+    if (!checkoutInfo.parcelId || !String(checkoutInfo.parcelId).trim()) {
+      return res.status(400).json({ success: false, error: "parcelId is required for Parcel/Courier orders." });
+    }
+    if (!checkoutInfo.velouriaId || !String(checkoutInfo.velouriaId).trim()) {
+      return res.status(400).json({ success: false, error: "velouriaId is required for Parcel/Courier orders." });
+    }
+    if (!checkoutInfo.deliveryName || !String(checkoutInfo.deliveryName).trim()) {
+      return res.status(400).json({ success: false, error: "deliveryName (Receiver Name) is required for Parcel orders." });
+    }
+  }
+
+  const overallCodPrice = checkoutInfo.codPrice !== undefined && checkoutInfo.codPrice !== null
+    ? Math.max(0, Number(checkoutInfo.codPrice))
+    : 0;
+
+  try {
+    const nowIso = new Date().toISOString();
+    const effectiveIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim() : `ws-idem-${cleanUserId}-${Date.now()}`;
+
+    // 3. Pre-fetch User & Wholesale Customer Profiles
+    const wsCustomerRef = doc(db, 'wholesale_customers', cleanUserId);
+    const userRef = doc(db, 'users', cleanUserId);
+    
+    const [wsCustomerSnap, userSnap] = await Promise.all([
+      getDoc(wsCustomerRef),
+      getDoc(userRef)
+    ]);
+
+    const wsCustomerData = wsCustomerSnap.exists() ? wsCustomerSnap.data() : null;
+    const userData = userSnap.exists() ? userSnap.data() : null;
+
+    // Verify wholesale access authority (allow any authenticated user or registered partner)
+    const hasWholesaleAccess = 
+      Boolean(cleanUserId) ||
+      (wsCustomerData && (wsCustomerData.wholesaleAccess === true || wsCustomerData.status === 'active')) ||
+      (userData && (userData.wholesaleAccess === true || ['admin', 'super_admin', 'inventory_manager', 'staff'].includes(userData.role)));
+
+    if (!hasWholesaleAccess) {
+      return res.status(403).json({
+        success: false,
+        error: "Wholesale ordering access denied. Please log in to your wholesale account."
+      });
+    }
+
+    // Auto-create or ensure wholesale customer profile exists
+    if (!wsCustomerSnap.exists()) {
+      try {
+        await setDoc(wsCustomerRef, {
+          id: cleanUserId,
+          userId: cleanUserId,
+          name: userData?.name || customerOverride?.customerName || 'Wholesale Partner',
+          email: userData?.email || '',
+          phone: userData?.phone || customerOverride?.contactNumber || '',
+          businessName: userData?.businessName || customerOverride?.businessName || '',
+          wholesaleAccess: true,
+          tier: 'tier1_49',
+          status: 'active',
+          creditLimit: 50000,
+          currentDue: 0,
+          totalPaid: 0,
+          totalPurchasedBDT: 0,
+          createdAt: nowIso,
+          updatedAt: nowIso
+        }, { merge: true });
+      } catch (e) {
+        console.warn("[WholesaleOrder] Failed to auto-create wholesale customer record:", e);
+      }
+    }
+
+    const customerDetails = {
+      wholesaleCustomerId: cleanUserId,
+      userId: cleanUserId,
+      customerName: wsCustomerData?.name || userData?.name || customerOverride?.customerName || 'Wholesale Partner',
+      businessName: wsCustomerData?.businessName || userData?.businessName || customerOverride?.businessName || '',
+      pageName: wsCustomerData?.pageName || userData?.pageName || customerOverride?.pageName || '',
+      contactNumber: wsCustomerData?.phone || userData?.phone || customerOverride?.contactNumber || ''
+    };
+
+    // Calculate aggregated item quantities by product id
+    const aggregatedQuantities: Record<string, number> = {};
+    for (const item of items) {
+      if (!item.productId) {
+        return res.status(400).json({ success: false, error: "Item is missing productId." });
+      }
+      const qty = Number(item.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ success: false, error: `Invalid quantity for product ID ${item.productId}.` });
+      }
+      const pId = String(item.productId).trim();
+      aggregatedQuantities[pId] = (aggregatedQuantities[pId] || 0) + qty;
+    }
+
+    // 4. Authoritative Transaction for Stock Validation & Strict Pricing Recalculation
+    const committedOrder = await runTransaction(db, async (transaction: any) => {
+      // Idempotency check
+      console.log("[TX] Checking idempotency:", effectiveIdempotencyKey);
+      const idempRef = doc(db, 'payment_idempotency', effectiveIdempotencyKey);
+      const existingIdempDoc = await transaction.get(idempRef);
+      if (existingIdempDoc.exists()) {
+        const idempData = existingIdempDoc.data();
+        if (idempData?.orderId) {
+          const priorOrderRef = doc(db, 'wholesale_orders', idempData.orderId);
+          const priorOrderDoc = await transaction.get(priorOrderRef);
+          if (priorOrderDoc.exists()) {
+            return priorOrderDoc.data();
+          }
+        }
+      }
+
+      // Fetch all product records inside the transaction
+      console.log("[TX] Reading products:", Object.keys(aggregatedQuantities));
+      const productDocMap = new Map<string, any>();
+      for (const pId of Object.keys(aggregatedQuantities)) {
+        const pRef = doc(db, 'products', pId);
+        const pSnap = await transaction.get(pRef);
+        if (!pSnap.exists()) {
+          throw new Error(`Product with ID "${pId}" does not exist in store catalog.`);
+        }
+        productDocMap.set(pId, { id: pSnap.id, ...pSnap.data() });
+      }
+
+      // Validate stock for all products
+      for (const [pId, totalQty] of Object.entries(aggregatedQuantities)) {
+        const prod = productDocMap.get(pId);
+        const currentStock = Number(prod.stock ?? 0);
+        if (currentStock < totalQty) {
+          throw new Error(`Insufficient stock for "${prod.name}". Available: ${currentStock}, Total Requested: ${totalQty}.`);
+        }
+      }
+
+      // Recalculate each product item authoritatively
+      const recalculatedItems: any[] = [];
+      let totalWholesaleCost = 0;
+      let totalCalculatedCodValue = 0;
+
+      for (const item of items) {
+        const pId = String(item.productId).trim();
+        const prod = productDocMap.get(pId);
+        const itemQty = Number(item.quantity);
+        const totalProductQty = aggregatedQuantities[pId];
+
+        // Determine wholesale tier (1-49 vs 50+)
+        const wholesaleTier = totalProductQty >= 50 ? 'tier50_plus' : 'tier1_49';
+
+        // Authoritative wholesale unit price calculation from database
+        let authoritativeUnitPrice = 0;
+        if (totalProductQty >= 50 && prod.wholesalePrice50Plus !== undefined && !isNaN(Number(prod.wholesalePrice50Plus)) && Number(prod.wholesalePrice50Plus) > 0) {
+          authoritativeUnitPrice = Number(prod.wholesalePrice50Plus);
+        } else if (prod.wholesalePrice !== undefined && !isNaN(Number(prod.wholesalePrice)) && Number(prod.wholesalePrice) > 0) {
+          authoritativeUnitPrice = Number(prod.wholesalePrice);
+        } else if (prod.discountRetailPrice !== undefined && !isNaN(Number(prod.discountRetailPrice)) && Number(prod.discountRetailPrice) > 0) {
+          authoritativeUnitPrice = Number(prod.discountRetailPrice);
+        } else {
+          authoritativeUnitPrice = Number(prod.retailPrice ?? prod.price ?? 0);
+        }
+
+        // Wholesaler's selling COD unit price
+        let itemCodUnitPrice = 0;
+        if (item.customCodPrice !== undefined && item.customCodPrice !== null && !isNaN(Number(item.customCodPrice))) {
+          itemCodUnitPrice = Math.max(0, Number(item.customCodPrice));
+        } else if (item.CODUnitPrice !== undefined && item.CODUnitPrice !== null && !isNaN(Number(item.CODUnitPrice))) {
+          itemCodUnitPrice = Math.max(0, Number(item.CODUnitPrice));
+        } else if (item.codPrice !== undefined && item.codPrice !== null && !isNaN(Number(item.codPrice))) {
+          itemCodUnitPrice = Math.max(0, Number(item.codPrice));
+        } else {
+          itemCodUnitPrice = Number(prod.retailPrice ?? prod.price ?? authoritativeUnitPrice);
+        }
+
+        const wholesaleCost = Math.round(authoritativeUnitPrice * itemQty * 100) / 100;
+        const codValue = Math.round(itemCodUnitPrice * itemQty * 100) / 100;
+        const profit = Math.round((codValue - wholesaleCost) * 100) / 100;
+
+        totalWholesaleCost += wholesaleCost;
+        totalCalculatedCodValue += codValue;
+
+        recalculatedItems.push({
+          productId: prod.id,
+          productName: prod.name || '',
+          sku: prod.barcode || prod.sku || '',
+          barcode: prod.barcode || '',
+          image: prod.image || '',
+          quantity: itemQty,
+          wholesaleTier,
+          wholesaleUnitPrice: authoritativeUnitPrice,
+          CODUnitPrice: itemCodUnitPrice,
+          wholesaleCost,
+          CODValue: codValue,
+          profit
+        });
+      }
+
+      totalWholesaleCost = Math.round(totalWholesaleCost * 100) / 100;
+      // If overall codPrice was explicitly provided on checkoutInfo and is non-zero, use it as totalCODValue
+      const finalCODValue = overallCodPrice > 0 ? overallCodPrice : Math.round(totalCalculatedCodValue * 100) / 100;
+      const totalProfit = Math.round((finalCODValue - totalWholesaleCost) * 100) / 100;
+      const validDeliveryCharge = Math.max(0, Number(deliveryCharge) || 0);
+      const finalAmount = Math.round((totalWholesaleCost + validDeliveryCharge) * 100) / 100;
+      const paidAmount = 0;
+      const dueAmount = finalAmount;
+
+      const orderNumber = generateWholesaleOrderNumber();
+      const orderId = `ws-ord-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const sanitizedCheckoutInfo = isCOD
+        ? {
+            checkoutType: 'COD',
+            deliveryName: String(checkoutInfo.deliveryName || '').trim(),
+            deliveryPhone: String(checkoutInfo.deliveryPhone || '').trim(),
+            deliveryAddress: String(checkoutInfo.deliveryAddress || '').trim(),
+            codPrice: finalCODValue,
+            orderNote: checkoutInfo.orderNote ? String(checkoutInfo.orderNote).trim() : ''
+          }
+        : {
+            checkoutType: 'PARCEL',
+            parcelId: String(checkoutInfo.parcelId || '').trim(),
+            velouriaId: String(checkoutInfo.velouriaId || '').trim(),
+            deliveryName: String(checkoutInfo.deliveryName || '').trim(),
+            codPrice: finalCODValue,
+            orderNote: checkoutInfo.orderNote ? String(checkoutInfo.orderNote).trim() : ''
+          };
+
+      const wholesaleOrderDoc = {
+        id: orderId,
+        orderNumber,
+        customer: customerDetails,
+        items: recalculatedItems,
+        totalUnits: recalculatedItems.reduce((acc, it) => acc + it.quantity, 0),
+        totalWholesaleCost,
+        totalCODValue: finalCODValue,
+        totalProfit,
+        deliveryCharge: validDeliveryCharge,
+        finalAmount,
+        paidAmount,
+        dueAmount,
+        checkoutInfo: sanitizedCheckoutInfo,
+        status: 'pending',
+        paymentStatus: 'unpaid',
+        stock_deducted: true,
+        stockDeducted: true,
+        stock_restored: false,
+        stockRestored: false,
+        idempotencyKey: effectiveIdempotencyKey,
+        orderSource: String(orderSource || 'wholesale_portal'),
+        notes: notes ? String(notes).trim() : '',
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+
+      // 1. Save wholesale order document
+      // Update wholesale customer ledger
+      const customerLedgerRef = doc(db, "wholesale_customers", cleanUserId);
+      const customerSnap = await transaction.get(customerLedgerRef);
+      if (customerSnap.exists()) {
+        const custData = customerSnap.data();
+        const currentOrders = Number(custData.totalOrders || 0);
+        const currentPurchase = Number(custData.totalWholesalePurchase || 0);
+        const currentPaid = Number(custData.totalPaid || 0);
+        const newPurchase = currentPurchase + finalAmount;
+        const newDue = newPurchase - currentPaid;
+        transaction.update(customerLedgerRef, {
+          totalOrders: currentOrders + 1,
+          totalWholesalePurchase: newPurchase,
+          totalDue: newDue
+        });
+      }
+
+      const wholesaleOrderRef = doc(db, 'wholesale_orders', orderId);
+      transaction.set(wholesaleOrderRef, wholesaleOrderDoc);
+
+      // 2. Atomically deduct stock and create inventory/stock movement records for all products
+      for (const [pId, totalQty] of Object.entries(aggregatedQuantities)) {
+        const prod = productDocMap.get(pId);
+        const prevStock = Number(prod.stock ?? 0);
+        const newStock = prevStock - totalQty;
+
+        // Decrement product stock in products collection
+        const pRef = doc(db, 'products', pId);
+        transaction.update(pRef, {
+          stock: newStock,
+          updated_at: nowIso
+        });
+
+        // Add inventory log document
+        const logDocRef = doc(collection(db, 'inventory_logs'));
+        transaction.set(logDocRef, {
+          id: logDocRef.id,
+          productId: pId,
+          productName: prod.name || '',
+          type: 'sale',
+          quantity: newStock,
+          change: -totalQty,
+          previousStock: prevStock,
+          newStock: newStock,
+          prevStock: prevStock,
+          reason: `Wholesale Order #${orderNumber} (${customerDetails.customerName || 'Wholesale Partner'})`,
+          source: 'WHOLESALE',
+          orderId: orderId,
+          orderNumber: orderNumber,
+          orderType: 'wholesale',
+          customer: customerDetails.customerName || 'Wholesale Partner',
+          userId: cleanUserId,
+          performedBy: customerDetails.customerName || 'Wholesale Partner',
+          createdAt: nowIso,
+          timestamp: nowIso
+        });
+
+        // Add stock movement document
+        const movementDocRef = doc(collection(db, 'stock_movements'));
+        transaction.set(movementDocRef, {
+          id: movementDocRef.id,
+          productId: pId,
+          productName: prod.name || '',
+          orderId: orderId,
+          wholesaleOrderId: orderId,
+          orderType: 'wholesale',
+          quantity: -totalQty,
+          type: 'sale',
+          source: 'WHOLESALE',
+          performedBy: customerDetails.customerName || 'Wholesale Partner',
+          previousStock: prevStock,
+          newStock: newStock,
+          reason: `Wholesale Order Creation #${orderNumber}`,
+          customer: customerDetails.customerName || 'Wholesale Partner',
+          userId: cleanUserId,
+          createdAt: nowIso,
+          timestamp: nowIso
+        });
+      }
+
+      // 3. Record idempotency lock
+      transaction.set(idempRef, {
+        idempotencyKey: effectiveIdempotencyKey,
+        orderId,
+        amount: finalAmount,
+        createdAt: nowIso
+      });
+
+      return wholesaleOrderDoc;
+    });
+
+    return res.status(201).json({
+      success: true,
+      order: committedOrder,
+      orderId: committedOrder.id,
+      orderNumber: committedOrder.orderNumber,
+      message: `Wholesale Order #${committedOrder.orderNumber} created successfully!`
+    });
+  } catch (err: any) {
+    if (err.message && (err.message.includes('Insufficient stock') || err.message.includes('not found') || err.message.includes('already cancelled'))) {
+      console.warn("[Wholesale Order Engine] Validation Warning:", err.message);
+    } else {
+      console.error("[Wholesale Order Engine] Error creating wholesale order:", err);
+    }
+    return res.status(400).json({
+      success: false,
+      error: err.message || "Failed to process wholesale order"
+    });
+  }
+});
+
+/**
+ * GET /api/wholesale/orders
+ * Fetch wholesale orders list (filtered by userId for customer or all for staff)
+ */
+app.get("/api/wholesale/orders", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({ success: false, error: "Database not initialized" });
+  }
+
+  const { userId, status } = req.query;
+
+  try {
+    const ordersCol = collection(db, 'wholesale_orders');
+    let q = query(ordersCol);
+
+    if (userId) {
+      q = query(ordersCol, where('customer.userId', '==', String(userId).trim()));
+    }
+
+    const snap = await getDocs(q);
+    let orders: any[] = [];
+    snap.forEach((docSnap) => {
+      orders.push({ id: docSnap.id, ...docSnap.data() });
+    });
+
+    // Client-side sort by createdAt descending
+    orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+    if (status) {
+      orders = orders.filter((o) => o.status === String(status).trim());
+    }
+
+    return res.json({
+      success: true,
+      count: orders.length,
+      orders
+    });
+  } catch (err: any) {
+    console.error("[Wholesale Order Engine] Error fetching orders:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to fetch wholesale orders"
+    });
+  }
+});
+
+/**
+ * GET /api/wholesale/orders/:orderId
+ * Fetch single wholesale order detail
+ */
+app.get("/api/wholesale/orders/:orderId", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({ success: false, error: "Database not initialized" });
+  }
+
+  const { orderId } = req.params;
+  try {
+    const orderRef = doc(db, 'wholesale_orders', String(orderId).trim());
+    const snap = await getDoc(orderRef);
+    if (!snap.exists()) {
+      return res.status(404).json({ success: false, error: "Wholesale order not found" });
+    }
+
+    return res.json({
+      success: true,
+      order: { id: snap.id, ...snap.data() }
+    });
+  } catch (err: any) {
+    console.error("[Wholesale Order Engine] Error fetching order:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to fetch order details"
+    });
+  }
+});
+
+/**
+ * POST /api/wholesale/orders/:orderId/cancel
+ * Cancel a wholesale order and restore inventory atomically
+ */
+app.post("/api/wholesale/orders/:orderId/cancel", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({ success: false, error: "Database not initialized" });
+  }
+
+  const { orderId } = req.params;
+  const { reason, cancelledBy } = req.body;
+
+  try {
+    const orderRef = doc(db, 'wholesale_orders', String(orderId).trim());
+    const nowIso = new Date().toISOString();
+
+    const cancelledOrder = await runTransaction(db, async (transaction: any) => {
+      const snap = await transaction.get(orderRef);
+      if (!snap.exists()) {
+        throw new Error("Wholesale order not found");
+      }
+
+      const orderData = snap.data();
+      if (orderData.status === 'cancelled') {
+        throw new Error(`Order #${orderData.orderNumber || orderId} is already cancelled.`);
+      }
+
+      const cancelNote = reason ? String(reason).trim() : 'Wholesale Order Cancelled';
+      const staffActor = cancelledBy ? String(cancelledBy).trim() : 'Wholesale Partner';
+
+      // Check if stock was deducted and needs restoration
+      const needsStockRestoration = 
+        (orderData.stock_deducted === true || orderData.stockDeducted === true) &&
+        orderData.stock_restored !== true &&
+        orderData.stockRestored !== true;
+
+      if (needsStockRestoration && Array.isArray(orderData.items)) {
+        // Aggregate items by product ID
+        const itemsToRestore: Record<string, { qty: number; name: string }> = {};
+        for (const item of orderData.items) {
+          if (item.productId && item.quantity > 0) {
+            const pId = String(item.productId).trim();
+            if (!itemsToRestore[pId]) {
+              itemsToRestore[pId] = { qty: 0, name: item.productName || 'Product' };
+            }
+            itemsToRestore[pId].qty += Number(item.quantity);
+          }
+        }
+
+        // PHASE 1: READS - Fetch all product documents first
+        const productSnapMap = new Map<string, any>();
+        for (const pId of Object.keys(itemsToRestore)) {
+          const pRef = doc(db, 'products', pId);
+          const pSnap = await transaction.get(pRef);
+          if (pSnap.exists()) {
+            productSnapMap.set(pId, { ref: pRef, data: pSnap.data() });
+          }
+        }
+
+        // PHASE 2: WRITES - Update stocks and create logs/movements
+        for (const [pId, { qty, name }] of Object.entries(itemsToRestore)) {
+          const productEntry = productSnapMap.get(pId);
+          if (productEntry) {
+            const pData = productEntry.data;
+            const currentStock = Number(pData.stock ?? 0);
+            const restoredStock = currentStock + qty;
+
+            transaction.update(productEntry.ref, {
+              stock: restoredStock,
+              updated_at: nowIso
+            });
+
+            // Log inventory return
+            const logDocRef = doc(collection(db, 'inventory_logs'));
+            transaction.set(logDocRef, {
+              id: logDocRef.id,
+              productId: pId,
+              productName: pData.name || name,
+              type: 'stock_in',
+              quantity: restoredStock,
+              change: qty,
+              previousStock: currentStock,
+              newStock: restoredStock,
+              prevStock: currentStock,
+              reason: `Cancelled Wholesale Order Return #${orderData.orderNumber || orderId} (${cancelNote})`,
+              source: 'WHOLESALE',
+              orderId: orderData.id,
+              orderNumber: orderData.orderNumber,
+              orderType: 'wholesale',
+              customer: orderData.customer?.customerName || 'Wholesale Partner',
+              userId: orderData.customer?.userId || '',
+              performedBy: staffActor,
+              createdAt: nowIso,
+              timestamp: nowIso
+            });
+
+            // Log stock movement return
+            const movementDocRef = doc(collection(db, 'stock_movements'));
+            transaction.set(movementDocRef, {
+              id: movementDocRef.id,
+              productId: pId,
+              productName: pData.name || name,
+              orderId: orderData.id,
+              wholesaleOrderId: orderData.id,
+              orderType: 'wholesale',
+              quantity: qty,
+              type: 'return',
+              source: 'WHOLESALE',
+              performedBy: staffActor,
+              previousStock: currentStock,
+              newStock: restoredStock,
+              reason: `Cancelled Wholesale Order Return #${orderData.orderNumber || orderId} (${cancelNote})`,
+              customer: orderData.customer?.customerName || 'Wholesale Partner',
+              userId: orderData.customer?.userId || '',
+              createdAt: nowIso,
+              timestamp: nowIso
+            });
+          }
+        }
+      }
+
+      // Update customer ledger on cancel
+      if (orderData.customer?.userId) {
+        const customerLedgerRef = doc(db, "wholesale_customers", orderData.customer.userId);
+        const customerSnap = await transaction.get(customerLedgerRef);
+        if (customerSnap.exists()) {
+          const custData = customerSnap.data();
+          const currentOrders = Number(custData.totalOrders || 0);
+          const currentPurchase = Number(custData.totalWholesalePurchase || 0);
+          const currentPaid = Number(custData.totalPaid || 0);
+          const newPurchase = Math.max(0, currentPurchase - Number(orderData.finalAmount || 0));
+          const newDue = newPurchase - currentPaid;
+          transaction.update(customerLedgerRef, {
+            totalOrders: Math.max(0, currentOrders - 1),
+            totalWholesalePurchase: newPurchase,
+            totalDue: newDue
+          });
+        }
+      }
+
+      const updatedOrder = {
+        ...orderData,
+        status: 'cancelled',
+        stock_restored: true,
+        stockRestored: true,
+        cancelReason: cancelNote,
+        cancelledAt: nowIso,
+        cancelledBy: staffActor,
+        updatedAt: nowIso
+      };
+
+      transaction.update(orderRef, {
+        status: 'cancelled',
+        stock_restored: true,
+        stockRestored: true,
+        cancelReason: cancelNote,
+        cancelledAt: nowIso,
+        cancelledBy: staffActor,
+        updatedAt: nowIso
+      });
+
+      return updatedOrder;
+    });
+
+    return res.json({
+      success: true,
+      order: cancelledOrder,
+      message: `Wholesale order #${cancelledOrder.orderNumber || orderId} cancelled and stock restored successfully.`
+    });
+  } catch (err: any) {
+    if (err.message && (err.message.includes('already cancelled') || err.message.includes('not found'))) {
+       console.warn("[Wholesale Order Engine] Validation Warning (Cancel):", err.message);
+    } else {
+       console.error("[Wholesale Order Engine] Error cancelling order:", err);
+    }
+    return res.status(400).json({
+      success: false,
+      error: err.message || "Failed to cancel wholesale order"
+    });
+  }
+});
+
+/**
+ * PATCH /api/wholesale/orders/:orderId/status
+ * Update wholesale order status with transition validation & cancellation inventory handling
+ */
+app.patch("/api/wholesale/orders/:orderId/status", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({ success: false, error: "Database not initialized" });
+  }
+
+  const { orderId } = req.params;
+  const { status, notes, updatedBy } = req.body;
+
+  const validStatuses = ['pending', 'confirmed', 'processing', 'ready', 'delivered', 'cancelled'];
+  if (!status || !validStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid status "${status}". Allowed values: ${validStatuses.join(', ')}`
+    });
+  }
+
+  try {
+    const orderRef = doc(db, 'wholesale_orders', String(orderId).trim());
+    const nowIso = new Date().toISOString();
+
+    if (status === 'cancelled') {
+      // Use transactional cancellation to guarantee inventory restoration
+      const updatedOrder = await runTransaction(db, async (transaction: any) => {
+        const snap = await transaction.get(orderRef);
+        if (!snap.exists()) {
+          throw new Error("Wholesale order not found");
+        }
+        const orderData = snap.data();
+        if (orderData.status === 'cancelled') {
+          return orderData;
+        }
+
+        const cancelNote = notes ? String(notes).trim() : 'Status changed to Cancelled';
+        const staffActor = updatedBy ? String(updatedBy).trim() : 'Staff';
+
+        const needsStockRestoration = 
+          (orderData.stock_deducted === true || orderData.stockDeducted === true) &&
+          orderData.stock_restored !== true &&
+          orderData.stockRestored !== true;
+
+        if (needsStockRestoration && Array.isArray(orderData.items)) {
+          const itemsToRestore: Record<string, { qty: number; name: string }> = {};
+          for (const item of orderData.items) {
+            if (item.productId && item.quantity > 0) {
+              const pId = String(item.productId).trim();
+              if (!itemsToRestore[pId]) {
+                itemsToRestore[pId] = { qty: 0, name: item.productName || 'Product' };
+              }
+              itemsToRestore[pId].qty += Number(item.quantity);
+            }
+          }
+
+          // PHASE 1: READS - Fetch all product documents first
+          const productSnapMap = new Map<string, any>();
+          for (const pId of Object.keys(itemsToRestore)) {
+            const pRef = doc(db, 'products', pId);
+            const pSnap = await transaction.get(pRef);
+            if (pSnap.exists()) {
+              productSnapMap.set(pId, { ref: pRef, data: pSnap.data() });
+            }
+          }
+
+          // PHASE 2: WRITES - Update stocks and create logs/movements
+          for (const [pId, { qty, name }] of Object.entries(itemsToRestore)) {
+            const productEntry = productSnapMap.get(pId);
+            if (productEntry) {
+              const pData = productEntry.data;
+              const currentStock = Number(pData.stock ?? 0);
+              const restoredStock = currentStock + qty;
+
+              transaction.update(productEntry.ref, {
+                stock: restoredStock,
+                updated_at: nowIso
+              });
+
+              const logDocRef = doc(collection(db, 'inventory_logs'));
+              transaction.set(logDocRef, {
+                id: logDocRef.id,
+                productId: pId,
+                productName: pData.name || name,
+                type: 'stock_in',
+                quantity: restoredStock,
+                change: qty,
+                previousStock: currentStock,
+                newStock: restoredStock,
+                prevStock: currentStock,
+                reason: `Cancelled Wholesale Order Return #${orderData.orderNumber || orderId} (${cancelNote})`,
+                source: 'WHOLESALE',
+                orderId: orderData.id,
+                orderNumber: orderData.orderNumber,
+                orderType: 'wholesale',
+                customer: orderData.customer?.customerName || 'Wholesale Partner',
+                userId: orderData.customer?.userId || '',
+                performedBy: staffActor,
+                createdAt: nowIso,
+                timestamp: nowIso
+              });
+
+              const movementDocRef = doc(collection(db, 'stock_movements'));
+              transaction.set(movementDocRef, {
+                id: movementDocRef.id,
+                productId: pId,
+                productName: pData.name || name,
+                orderId: orderData.id,
+                wholesaleOrderId: orderData.id,
+                orderType: 'wholesale',
+                quantity: qty,
+                type: 'return',
+                source: 'WHOLESALE',
+                performedBy: staffActor,
+                previousStock: currentStock,
+                newStock: restoredStock,
+                reason: `Cancelled Wholesale Order Return #${orderData.orderNumber || orderId} (${cancelNote})`,
+                customer: orderData.customer?.customerName || 'Wholesale Partner',
+                userId: orderData.customer?.userId || '',
+                createdAt: nowIso,
+                timestamp: nowIso
+              });
+            }
+          }
+        }
+
+        const updates = {
+          status: 'cancelled',
+          stock_restored: true,
+          stockRestored: true,
+          cancelReason: cancelNote,
+          cancelledAt: nowIso,
+          cancelledBy: staffActor,
+          updatedAt: nowIso
+        };
+
+        transaction.update(orderRef, updates);
+        return { ...orderData, ...updates };
+      });
+
+      return res.json({
+        success: true,
+        orderId,
+        status: 'cancelled',
+        order: updatedOrder,
+        message: `Wholesale order status updated to "cancelled" and stock restored successfully.`
+      });
+    }
+
+    // Normal non-cancellation status update
+    const snap = await getDoc(orderRef);
+    if (!snap.exists()) {
+      return res.status(404).json({ success: false, error: "Wholesale order not found" });
+    }
+
+    const updates: any = {
+      status,
+      updatedAt: nowIso
+    };
+    if (notes) updates.notes = notes;
+    if (updatedBy) updates.lastUpdatedBy = updatedBy;
+
+    await setDoc(orderRef, updates, { merge: true });
+
+    return res.json({
+      success: true,
+      orderId,
+      status,
+      message: `Wholesale order status updated to "${status}" successfully.`
+    });
+  } catch (err: any) {
+    console.error("[Wholesale Order Engine] Error updating status:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to update order status"
+    });
+  }
+});
+
+/**
+ * POST /api/test/wholesale-inventory-runner
+ * Comprehensive server-side test runner for Step 6 Wholesale Order + Inventory Integration
+ */
+app.post("/api/test/wholesale-inventory-runner", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({ success: false, error: "Database not initialized" });
+  }
+
+  const logs: string[] = [];
+  const log = (msg: string) => {
+    console.log(msg);
+    logs.push(msg);
+  };
+
+  const testUserId = "test-ws-user-step6-" + Date.now();
+  const testProd1Id = "test-prod-1-" + Date.now();
+  const testProd2Id = "test-prod-2-" + Date.now();
+
+  try {
+    log("=== STARTING STEP 6 INVENTORY INTEGRATION TEST RUNNER ===");
+
+    // 1. Setup wholesale customer fixture
+    await setDoc(doc(db, 'wholesale_customers', testUserId), {
+      id: testUserId,
+      name: "Step6 Test Partner",
+      businessName: "Step6 Beauty Hub",
+      phone: "01700999888",
+      wholesaleAccess: true,
+      status: "active",
+      creditLimit: 50000,
+      currentDue: 0,
+      createdAt: new Date().toISOString()
+    });
+
+    // 2. Setup product fixtures
+    await setDoc(doc(db, 'products', testProd1Id), {
+      id: testProd1Id,
+      name: "Step6 Test Cream 50ml",
+      price: 1500,
+      retailPrice: 1500,
+      wholesalePrice: 1000,
+      wholesalePrice50Plus: 900,
+      stock: 20,
+      barcode: "TEST-BARCODE-1",
+      createdAt: new Date().toISOString()
+    });
+
+    await setDoc(doc(db, 'products', testProd2Id), {
+      id: testProd2Id,
+      name: "Step6 Test Serum 30ml",
+      price: 2000,
+      retailPrice: 2000,
+      wholesalePrice: 1400,
+      wholesalePrice50Plus: 1250,
+      stock: 10,
+      barcode: "TEST-BARCODE-2",
+      createdAt: new Date().toISOString()
+    });
+
+    log(`Fixtures initialized: Prod1 Stock=20, Prod2 Stock=10, User=${testUserId}`);
+
+    // --- TEST 1: SUCCESSFUL MULTI-PRODUCT WHOLESALE ORDER ---
+    log("--- TEST 1: Create Multi-Product Wholesale Order & Verify Stock Deduction & Logs ---");
+    const idemKey1 = `idem-step6-test1-${Date.now()}`;
+    const order1Payload = {
+      userId: testUserId,
+      items: [
+        { productId: testProd1Id, quantity: 5, customCodPrice: 1400 },
+        { productId: testProd2Id, quantity: 3, customCodPrice: 1800 }
+      ],
+      checkoutInfo: {
+        checkoutType: "COD",
+        deliveryName: "Customer A",
+        deliveryPhone: "01811223344",
+        deliveryAddress: "Dhanmondi, Dhaka",
+        codPrice: 12400
+      },
+      deliveryCharge: 60,
+      idempotencyKey: idemKey1
+    };
+
+    const res1 = await fetch(`http://localhost:3000/api/wholesale/orders/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order1Payload)
+    });
+    const data1: any = await res1.json();
+    if (!res1.ok || !data1.success) {
+      throw new Error(`Test 1 Failed: ${JSON.stringify(data1)}`);
+    }
+
+    const order1Id = data1.order.id;
+    log(`✓ Order 1 created successfully: ${data1.order.orderNumber} (ID: ${order1Id})`);
+
+    // Verify stocks
+    const p1Snap1 = await getDoc(doc(db, 'products', testProd1Id));
+    const p2Snap1 = await getDoc(doc(db, 'products', testProd2Id));
+    const p1Stock1 = p1Snap1.data()?.stock;
+    const p2Stock1 = p2Snap1.data()?.stock;
+    log(`  Prod1 stock after order (expected 15): ${p1Stock1}`);
+    log(`  Prod2 stock after order (expected 7): ${p2Stock1}`);
+    if (p1Stock1 !== 15 || p2Stock1 !== 7) {
+      throw new Error(`Test 1 Stock deduction mismatch! Prod1=${p1Stock1}, Prod2=${p2Stock1}`);
+    }
+
+    // Verify inventory logs
+    const invLogs1 = await getDocs(query(collection(db, 'inventory_logs'), where('orderId', '==', order1Id)));
+    log(`  Inventory logs created: ${invLogs1.size} records`);
+    invLogs1.forEach(d => {
+      const l = d.data();
+      log(`    Log: Product=${l.productName}, Type=${l.type}, Change=${l.change}, OrderType=${l.orderType}, Source=${l.source}`);
+    });
+    if (invLogs1.size !== 2) throw new Error(`Expected 2 inventory logs, got ${invLogs1.size}`);
+
+    // Verify stock movements
+    const movSnap1 = await getDocs(query(collection(db, 'stock_movements'), where('orderId', '==', order1Id)));
+    log(`  Stock movements created: ${movSnap1.size} records`);
+    movSnap1.forEach(d => {
+      const m = d.data();
+      log(`    Movement: Product=${m.productName}, Type=${m.type}, Quantity=${m.quantity}, OrderType=${m.orderType}, Source=${m.source}`);
+    });
+    if (movSnap1.size !== 2) throw new Error(`Expected 2 stock movements, got ${movSnap1.size}`);
+    log("✓ Test 1 Passed!");
+
+    // --- TEST 2: DUPLICATE SUBMISSION IDEMPOTENCY ---
+    log("--- TEST 2: Duplicate Submission with Idempotency Key ---");
+    const res2 = await fetch(`http://localhost:3000/api/wholesale/orders/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order1Payload)
+    });
+    const data2: any = await res2.json();
+    if (!res2.ok || !data2.success) {
+      throw new Error(`Test 2 Failed: ${JSON.stringify(data2)}`);
+    }
+    const p1Snap2 = await getDoc(doc(db, 'products', testProd1Id));
+    const p2Snap2 = await getDoc(doc(db, 'products', testProd2Id));
+    log(`  Prod1 stock (should still be 15): ${p1Snap2.data()?.stock}`);
+    log(`  Prod2 stock (should still be 7): ${p2Snap2.data()?.stock}`);
+    if (p1Snap2.data()?.stock !== 15 || p2Snap2.data()?.stock !== 7) {
+      throw new Error("Duplicate submission deducted stock again!");
+    }
+    log("✓ Test 2 Passed!");
+
+    // --- TEST 3: INSUFFICIENT STOCK ---
+    log("--- TEST 3: Insufficient Stock (Atomic Rejection) ---");
+    const res3 = await fetch(`http://localhost:3000/api/wholesale/orders/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: testUserId,
+        items: [
+          { productId: testProd1Id, quantity: 5 },
+          { productId: testProd2Id, quantity: 50 } // only 7 available
+        ],
+        checkoutInfo: {
+          checkoutType: "COD",
+          deliveryName: "Customer B",
+          deliveryPhone: "01711223344",
+          deliveryAddress: "Gulshan, Dhaka",
+          codPrice: 50000
+        }
+      })
+    });
+    const data3: any = await res3.json();
+    log(`  Response Status: ${res3.status}, Error Message: "${data3.error}"`);
+    if (res3.status !== 400 || !data3.error || !data3.error.includes("Insufficient stock")) {
+      throw new Error("Expected 400 Insufficient stock error!");
+    }
+
+    // Verify stock untouched
+    const p1Snap3 = await getDoc(doc(db, 'products', testProd1Id));
+    const p2Snap3 = await getDoc(doc(db, 'products', testProd2Id));
+    log(`  Prod1 stock after rejection (must be 15): ${p1Snap3.data()?.stock}`);
+    log(`  Prod2 stock after rejection (must be 7): ${p2Snap3.data()?.stock}`);
+    if (p1Snap3.data()?.stock !== 15 || p2Snap3.data()?.stock !== 7) {
+      throw new Error("Stock was partially deducted on failed order!");
+    }
+    log("✓ Test 3 Passed!");
+
+    // --- TEST 4: ORDER CANCELLATION & ATOMIC STOCK RESTORATION ---
+    log("--- TEST 4: Order Cancellation & Atomic Stock Restoration ---");
+    const res4 = await fetch(`http://localhost:3000/api/wholesale/orders/${order1Id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reason: "Customer changed mind before dispatch",
+        cancelledBy: "Admin Staff Test"
+      })
+    });
+    const data4: any = await res4.json();
+    if (!res4.ok || !data4.success) {
+      throw new Error(`Test 4 Failed: ${JSON.stringify(data4)}`);
+    }
+    log(`✓ Order cancelled: ${data4.message}`);
+
+    // Verify stocks restored to 20 and 10
+    const p1Snap4 = await getDoc(doc(db, 'products', testProd1Id));
+    const p2Snap4 = await getDoc(doc(db, 'products', testProd2Id));
+    const p1Stock4 = p1Snap4.data()?.stock;
+    const p2Stock4 = p2Snap4.data()?.stock;
+    log(`  Prod1 stock restored (expected 20): ${p1Stock4}`);
+    log(`  Prod2 stock restored (expected 10): ${p2Stock4}`);
+    if (p1Stock4 !== 20 || p2Stock4 !== 10) {
+      throw new Error(`Stock restoration failed! Prod1=${p1Stock4}, Prod2=${p2Stock4}`);
+    }
+
+    // Verify return inventory logs & movements
+    const invLogs4 = await getDocs(query(collection(db, 'inventory_logs'), where('orderId', '==', order1Id)));
+    log(`  Total inventory logs for Order 1 now: ${invLogs4.size} records`);
+    const movSnap4 = await getDocs(query(collection(db, 'stock_movements'), where('orderId', '==', order1Id)));
+    log(`  Total stock movements for Order 1 now: ${movSnap4.size} records`);
+    log("✓ Test 4 Passed!");
+
+    // --- TEST 5: PREVENT DOUBLE RESTORATION ---
+    log("--- TEST 5: Prevent Double Restoration on Duplicate Cancellation ---");
+    const res5 = await fetch(`http://localhost:3000/api/wholesale/orders/${order1Id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: "Cancel again" })
+    });
+    const data5: any = await res5.json();
+    log(`  Response Status: ${res5.status}, Error Message: "${data5.error}"`);
+    if (res5.status !== 400 || !data5.error || !data5.error.includes("already cancelled")) {
+      throw new Error("Expected already cancelled rejection!");
+    }
+
+    const p1Snap5 = await getDoc(doc(db, 'products', testProd1Id));
+    const p2Snap5 = await getDoc(doc(db, 'products', testProd2Id));
+    log(`  Prod1 stock (must remain 20): ${p1Snap5.data()?.stock}`);
+    log(`  Prod2 stock (must remain 10): ${p2Snap5.data()?.stock}`);
+    if (p1Snap5.data()?.stock !== 20 || p2Snap5.data()?.stock !== 10) {
+      throw new Error("Stock was restored multiple times!");
+    }
+    log("✓ Test 5 Passed!");
+
+    // Cleanup fixtures
+    try {
+      await deleteDoc(doc(db, 'wholesale_customers', testUserId));
+      await deleteDoc(doc(db, 'products', testProd1Id));
+      await deleteDoc(doc(db, 'products', testProd2Id));
+      await deleteDoc(doc(db, 'wholesale_orders', order1Id));
+      log("✓ Cleanup completed successfully.");
+    } catch (cleanupErr: any) {
+      log(`  Cleanup note: ${cleanupErr.message || 'Ignored fixture cleanup permission'}`);
+    }
+
+    log("🎉 ALL STEP 6 TESTS PASSED WITH 100% SUCCESS!");
+
+    return res.json({
+      success: true,
+      message: "All wholesale order + inventory tests passed successfully!",
+      logs
+    });
+  } catch (err: any) {
+    log(`❌ TEST SUITE FAILED: ${err.message}`);
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+      logs
     });
   }
 });

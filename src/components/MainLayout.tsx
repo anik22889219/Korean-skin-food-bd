@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Tv, Globe, MessageSquare, Menu, ChevronLeft, 
   ChevronRight, Home, Compass, BarChart3, CreditCard, Boxes, 
   TrendingUp, Wand2, MessageCircle, Gift, Lock, Camera, Sparkles,
-  Search, Video, Award, Heart, HelpCircle
+  Search, Video, Award, Heart, HelpCircle, Building2, Truck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -173,7 +173,7 @@ export const MainLayout: React.FC = () => {
 
         {/* Center Section: Branding Logo */}
         <Link to="/" className="flex items-center gap-2 group shrink-0">
-          {globalTheme.logoUrl ? (
+          {globalTheme.logoUrl && globalTheme.logoUrl.trim() !== '' ? (
             <img src={globalTheme.logoUrl} alt={globalTheme.logoText} className="h-8 sm:h-9 object-contain" />
           ) : (
             <>
@@ -259,9 +259,9 @@ export const MainLayout: React.FC = () => {
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
                 className="w-8 h-8 rounded-full overflow-hidden border border-pink-200 cursor-pointer hover:border-[#E91E8C] transition"
               >
-                {profile?.photoURL || user?.photoURL ? (
+                {(profile?.photoURL && profile.photoURL.trim() !== '') || (user?.photoURL && user.photoURL.trim() !== '') ? (
                   <img 
-                    src={profile?.photoURL || user?.photoURL} 
+                    src={(profile?.photoURL && profile.photoURL.trim() !== '') ? profile.photoURL : user!.photoURL!} 
                     alt="Profile" 
                     className="w-full h-full object-cover" 
                     referrerPolicy="no-referrer"
@@ -295,6 +295,24 @@ export const MainLayout: React.FC = () => {
                       >
                         <User size={14} className="text-[#E91E8C]" />
                         <span>My Account & Orders</span>
+                      </Link>
+
+                      <Link 
+                        to="/wholesale/profile" 
+                        onClick={() => setProfileMenuOpen(false)}
+                        className="w-full text-left px-4 py-2 hover:bg-pink-50/40 flex items-center gap-2 transition text-purple-700 font-bold"
+                      >
+                        <Building2 size={14} className="text-purple-600" />
+                        <span>Wholesale Profile</span>
+                      </Link>
+
+                      <Link 
+                        to="/wholesale/checkout" 
+                        onClick={() => setProfileMenuOpen(false)}
+                        className="w-full text-left px-4 py-2 hover:bg-amber-50/40 flex items-center gap-2 transition text-amber-900 font-bold"
+                      >
+                        <Truck size={14} className="text-amber-600" />
+                        <span>Wholesale Checkout</span>
                       </Link>
 
                       {(creatorProfile || profile?.role === 'creator') && (
@@ -455,6 +473,28 @@ export const MainLayout: React.FC = () => {
                     <span>{language === 'bn' ? 'আমার প্রোফাইল ও অর্ডার' : 'My Account & Orders'}</span>
                   </Link>
 
+                  <Link
+                    to="/wholesale/profile"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/wholesale/profile') ? 'bg-purple-900 text-white' : 'hover:bg-purple-50 text-purple-900 font-bold'
+                    }`}
+                  >
+                    <Building2 size={16} className="text-purple-600" />
+                    <span>{language === 'bn' ? 'হোলসেল প্রোফাইল' : 'Wholesale Profile'}</span>
+                  </Link>
+
+                  <Link
+                    to="/wholesale/checkout"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/wholesale/checkout') ? 'bg-amber-500 text-slate-950 font-black' : 'hover:bg-amber-50 text-amber-900 font-bold'
+                    }`}
+                  >
+                    <Truck size={16} className="text-amber-600" />
+                    <span>{language === 'bn' ? 'হোলসেল চেকআউট' : 'Wholesale Checkout'}</span>
+                  </Link>
+
                   {user && isAdmin && (
                     <Link
                       to="/admin"
@@ -557,7 +597,7 @@ export const MainLayout: React.FC = () => {
                           return (
                             <div key={item.product.id} className="bg-pink-50/20 p-3 rounded-2xl border border-pink-100/50 flex items-center justify-between text-xs">
                               <div className="flex items-center gap-3 min-w-0">
-                                <img src={item.product.image} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
+                                <img src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
                                 <div className="min-w-0">
                                   <h4 className="font-bold text-gray-800 leading-tight truncate">
                                     {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}

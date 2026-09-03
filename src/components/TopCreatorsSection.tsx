@@ -67,7 +67,7 @@ export const TopCreatorsSection: React.FC = () => {
                 <div className="flex items-center gap-3">
                   <div className="relative shrink-0">
                     <img
-                      src={creator.profileImage}
+                      src={creator.profileImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
                       alt={creator.displayName}
                       className="w-12 h-12 rounded-xl object-cover border border-slate-600 bg-slate-900"
                     />

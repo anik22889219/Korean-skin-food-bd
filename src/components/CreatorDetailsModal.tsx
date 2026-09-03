@@ -75,7 +75,7 @@ export const CreatorDetailsModal: React.FC<CreatorDetailsModalProps> = ({
 
             <div className="flex items-center gap-4 min-w-0 pr-8">
               <img
-                src={creator.profileImage}
+                src={creator.profileImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
                 alt={creator.displayName}
                 className="w-16 h-16 rounded-2xl object-cover border-2 border-pink-400 bg-slate-900 shrink-0"
               />

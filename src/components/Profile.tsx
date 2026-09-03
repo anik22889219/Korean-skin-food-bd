@@ -11,7 +11,7 @@ import {
   HelpCircle, Search, Filter, Copy, Check, ChevronDown, ChevronUp, 
   RefreshCw, DollarSign, Mail, ArrowRight, Wand2, Tag, ShieldCheck, Truck, XCircle,
   Gift, Award, Crown, Coins, Percent, Sparkles, ExternalLink, Video, Flame,
-  Share2, ChevronRight, Zap, Settings, ShieldAlert, Heart, Star, Compass
+  Share2, ChevronRight, Zap, Settings, ShieldAlert, Heart, Star, Compass, Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -520,6 +520,44 @@ export const Profile: React.FC = () => {
               <span>+ Reel</span>
             </Link>
           </div>
+        </motion.div>
+      )}
+
+      {/* Wholesale Partner Status Banner */}
+      {profile?.wholesaleAccess && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 rounded-3xl p-5 sm:p-6 text-white border border-purple-900/40 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-purple-500/30">
+              <Building2 size={24} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-black uppercase tracking-wider text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full border border-purple-500/30">
+                  Verified Wholesale Partner
+                </span>
+                <span className="text-xs text-purple-200">1–49 & 50+ Bulk Pricing Active</span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-white mt-0.5">
+                B2B Enterprise Wholesale Hub
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Manage your business profile, view credit limits, tax invoices, and store credentials.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/wholesale/profile"
+            className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2 transition-all hover:scale-105 active:scale-95 shrink-0"
+          >
+            <Building2 size={16} />
+            <span>Open Wholesale Profile</span>
+            <ChevronRight size={14} />
+          </Link>
         </motion.div>
       )}
 
@@ -1066,6 +1104,26 @@ export const Profile: React.FC = () => {
       {activeTab === 'role_hub' && (
         <div className="space-y-6">
           
+          {/* Wholesale Partner Hub Card in Role Hub */}
+          <div className="bg-white rounded-3xl p-6 sm:p-8 border border-purple-100 shadow-sm space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-4 border-b border-purple-100 pb-4">
+              <div>
+                <span className="text-xs font-black uppercase text-purple-600 tracking-wider block">B2B Wholesale Portal</span>
+                <h3 className="text-xl font-black text-gray-900">Enterprise & Wholesale Account</h3>
+              </div>
+              <Link
+                to="/wholesale/profile"
+                className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5"
+              >
+                <Building2 size={14} />
+                <span>{profile?.wholesaleAccess ? 'Manage Wholesale Profile →' : 'Apply for Wholesale →'}</span>
+              </Link>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Wholesale accounts enjoy verified tier 1 (1–49 qty) and tier 2 (50+ qty) bulk discounting directly from Korean brand importers, commercial tax invoices, and credit ledger capabilities.
+            </p>
+          </div>
+
           {/* If Creator */}
           {creatorProfile && (
             <div className="bg-white rounded-3xl p-6 sm:p-8 border border-pink-100 shadow-sm space-y-6">

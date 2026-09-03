@@ -461,9 +461,120 @@
         "createdAt": { "type": "string" }
       },
       "required": ["idempotencyKey", "orderId", "amount", "createdAt"]
+    },
+    "WholesaleOrder": {
+      "title": "WholesaleOrder",
+      "description": "Dedicated wholesale orders with tier pricing, COD customer selling prices, and profit calculations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNumber": { "type": "string" },
+        "customer": {
+          "type": "object",
+          "properties": {
+            "wholesaleCustomerId": { "type": "string" },
+            "userId": { "type": "string" },
+            "customerName": { "type": "string" },
+            "businessName": { "type": "string" },
+            "pageName": { "type": "string" },
+            "contactNumber": { "type": "string" }
+          },
+          "required": ["wholesaleCustomerId", "userId", "customerName", "contactNumber"]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "productId": { "type": "string" },
+              "productName": { "type": "string" },
+              "sku": { "type": "string" },
+              "barcode": { "type": "string" },
+              "quantity": { "type": "number" },
+              "wholesaleTier": { "type": "string" },
+              "wholesaleUnitPrice": { "type": "number" },
+              "CODUnitPrice": { "type": "number" },
+              "wholesaleCost": { "type": "number" },
+              "CODValue": { "type": "number" },
+              "profit": { "type": "number" }
+            },
+            "required": ["productId", "productName", "quantity", "wholesaleTier", "wholesaleUnitPrice", "CODUnitPrice", "wholesaleCost", "CODValue", "profit"]
+          }
+        },
+        "totalUnits": { "type": "number" },
+        "totalWholesaleCost": { "type": "number" },
+        "totalCODValue": { "type": "number" },
+        "totalProfit": { "type": "number" },
+        "deliveryCharge": { "type": "number" },
+        "finalAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "dueAmount": { "type": "number" },
+        "checkoutInfo": { "type": "object" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "processing", "ready", "delivered", "cancelled"] },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "partial", "paid"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "customer", "items", "totalWholesaleCost", "totalCODValue", "totalProfit", "finalAmount", "dueAmount", "status", "paymentStatus", "createdAt"]
+    },
+    "WholesaleCustomer": {
+      "title": "WholesaleCustomer",
+      "description": "Wholesale customer profile, credit limit, and ledger balances",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "altPhone": { "type": "string" },
+        "email": { "type": "string" },
+        "businessName": { "type": "string" },
+        "businessType": { "type": "string" },
+        "creditLimit": { "type": "number" },
+        "currentDue": { "type": "number" },
+        "totalOrders": { "type": "number" },
+        "totalWholesalePurchase": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "totalDue": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "suspended", "pending"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "phone", "creditLimit", "currentDue", "status", "createdAt", "updatedAt"]
+    },
+    "WholesalePayment": {
+      "title": "WholesalePayment",
+      "description": "Wholesale customer payment transaction and ledger balance snapshot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "wholesaleCustomerId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "previousDue": { "type": "number" },
+        "remainingDue": { "type": "number" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "reference": { "type": "string" },
+        "note": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "wholesaleCustomerId", "amount", "paymentMethod", "createdBy", "createdAt"]
     }
   },
   "firestore": {
+    "/wholesale_customers/{customerId}": {
+      "schema": "WholesaleCustomer",
+      "description": "Wholesale customer ledger accounts"
+    },
+    "/wholesale_payments/{paymentId}": {
+      "schema": "WholesalePayment",
+      "description": "Wholesale payment receipts and ledger entries"
+    },
+    "/wholesale_orders/{orderId}": {
+      "schema": "WholesaleOrder",
+      "description": "Dedicated wholesale orders collection"
+    },
     "/payment_idempotency/{keyId}": {
       "schema": "PaymentIdempotency",
       "description": "Payment and due collection idempotency locks"

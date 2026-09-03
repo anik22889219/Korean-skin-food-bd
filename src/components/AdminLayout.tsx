@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
-  BarChart3, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
+  BarChart3,
+  Building2, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt
@@ -96,6 +97,7 @@ export const AdminLayout: React.FC = () => {
   const isInventoryManager = profile?.role === 'inventory_manager';
 
   const navItems = [
+    { to: '/admin/wholesale', label: 'Wholesale Management', badge: 'B2B', icon: Building2 },
     { to: '/admin', label: 'Dashboard Overview', badge: 'Live', icon: BarChart3, end: true },
     { to: '/admin/business-finance', label: 'Business Banking & Dues', badge: 'Finance', icon: Landmark },
     { to: '/admin/payments-due', label: 'Due Payments', badge: 'Receivables', icon: Receipt },
@@ -112,7 +114,7 @@ export const AdminLayout: React.FC = () => {
       icon: CreditCard,
       highlight: isAdminOrSuperAdmin && activePosCount > 0
     },
-    { to: '/admin/products', label: 'Skincare Catalog', badge: 'Stock', icon: Boxes },
+    { to: '/admin/products', label: 'Product List', badge: 'Stock', icon: Boxes },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },

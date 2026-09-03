@@ -80,7 +80,7 @@ export const AdminOrders: React.FC = () => {
 
   // Filtering state
   const [searchQuery, setSearchQuery] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<'ALL' | 'WEBSITE' | 'POS'>('ALL');
+  const [sourceFilter, setSourceFilter] = useState<'ALL' | 'WEBSITE' | 'POS' | 'WHOLESALE'>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
   // Active Fulfillment Order state
@@ -864,7 +864,7 @@ export const AdminOrders: React.FC = () => {
                     <div className="flex items-start gap-3">
                       {/* Product Image Thumbnail */}
                       <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center relative shadow-2xs">
-                        {productImage ? (
+                        {productImage && productImage.trim() !== '' ? (
                           <img
                             src={productImage}
                             alt={item.name}
@@ -987,10 +987,10 @@ export const AdminOrders: React.FC = () => {
           <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">
             <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
               <QrCode className="w-5 h-5 text-rose-600" />
-              Website Order Fulfillment Queue ({pendingOrders.length})
+              Website & Wholesale Order Verification Queue ({pendingOrders.length})
             </h2>
             <span className="text-xs text-slate-500">
-              Orders created on Website require barcode verification before stock deduction.
+              Orders requiring barcode verification & fulfillment inspection.
             </span>
           </div>
 
@@ -999,7 +999,7 @@ export const AdminOrders: React.FC = () => {
               <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto" />
               <h3 className="text-lg font-bold text-slate-800">Fulfillment Queue Clear!</h3>
               <p className="text-slate-500 text-sm max-w-md mx-auto">
-                There are no pending website orders awaiting barcode verification right now.
+                There are no pending website or wholesale orders awaiting barcode verification right now.
               </p>
             </div>
           ) : (
@@ -1015,11 +1015,19 @@ export const AdminOrders: React.FC = () => {
                       <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 font-bold text-xs uppercase rounded-full border border-amber-200">
                         {order.status.toUpperCase()}
                       </span>
-                      <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 font-bold text-xs uppercase rounded-full border border-slate-200">
+                      <span className={`px-2.5 py-0.5 font-bold text-xs uppercase rounded-full border ${
+                        order.order_source === 'WHOLESALE'
+                          ? 'bg-purple-100 text-purple-800 border-purple-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}>
                         {order.order_source}
                       </span>
-                      <span className="px-2.5 py-0.5 bg-rose-100 text-rose-800 font-bold text-xs uppercase rounded-full border border-rose-200">
-                        Stock Deducted: NO
+                      <span className={`px-2.5 py-0.5 font-bold text-xs uppercase rounded-full border ${
+                        order.stock_deducted
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                          : 'bg-rose-100 text-rose-800 border-rose-200'
+                      }`}>
+                        Stock Deducted: {order.stock_deducted ? 'YES' : 'NO'}
                       </span>
                     </div>
 
@@ -1040,7 +1048,7 @@ export const AdminOrders: React.FC = () => {
                           const img = i.image || prod?.image || (prod?.images && prod.images[0]) || '';
                           return (
                             <div key={iIdx} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1.5 pr-3 shadow-2xs">
-                              {img ? (
+                              {img && img.trim() !== '' ? (
                                 <img
                                   src={img}
                                   alt={i.name}
@@ -1126,6 +1134,7 @@ export const AdminOrders: React.FC = () => {
                   <option value="ALL">All Sources</option>
                   <option value="WEBSITE">Website</option>
                   <option value="POS">POS / Offline</option>
+                  <option value="WHOLESALE">Wholesale (B2B)</option>
                 </select>
               </div>
 
@@ -1162,6 +1171,8 @@ export const AdminOrders: React.FC = () => {
                         <span className="font-mono font-black text-rose-600 text-sm">#{order.id}</span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
                           order.order_source === 'POS'
+                            ? 'bg-amber-100 text-amber-800 border-amber-200'
+                            : order.order_source === 'WHOLESALE'
                             ? 'bg-purple-100 text-purple-800 border-purple-200'
                             : 'bg-blue-100 text-blue-800 border-blue-200'
                         }`}>
@@ -1413,7 +1424,7 @@ export const AdminOrders: React.FC = () => {
                   return (
                     <div key={i} className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-800 bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        {img ? (
+                        {img && img.trim() !== '' ? (
                           <img
                             src={img}
                             alt={item.name}

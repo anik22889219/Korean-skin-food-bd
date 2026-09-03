@@ -16,6 +16,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
   logoUrl = DEFAULT_LOGO,
   className = ''
 }) => {
+  const effectiveLogo = (logoUrl && logoUrl.trim() !== '') ? logoUrl : DEFAULT_LOGO;
   // Calculate items subtotal
   const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   
@@ -72,7 +73,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
         {/* Left side: circular logo + brand text */}
         <div className="flex items-center gap-3">
           <img
-            src={logoUrl}
+            src={effectiveLogo}
             alt="Korean Skin Food BD Logo"
             className="w-[44px] h-[44px] rounded-full object-cover bg-white p-0.5 border border-pink-200/40 shrink-0"
           />

@@ -75,6 +75,19 @@ export function isWholesaleConfigured(product?: Partial<Product> | null): boolea
 }
 
 /**
+ * Returns the cash price for a product if configured (> 0).
+ * Otherwise falls back to active retail price.
+ */
+export function getCashPrice(product?: Partial<Product> | null): number {
+  if (!product) return 0;
+  const cash = product.cashPrice !== undefined && product.cashPrice !== null ? Number(product.cashPrice) : undefined;
+  if (cash !== undefined && !isNaN(cash) && cash > 0) {
+    return cash;
+  }
+  return getRetailPrice(product);
+}
+
+/**
  * Aggregates item quantities by productId across cart items to ensure
  * multi-line or split-line quantities (e.g. 30 + 20 = 50) receive the appropriate 50+ wholesale tier.
  */
@@ -89,16 +102,23 @@ export function aggregateProductQuantities(items: Array<{ productId: string; qua
 
 /**
  * Calculates the unit price for any product given pricing mode and total aggregated quantity.
+ * Modes:
+ * - 'retail': Uses discountRetailPrice (if active) or regular retailPrice.
+ * - 'wholesale': Tiered based on quantity (1-49: wholesalePrice, 50+: wholesalePrice50Plus).
+ * - 'cash': Uses cashPrice (if configured > 0) or falls back to retail.
  */
 export function getProductUnitPrice(
   product?: Partial<Product> | null,
-  pricingMode: 'retail' | 'wholesale' = 'retail',
+  pricingMode: 'retail' | 'wholesale' | 'cash' = 'retail',
   quantity: number = 1,
   strictWholesale: boolean = false
 ): number {
   if (!product) return 0;
   if (pricingMode === 'wholesale') {
     return getWholesalePrice(product, quantity, strictWholesale);
+  }
+  if (pricingMode === 'cash') {
+    return getCashPrice(product);
   }
   return getRetailPrice(product);
 }
@@ -159,6 +179,10 @@ export function normalizeProductPricing(product: Partial<Product>): Product {
       : wholesalePrice
   );
 
+  const cashPrice = product.cashPrice !== undefined && product.cashPrice !== null && !isNaN(Number(product.cashPrice)) && Number(product.cashPrice) > 0
+    ? Number(product.cashPrice)
+    : undefined;
+
   return {
     ...product,
     id: product.id || `prod-${Date.now()}`,
@@ -172,10 +196,14 @@ export function normalizeProductPricing(product: Partial<Product>): Product {
     importPrice,
     wholesalePrice,
     wholesalePrice50Plus,
+    cashPrice,
     // Legacy fields for full backward compatibility
     price: retailPrice,
     discountPrice: discountRetailPrice,
     image: product.image || '',
+    imageAltText: product.imageAltText || product.altText || '',
+    metaTitle: product.metaTitle || product.seoTitle || '',
+    metaDescription: product.metaDescription || '',
     stock: Number(product.stock ?? 0),
     description: product.description || '',
     descriptionBN: product.descriptionBN || '',

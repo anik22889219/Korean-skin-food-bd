@@ -133,7 +133,7 @@ export const HeaderSearch: React.FC<HeaderSearchProps> = ({
                   className="p-3 hover:bg-rose-50/50 cursor-pointer transition-colors flex items-center gap-3 group"
                 >
                   <img
-                    src={product.image}
+                    src={product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
                     alt={product.name}
                     className="w-12 h-12 object-cover rounded-xl bg-slate-100 border border-slate-200 shrink-0 group-hover:scale-105 transition-transform"
                   />

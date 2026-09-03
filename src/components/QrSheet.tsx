@@ -235,7 +235,7 @@ export default function QrSheet({ onBack, products }: QrSheetProps) {
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-3">
                           <img 
-                            src={p.image} 
+                            src={p.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=150'} 
                             alt={p.name} 
                             className="w-10 h-10 object-cover rounded-xl shadow-sm border border-pink-100"
                             referrerPolicy="no-referrer"

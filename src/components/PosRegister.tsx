@@ -980,6 +980,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                       setActiveTab('scan');
                     }}
                     mode={scannerContext === 'STOCK_IN' || activeTab === 'stock_in' ? 'stock_in' : 'sale'}
+                    pricingMode={pricingMode}
                     cartQuantities={cartQuantitiesMap}
                     stockInQuantities={stockInQuantitiesMap}
                   />
@@ -1091,6 +1092,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   setActiveTab('stock_in');
                 }}
                 mode={scannerContext === 'STOCK_IN' || activeTab === 'stock_in' ? 'stock_in' : 'sale'}
+                pricingMode={pricingMode}
                 cartQuantities={cartQuantitiesMap}
                 stockInQuantities={stockInQuantitiesMap}
               />

@@ -176,7 +176,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ isAdminView = 
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <img
-                        src={creator.profileImage}
+                        src={creator.profileImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
                         alt={creator.displayName}
                         className="w-14 h-14 rounded-2xl object-cover border-2 border-white shadow bg-slate-100"
                       />
@@ -279,7 +279,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ isAdminView = 
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <img
-                            src={creator.profileImage}
+                            src={creator.profileImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
                             alt={creator.displayName}
                             className="w-10 h-10 rounded-xl object-cover border border-slate-200 bg-slate-100"
                           />

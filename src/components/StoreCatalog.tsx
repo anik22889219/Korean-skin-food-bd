@@ -357,7 +357,7 @@ export const StoreCatalog: React.FC = () => {
           <div className="lg:col-span-5 relative">
             <div className="aspect-[4/5] rounded-3xl overflow-hidden shadow-lg border border-pink-100">
               <img
-                src={fs.founderImageUrl}
+                src={fs.founderImageUrl || 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=800&auto=format&fit=crop'}
                 alt="Founders Story"
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
@@ -467,7 +467,7 @@ export const StoreCatalog: React.FC = () => {
           <div className="lg:col-span-6 relative">
             <div className="aspect-[4/3] rounded-3xl overflow-hidden shadow-lg border border-pink-100">
               <img
-                src={qa.mainImageUrl}
+                src={qa.mainImageUrl || 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&auto=format&fit=crop'}
                 alt="Logistics QA"
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
@@ -603,7 +603,7 @@ export const StoreCatalog: React.FC = () => {
                           className="p-2.5 hover:bg-rose-50/50 cursor-pointer transition-colors flex items-center gap-3 group"
                         >
                           <img
-                            src={product.image}
+                            src={product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
                             alt={product.name}
                             className="w-10 h-10 object-cover rounded-lg bg-slate-100 border border-slate-200 shrink-0"
                           />
@@ -1063,13 +1063,13 @@ export const StoreCatalog: React.FC = () => {
 
           <div className="lg:col-span-7 grid grid-cols-3 gap-3">
             <div className="aspect-[3/4] rounded-2xl overflow-hidden border border-pink-100 shadow-sm">
-              <img src={rr.image1Url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <img src={rr.image1Url || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=600'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             </div>
             <div className="aspect-[3/4] rounded-2xl overflow-hidden border border-pink-100 shadow-sm">
-              <img src={rr.image2Url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <img src={rr.image2Url || 'https://images.unsplash.com/photo-1571781926291-c477ebfd024b?auto=format&fit=crop&q=80&w=600'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             </div>
             <div className="aspect-[3/4] rounded-2xl overflow-hidden border border-pink-100 shadow-sm">
-              <img src={rr.image3Url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <img src={rr.image3Url || 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&q=80&w=600'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             </div>
           </div>
         </div>

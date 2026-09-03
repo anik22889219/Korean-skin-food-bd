@@ -113,6 +113,18 @@ export const PosCart: React.FC<PosCartProps> = ({
                 <span>Wholesale</span>
                 <span className="text-[9px] bg-purple-200/50 text-purple-900 px-1 py-0.2 rounded font-mono">1-49 / 50+</span>
               </button>
+              <button
+                type="button"
+                onClick={() => onPricingModeChange('cash')}
+                className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer ${
+                  pricingMode === 'cash'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Banknote size={12} />
+                <span>Cash Price</span>
+              </button>
             </div>
 
             {onOpenScanner && (
@@ -170,7 +182,7 @@ export const PosCart: React.FC<PosCartProps> = ({
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <img
-                      src={item.product.image}
+                      src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
                       alt={item.product.name}
                       className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-2xs shrink-0"
                       referrerPolicy="no-referrer"
@@ -193,6 +205,12 @@ export const PosCart: React.FC<PosCartProps> = ({
                             {item.quantity >= 50
                               ? `Tier 50+ (৳${item.product.wholesalePrice50Plus ?? item.product.wholesalePrice})`
                               : `Tier 1-49 (৳${item.product.wholesalePrice ?? item.product.retailPrice})`}
+                          </span>
+                        )}
+                        {pricingMode === 'cash' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-0.5">
+                            <Banknote size={10} />
+                            <span>Cash Rate {item.product.cashPrice ? `(৳${item.product.cashPrice})` : '(Retail Rate)'}</span>
                           </span>
                         )}
                         <span className="text-[10px] text-gray-400">Stock: {item.product.stock}</span>
