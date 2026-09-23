@@ -422,21 +422,36 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   };
 
   // Cart Adjustments
-  const handleAddToCart = async (product: Product) => {
+  const handleAddToCart = async (product: Product, quantityToAdd: number = 1) => {
     if (!sessionId) return;
     const currentCartQty = cartQuantitiesMap[product.id] || 0;
     if (product.stock <= 0) {
       alert(`"${product.name}" is out of stock!`);
       return;
     }
-    if (currentCartQty >= product.stock) {
+    if (currentCartQty + quantityToAdd - 1 >= product.stock) {
       alert(`Cannot add more. Available warehouse stock is ${product.stock}.`);
       return;
     }
-    const res = await addProductToSession(sessionId, product.id, currentCartQty);
-    if (!res.success) {
-      alert(res.message);
-    }
+
+    // Instant optimistic update in local state
+    const tempDocs = Array.from({ length: quantityToAdd }, (_, i) => ({
+      id: `opt_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+      product_id: product.id,
+      scanned_at: new Date().toISOString()
+    }));
+    setScans(prev => [...prev, ...tempDocs]);
+
+    // Atomic sync to Firestore
+    addProductToSession(sessionId, product.id, currentCartQty, quantityToAdd).then((res) => {
+      if (!res.success) {
+        alert(res.message);
+        setScans(prev => prev.filter(s => !tempDocs.some(t => t.id === s.id)));
+      }
+    }).catch(err => {
+      console.error('Session sync error:', err);
+      setScans(prev => prev.filter(s => !tempDocs.some(t => t.id === s.id)));
+    });
   };
 
   const handleAddToStockIn = (product: Product) => {
@@ -455,10 +470,27 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const handleIncrement = async (productId: string) => {
     if (!sessionId) return;
     const currentQty = cartQuantitiesMap[productId] || 0;
-    const res = await addProductToSession(sessionId, productId, currentQty);
-    if (!res.success) {
-      alert(res.message);
+    const prod = productService.getProductById(productId) || productService.getProductByBarcode(productId);
+    if (prod && currentQty >= prod.stock) {
+      alert(`Cannot add more. Available warehouse stock is ${prod.stock}.`);
+      return;
     }
+    const tempDoc = {
+      id: `opt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      product_id: productId,
+      scanned_at: new Date().toISOString()
+    };
+    setScans(prev => [...prev, tempDoc]);
+
+    addProductToSession(sessionId, productId, currentQty, 1).then((res) => {
+      if (!res.success) {
+        alert(res.message);
+        setScans(prev => prev.filter(s => s.id !== tempDoc.id));
+      }
+    }).catch(err => {
+      console.error('Error incrementing scan:', err);
+      setScans(prev => prev.filter(s => s.id !== tempDoc.id));
+    });
   };
 
   const handleDecrement = async (productId: string, docIds: string[]) => {

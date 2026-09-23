@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { collection, doc, onSnapshot, query, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { productService } from '../services/productService';
-import { addProductToSession, posService, isAllowedPosRole, detectDeviceType } from '../services/posService';
+import { addProductToSession, posService, isAllowedPosRole } from '../services/posService';
 import { Product, UserProfile, PosSession } from '../types';
 import { getRetailPrice } from '../utils/pricing';
 import { StockInQueueItem, ScannerContext } from './pos/types';
 import { 
-  findProductByScannedCode, 
+  lookupProductByBarcode, 
+  buildBarcodeIndex,
   scanBarcodeFromImageFile, 
   scanBarcodeFromLiveVideoSnapshot, 
   applyCameraTrackConstraints, 
@@ -31,15 +32,12 @@ import {
   ShoppingBag, 
   Volume2, 
   VolumeX, 
-  Bug, 
   Loader2, 
-  PackagePlus, 
-  Package,
   Eye,
   EyeOff,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
-import { PosScanProgressOverlay } from './pos/PosScanProgressOverlay';
 import { PosProductQuickViewModal } from './pos/PosProductQuickViewModal';
 
 export { type ScannerContext };
@@ -54,7 +52,7 @@ interface PosScanProps {
   stockInQueue?: StockInQueueItem[];
   onRemoveFromStockIn?: (productId: string) => void;
   onUpdateStockInQty?: (productId: string, quantity: number) => void;
-  onAddToCart?: (product: Product) => void;
+  onAddToCart?: (product: Product, quantity?: number) => void;
 }
 
 // Resilient Web Audio API synthesizer for retail barcode scanning chime
@@ -72,7 +70,7 @@ function getAudioContext(): AudioContext | null {
       globalAudioCtx.resume().catch(() => {});
     }
     return globalAudioCtx;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -110,7 +108,7 @@ export function playSuccessBeep(volume: number = 0.25) {
     osc2.start(now);
     osc1.stop(now + 0.18);
     osc2.stop(now + 0.18);
-  } catch (e) {}
+  } catch {}
 }
 
 /**
@@ -138,10 +136,10 @@ export function playErrorBeep(volume: number = 0.2) {
 
     osc.start(now);
     osc.stop(now + 0.22);
-  } catch (e) {}
+  } catch {}
 }
 
-export default function PosScan({ 
+export const PosScan = React.memo(function PosScan({ 
   sessionId: propSessionId, 
   onBack, 
   currentUser, 
@@ -153,7 +151,7 @@ export default function PosScan({
   onUpdateStockInQty,
   onAddToCart
 }: PosScanProps) {
-  // Check if current user is authorized staff (Only admin, super_admin, inventory_manager)
+  // Check if current user is authorized staff
   const isUserStaff = Boolean(currentUser && isAllowedPosRole(currentUser.role));
 
   // Active user-based session state
@@ -162,12 +160,33 @@ export default function PosScan({
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(context === 'SALE');
   const [sessionError, setSessionError] = useState<string | null>(null);
 
-  // Scanner & Cart states
-  const [scannedItemsCount, setScannedItemsCount] = useState(0);
+  // Optimistic cart state for instant (<2ms) UI feedback
+  interface OptimisticCartItem {
+    product: Product;
+    quantity: number;
+    docIds: string[];
+  }
+  const [optimisticCart, setOptimisticCart] = useState<OptimisticCartItem[]>([]);
+
+  // Last scanned item & notification banner
   const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [scanStatusMsg, setScanStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Sound & debug
+  // Camera video ref and state
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerControllerRef = useRef<ScannerController | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [useFrontCamera, setUseFrontCamera] = useState<boolean>(false);
+  const [posCameraZoom, setPosCameraZoom] = useState<number>(1.0);
+
+  // Manual search & drawer states
+  const [showManualInput, setShowManualInput] = useState<boolean>(false);
+  const [showCartDrawer, setShowCartDrawer] = useState<boolean>(false);
+  const [manualCode, setManualCode] = useState<string>('');
+  const [isPhotoScanning, setIsPhotoScanning] = useState<boolean>(false);
+
+  // Sound & vibration
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('pos_scan_sound_enabled');
@@ -177,47 +196,35 @@ export default function PosScan({
     }
   });
 
-  // Quick View Inspection Overlay State
+  // Quick View Inspection Mode (default false = direct fast add)
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [isQuickViewOpen, setIsQuickViewOpen] = useState<boolean>(false);
   const [quickViewEnabled, setQuickViewEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('pos_scan_quickview_enabled');
-      return saved !== null ? saved === 'true' : true;
+      return saved !== null ? saved === 'true' : false;
     } catch {
-      return true;
+      return false;
     }
   });
 
-  const toggleQuickViewMode = () => {
-    const next = !quickViewEnabled;
-    setQuickViewEnabled(next);
-    try {
-      localStorage.setItem('pos_scan_quickview_enabled', String(next));
-    } catch {}
-    setScanStatusMsg({
-      type: 'success',
-      text: next ? '✨ Quick-View on scan active' : '⚡ Fast direct add on scan active'
-    });
-  };
-
-  const [showDebugMode, setShowDebugMode] = useState<boolean>(false);
-  const [debugInfo, setDebugInfo] = useState<BarcodeDebugInfo | null>(null);
-
-  // Camera & tab states
-  const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
-  const [isPhotoScanning, setIsPhotoScanning] = useState<boolean>(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [useFrontCamera, setUseFrontCamera] = useState<boolean>(false);
-  const [posCameraZoom, setPosCameraZoom] = useState<number>(1.5);
-  const [manualCode, setManualCode] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'camera' | 'manual' | 'cart'>('camera');
-
-  // Hidden barcode input state & ref for physical USB/Bluetooth/keyboard-wedge barcode scanners (BARCODE + ENTER)
+  // Hidden barcode input for physical USB/Bluetooth/Keyboard-wedge scanners
   const [hiddenBarcode, setHiddenBarcode] = useState<string>('');
   const hiddenBarcodeRef = useRef<HTMLInputElement>(null);
 
-  // Keep hidden input focused for physical barcode scanners
+  // Products list & O(1) Barcode Index
+  const [productsList, setProductsList] = useState<Product[]>(() => productService.getProducts());
+  useEffect(() => {
+    return productService.subscribe((prods) => {
+      setProductsList(prods);
+    });
+  }, []);
+
+  const barcodeIndex = useMemo(() => {
+    return buildBarcodeIndex(productsList);
+  }, [productsList]);
+
+  // Keep hidden input focused for physical hardware scanners
   useEffect(() => {
     const focusInterval = setInterval(() => {
       if (hiddenBarcodeRef.current && document.activeElement !== hiddenBarcodeRef.current) {
@@ -226,44 +233,9 @@ export default function PosScan({
           hiddenBarcodeRef.current.focus();
         }
       }
-    }, 400);
+    }, 500);
     return () => clearInterval(focusInterval);
   }, []);
-
-  const handleHiddenBarcodeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const code = hiddenBarcode.trim();
-    if (!code) return;
-    setHiddenBarcode('');
-    await handleScanSuccess(code);
-  };
-  
-  // Live cart
-  const [scansList, setScansList] = useState<any[]>([]);
-  const [editingQtyMobile, setEditingQtyMobile] = useState<{ [productId: string]: string }>({});
-
-  // Staff login simulation (for quick testing)
-  const [emailInput, setEmailInput] = useState('');
-  const [roleInput, setRoleInput] = useState<'admin' | 'super_admin' | 'inventory_manager'>('admin');
-
-  // Scanner Controller Ref
-  const lastScanRef = useRef<{ productId: string; time: number } | null>(null);
-  const scannerControllerRef = useRef<ScannerController | null>(null);
-
-  // Sound toggle
-  const toggleSound = () => {
-    const next = !soundEnabled;
-    setSoundEnabled(next);
-    try {
-      localStorage.setItem('pos_scan_sound_enabled', String(next));
-    } catch {}
-    if (next) playSuccessBeep(0.22);
-  };
-
-  const handleTestSound = () => {
-    playSuccessBeep(0.28);
-    if (navigator.vibrate) navigator.vibrate(80);
-  };
 
   // Warm up audio context on interaction
   useEffect(() => {
@@ -295,8 +267,6 @@ export default function PosScan({
       setSessionError(null);
 
       try {
-        // Call the user-based session architecture:
-        // Automatically restores existing active session or creates a new one
         const session = await posService.getOrCreateUserPosSession({
           userId: currentUser.uid,
           userName: currentUser.name || 'Store Staff',
@@ -333,7 +303,6 @@ export default function PosScan({
   useEffect(() => {
     if (!activeSessionId) return;
 
-    // Send immediate heartbeat on session connect
     const nowIso = new Date().toISOString();
     const sessionRef = doc(db, 'pos_sessions', activeSessionId);
     updateDoc(sessionRef, {
@@ -341,7 +310,6 @@ export default function PosScan({
       updated_at: nowIso
     }).catch(() => {});
 
-    // Periodic heartbeat every 15 seconds to keep session alive in Firestore
     const heartbeatTimer = setInterval(() => {
       const timeIso = new Date().toISOString();
       updateDoc(sessionRef, {
@@ -350,7 +318,6 @@ export default function PosScan({
       }).catch(() => {});
     }, 15000);
 
-    // Real-time listener on active session document
     const unsub = onSnapshot(sessionRef, (snap) => {
       if (!snap.exists()) {
         if (context === 'SALE') {
@@ -386,25 +353,202 @@ export default function PosScan({
   // ================= 3. SCANS REAL-TIME LISTENER (CART ITEMS) =================
   useEffect(() => {
     if (!activeSessionId || context === 'STOCK_IN') {
-      setScansList([]);
-      setScannedItemsCount(0);
       return;
     }
     const q = query(collection(db, 'pos_sessions', activeSessionId, 'scans'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: any[] = [];
+      const counts: Record<string, { count: number; docIds: string[] }> = {};
       snapshot.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
+        const d = docSnap.data();
+        if (d.product_id) {
+          if (!counts[d.product_id]) counts[d.product_id] = { count: 0, docIds: [] };
+          counts[d.product_id].count++;
+          counts[d.product_id].docIds.push(docSnap.id);
+        }
       });
-      setScansList(list);
-      setScannedItemsCount(snapshot.size);
+
+      // Reconcile server snapshot with optimistic cart
+      setOptimisticCart((prev) => {
+        const productMap = new Map<string, OptimisticCartItem>();
+        
+        // Add existing items from optimistic
+        prev.forEach(item => {
+          productMap.set(item.product.id, { ...item });
+        });
+
+        // Reconcile with server counts
+        Object.keys(counts).forEach(productId => {
+          const prod = productService.getProductByBarcode(productId) || productService.getProductById(productId);
+          if (!prod) return;
+
+          const serverCount = counts[productId].count;
+          const serverDocIds = counts[productId].docIds;
+
+          const existing = productMap.get(productId);
+          if (existing) {
+            existing.quantity = Math.max(existing.quantity, serverCount);
+            existing.docIds = serverDocIds;
+          } else {
+            productMap.set(productId, {
+              product: prod,
+              quantity: serverCount,
+              docIds: serverDocIds
+            });
+          }
+        });
+
+        // If snapshot size is 0 and no optimistic addition pending, clear
+        if (snapshot.size === 0 && prev.every(it => it.docIds.length > 0)) {
+          return [];
+        }
+
+        return Array.from(productMap.values());
+      });
     }, (err) => {
       console.warn('[PosScan] Error listening to scans:', err);
     });
+
     return () => unsubscribe();
   }, [activeSessionId, context]);
 
-  // ================= 4. CAMERA SCANNER ENGINE =================
+  // ================= 4. REAL-TIME FAST SCAN DISPATCHER =================
+  const handleScanDetected = useCallback(async (rawText: string) => {
+    if (!rawText) return;
+    const tStart = performance.now();
+
+    // 1. O(1) Map Lookup
+    const { product, normalizedCode } = lookupProductByBarcode(barcodeIndex, rawText);
+    const tLookup = performance.now();
+
+    if (!product) {
+      if (soundEnabled) playErrorBeep();
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      setScanStatusMsg({
+        type: 'error',
+        text: `Unrecognized code: "${normalizedCode || rawText}"`
+      });
+      return;
+    }
+
+    // Stock check for sale mode
+    if (context === 'SALE' && product.stock <= 0) {
+      if (soundEnabled) playErrorBeep();
+      setScanStatusMsg({
+        type: 'error',
+        text: `"${product.name}" is out of stock!`
+      });
+      return;
+    }
+
+    // 2. Instant Feedback: Beep + Vibration immediately
+    if (soundEnabled) playSuccessBeep(0.25);
+    if (navigator.vibrate) navigator.vibrate(80);
+
+    setLastScannedProduct(product);
+    setScanStatusMsg({
+      type: 'success',
+      text: `Added "${product.name}"`
+    });
+
+    // If Quick-View is explicitly toggled by user, open inspection modal
+    if (quickViewEnabled) {
+      setQuickViewProduct(product);
+      setIsQuickViewOpen(true);
+      return;
+    }
+
+    // 3. OPTIMISTIC LOCAL CART UPDATE (< 2ms)
+    if (context === 'STOCK_IN') {
+      if (onAddToStockIn) {
+        onAddToStockIn(product);
+      }
+    } else {
+      let currentCartQty = 0;
+      setOptimisticCart((prev) => {
+        const existing = prev.find((it) => it.product.id === product.id);
+        if (existing) {
+          currentCartQty = existing.quantity;
+          if (currentCartQty >= product.stock) {
+            return prev;
+          }
+          return prev.map((it) =>
+            it.product.id === product.id ? { ...it, quantity: it.quantity + 1 } : it
+          );
+        }
+        return [{ product, quantity: 1, docIds: [] }, ...prev];
+      });
+
+      if (onAddToCart) {
+        onAddToCart(product, 1);
+      }
+
+      const tUI = performance.now();
+
+      // 4. Background Firestore Synchronization (Non-blocking)
+      if (activeSessionId) {
+        addProductToSession(activeSessionId, product.id, currentCartQty, 1)
+          .then((res) => {
+            const tSync = performance.now();
+            console.log(
+              `[POS Scan Timing]\n` +
+              `Detection & Lookup: ${(tLookup - tStart).toFixed(1)} ms\n` +
+              `UI Update: ${(tUI - tLookup).toFixed(1)} ms\n` +
+              `Firestore Sync: ${(tSync - tUI).toFixed(1)} ms\n` +
+              `Total: ${(tSync - tStart).toFixed(1)} ms`
+            );
+
+            if (!res.success) {
+              // Rollback optimistic update on error
+              setOptimisticCart((prev) => {
+                const item = prev.find((it) => it.product.id === product.id);
+                if (!item) return prev;
+                if (item.quantity <= 1) {
+                  return prev.filter((it) => it.product.id !== product.id);
+                }
+                return prev.map((it) =>
+                  it.product.id === product.id ? { ...it, quantity: it.quantity - 1 } : it
+                );
+              });
+              if (soundEnabled) playErrorBeep();
+              setScanStatusMsg({
+                type: 'error',
+                text: res.message
+              });
+            }
+          })
+          .catch((err) => {
+            console.error('[PosScan] Background session sync error:', err);
+            // Rollback optimistic update
+            setOptimisticCart((prev) => {
+              const item = prev.find((it) => it.product.id === product.id);
+              if (!item) return prev;
+              if (item.quantity <= 1) {
+                return prev.filter((it) => it.product.id !== product.id);
+              }
+              return prev.map((it) =>
+                it.product.id === product.id ? { ...it, quantity: it.quantity - 1 } : it
+              );
+            });
+            if (soundEnabled) playErrorBeep();
+            setScanStatusMsg({
+              type: 'error',
+              text: 'Failed to sync scan with session.'
+            });
+          });
+      }
+    }
+  }, [barcodeIndex, context, soundEnabled, quickViewEnabled, onAddToStockIn, onAddToCart, activeSessionId]);
+
+  // Physical Barcode Scanner Submission (Enter key)
+  const handleHiddenBarcodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = hiddenBarcode.trim();
+    if (!code) return;
+    setHiddenBarcode('');
+    await handleScanDetected(code);
+  };
+
+  // ================= 5. CAMERA CONTROLLER LIFECYCLE =================
   useEffect(() => {
     if (!isCameraActive) {
       if (scannerControllerRef.current) {
@@ -416,37 +560,21 @@ export default function PosScan({
 
     let active = true;
 
-    const startScanner = async () => {
+    const initScanner = async () => {
       setCameraError(null);
       if (scannerControllerRef.current) {
         await scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
       }
 
-      // Wait until #reader-container is mounted in the DOM
-      let attempts = 0;
-      while (active && !document.getElementById("reader-container") && attempts < 15) {
-        await new Promise(r => setTimeout(r, 50));
-        attempts++;
-      }
-
-      if (!active) return;
-
-      const containerCheck = document.getElementById("reader-container");
-      if (!containerCheck) {
-        if (active) {
-          setCameraError("Camera view container not found.");
-          setIsCameraActive(false);
-        }
-        return;
-      }
+      if (!videoRef.current || !active) return;
 
       try {
         const controller = await startUnifiedCameraScanner({
-          containerId: "reader-container",
+          videoElement: videoRef.current,
           useFrontCamera,
           onScanSuccess: (rawCode) => {
-            if (active) handleScanSuccess(rawCode);
+            if (active) handleScanDetected(rawCode);
           },
           onError: (errMsg) => {
             if (active) {
@@ -454,7 +582,7 @@ export default function PosScan({
               setIsCameraActive(false);
             }
           },
-          debounceMs: 1200
+          debounceMs: 800
         });
 
         if (active) {
@@ -471,16 +599,18 @@ export default function PosScan({
       }
     };
 
-    startScanner();
+    // Small delay to ensure React ref has attached to video element
+    const timer = setTimeout(initScanner, 60);
 
     return () => {
       active = false;
+      clearTimeout(timer);
       if (scannerControllerRef.current) {
         scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
       }
     };
-  }, [isCameraActive, useFrontCamera]);
+  }, [isCameraActive, useFrontCamera, handleScanDetected]);
 
   const stopScanner = () => {
     if (scannerControllerRef.current) {
@@ -490,36 +620,39 @@ export default function PosScan({
     setIsCameraActive(false);
   };
 
-  const handleLiveLensSnapPos = async () => {
+  // Quick Zoom control
+  const handleZoomChange = async (newZoom: number) => {
+    setPosCameraZoom(newZoom);
+    if (scannerControllerRef.current) {
+      await scannerControllerRef.current.applyZoom(newZoom);
+    }
+  };
+
+  // Live Lens Snapshot fallback
+  const handleLiveLensSnap = async () => {
+    if (!videoRef.current) return;
     setIsPhotoScanning(true);
-    setScanStatusMsg({ type: 'success', text: '🔍 Analyzing live camera frame...' });
+    setScanStatusMsg({ type: 'success', text: '🔍 Analyzing instant frame...' });
 
     try {
-      const scannedText = await scanBarcodeFromLiveVideoSnapshot("reader-container");
+      const scannedText = await scanBarcodeFromLiveVideoSnapshot(videoRef.current);
       if (scannedText) {
-        await handleScanSuccess(scannedText);
+        await handleScanDetected(scannedText);
       } else {
         setScanStatusMsg({
           type: 'error',
-          text: 'Could not read barcode from instant frame. Hold camera ~15cm away and tap Lens Scan again.'
+          text: 'No barcode detected in frame. Hold camera ~15cm away.'
         });
       }
-    } catch (err) {
-      console.error("POS Live Lens snap error:", err);
-      setScanStatusMsg({ type: 'error', text: 'Error performing live snapshot scan.' });
+    } catch {
+      setScanStatusMsg({ type: 'error', text: 'Error analyzing frame.' });
     } finally {
       setIsPhotoScanning(false);
     }
   };
 
-  const handlePosZoomChange = async (newZoom: number) => {
-    setPosCameraZoom(newZoom);
-    if (isCameraActive) {
-      await applyCameraTrackConstraints("reader-container", { zoom: newZoom, triggerFocus: true });
-    }
-  };
-
-  const handleGoogleLensPhotoScanPos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Gallery photo barcode scan fallback
+  const handlePhotoUploadScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -529,165 +662,32 @@ export default function PosScan({
     try {
       const scannedText = await scanBarcodeFromImageFile(file);
       if (scannedText) {
-        await handleScanSuccess(scannedText);
+        await handleScanDetected(scannedText);
       } else {
         setScanStatusMsg({
           type: 'error',
-          text: 'Could not read barcode from photo. Ensure lighting is clear and retry.'
+          text: 'Could not read barcode from image.'
         });
       }
-    } catch (err) {
-      console.error("POS Photo scan error:", err);
-      setScanStatusMsg({ type: 'error', text: 'Error analyzing photo barcode.' });
+    } catch {
+      setScanStatusMsg({ type: 'error', text: 'Error analyzing photo.' });
     } finally {
       setIsPhotoScanning(false);
       e.target.value = '';
     }
   };
 
-  // ================= 5. BARCODE SUCCESS PROCESSING =================
-  const handleAddProductWithQuantity = async (
-    product: Product,
-    quantity: number,
-    action: 'keep_scanning' | 'checkout'
-  ) => {
-    if (!product || quantity <= 0) return;
-    getAudioContext();
-    const productId = product.id;
-
-    if (context === 'STOCK_IN') {
-      // CONTEXT-AWARE: STOCK RECEIVING FLOW
-      if (onAddToStockIn) {
-        for (let i = 0; i < quantity; i++) {
-          onAddToStockIn(product);
-        }
-      }
-    } else {
-      // CONTEXT-AWARE: SALE REGISTER FLOW
-      if (activeSessionId) {
-        for (let i = 0; i < quantity; i++) {
-          const result = await addProductToSession(activeSessionId, productId);
-          if (!result.success && i === 0) {
-            if (soundEnabled) playErrorBeep();
-            setScanStatusMsg({
-              type: 'error',
-              text: result.message || `Failed to add product.`
-            });
-            return;
-          }
-        }
-      } else if (onAddToCart) {
-        for (let i = 0; i < quantity; i++) {
-          onAddToCart(product);
-        }
-      }
-    }
-
-    if (soundEnabled) playSuccessBeep();
-    if (navigator.vibrate) navigator.vibrate(90);
-
-    setLastScannedProduct(product);
-    setScanStatusMsg({
-      type: 'success',
-      text: `Added ${quantity > 1 ? `${quantity} × ` : ''}"${product.name}"!`
-    });
-
-    setIsQuickViewOpen(false);
-
-    if (action === 'checkout') {
-      stopScanner();
-      onBack();
-    }
-  };
-
-  const handleScanSuccess = async (rawText: string) => {
-    if (!rawText) return;
-
-    getAudioContext();
-
-    const allProducts = productService.getProducts();
-    const { product, debugInfo: scanDebug } = findProductByScannedCode(allProducts, rawText);
-    setDebugInfo(scanDebug);
-
-    if (!product) {
-      // Unknown barcode: show error, keep scanner open, do NOT add product, do NOT play success sound
-      if (soundEnabled) playErrorBeep();
-      if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
-      setScanStatusMsg({
-        type: 'error',
-        text: `Unrecognized code "${scanDebug.normalizedValue || scanDebug.rawValue}"`
-      });
-      return;
-    }
-
-    const productId = product.id;
-
-    // Avoid double scans within 1.2 seconds / prevent duplicate Enter/rapid scan submissions
-    const now = Date.now();
-    if (lastScanRef.current && lastScanRef.current.productId === productId && (now - lastScanRef.current.time) < 1200) {
-      return;
-    }
-    lastScanRef.current = { productId, time: now };
-
-    if (soundEnabled) playSuccessBeep();
-    if (navigator.vibrate) navigator.vibrate(90);
-
-    setLastScannedProduct(product);
-
-    if (quickViewEnabled) {
-      // Show Quick-View for product details upon successful match!
-      setQuickViewProduct(product);
-      setIsQuickViewOpen(true);
-    } else {
-      // Direct fast add
-      await handleAddProductWithQuantity(product, 1, 'keep_scanning');
-    }
-  };
-
-  // Products list for manual search
-  const [productsList, setProductsList] = useState<Product[]>(() => productService.getProducts());
-  useEffect(() => {
-    return productService.subscribe((prods) => {
-      setProductsList(prods);
-    });
-  }, []);
-
-  const filteredManualProducts = useMemo(() => {
-    const q = manualCode.trim().toLowerCase();
-    if (!q) return [];
-    return productsList.filter(p => {
-      const nameMatch = p.name?.toLowerCase().includes(q);
-      const brandMatch = p.brand?.toLowerCase().includes(q);
-      const barcodeMatch = p.barcode?.toLowerCase().includes(q);
-      const idMatch = p.id?.toLowerCase().includes(q);
-      const catMatch = p.category?.toLowerCase().includes(q);
-      return nameMatch || brandMatch || barcodeMatch || idMatch || catMatch;
-    }).slice(0, 15);
-  }, [productsList, manualCode]);
-
-  const handleSelectManualProduct = async (product: Product, openQuickViewFirst: boolean = false) => {
-    if (!product) return;
-    getAudioContext();
-
-    if (openQuickViewFirst || quickViewEnabled) {
-      setQuickViewProduct(product);
-      setIsQuickViewOpen(true);
-      return;
-    }
-
-    await handleAddProductWithQuantity(product, 1, 'keep_scanning');
-    setManualCode('');
-  };
-
-  // Manual code submission
+  // Manual search submission
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const q = manualCode.trim();
     if (!q) return;
 
-    const { product } = findProductByScannedCode(productsList, q);
+    const { product } = lookupProductByBarcode(barcodeIndex, q);
     if (product) {
-      await handleSelectManualProduct(product);
+      await handleScanDetected(q);
+      setManualCode('');
+      setShowManualInput(false);
       return;
     }
 
@@ -697,144 +697,94 @@ export default function PosScan({
     );
 
     if (matches.length === 1) {
-      await handleSelectManualProduct(matches[0]);
+      await handleScanDetected(matches[0].barcode || matches[0].id);
+      setManualCode('');
+      setShowManualInput(false);
     } else if (matches.length > 1) {
       setScanStatusMsg({
         type: 'error',
-        text: `Multiple products matched "${q}". Please select from the list below.`
+        text: `Multiple matches found (${matches.length}). Select one below.`
       });
     } else {
-      await handleScanSuccess(q);
+      await handleScanDetected(q);
+      setManualCode('');
     }
   };
 
-  const handleStaffLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!emailInput.trim()) {
-      alert("Please enter work email.");
+  // Total cart count
+  const totalCount = useMemo(() => {
+    if (context === 'STOCK_IN') {
+      return stockInQueue.reduce((acc, it) => acc + (it.quantity || 0), 0);
+    }
+    return optimisticCart.reduce((acc, it) => acc + it.quantity, 0);
+  }, [context, stockInQueue, optimisticCart]);
+
+  // Cart quantity adjustment inside scanner drawer
+  const handleIncrement = async (product: Product) => {
+    if (context === 'STOCK_IN') {
+      if (onAddToStockIn) onAddToStockIn(product);
       return;
     }
+    await handleScanDetected(product.barcode || product.id);
+  };
+
+  const handleDecrement = async (item: OptimisticCartItem) => {
+    if (context === 'STOCK_IN') {
+      if (onUpdateStockInQty && item.quantity > 1) {
+        onUpdateStockInQty(item.product.id, item.quantity - 1);
+      } else if (onRemoveFromStockIn) {
+        onRemoveFromStockIn(item.product.id);
+      }
+      return;
+    }
+
+    if (item.quantity <= 1) {
+      handleRemoveItem(item);
+      return;
+    }
+
+    // Optimistic decrement
+    setOptimisticCart(prev =>
+      prev.map(it => it.product.id === item.product.id ? { ...it, quantity: it.quantity - 1 } : it)
+    );
+
+    if (activeSessionId && item.docIds.length > 0) {
+      const docIdToDelete = item.docIds[item.docIds.length - 1];
+      deleteDoc(doc(db, 'pos_sessions', activeSessionId, 'scans', docIdToDelete)).catch(e => {
+        console.error('Error deleting scan doc:', e);
+      });
+    }
+  };
+
+  const handleRemoveItem = async (item: OptimisticCartItem) => {
+    if (context === 'STOCK_IN') {
+      if (onRemoveFromStockIn) onRemoveFromStockIn(item.product.id);
+      return;
+    }
+
+    setOptimisticCart(prev => prev.filter(it => it.product.id !== item.product.id));
+
+    if (activeSessionId && item.docIds.length > 0) {
+      const batch = writeBatch(db);
+      item.docIds.forEach(id => {
+        batch.delete(doc(db, 'pos_sessions', activeSessionId, 'scans', id));
+      });
+      batch.commit().catch(e => console.error('Error batch deleting items:', e));
+    }
+  };
+
+  // Staff login simulation
+  const [emailInput, setEmailInput] = useState('');
+  const [roleInput, setRoleInput] = useState<'admin' | 'super_admin' | 'inventory_manager'>('admin');
+  const handleStaffLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput.trim()) return;
     if (onLoginStaff) {
       onLoginStaff(emailInput.trim(), roleInput);
     }
   };
 
-  // Grouped cart items
-  const mobileCartItems = useMemo(() => {
-    const counts: { [pId: string]: { count: number; docIds: string[] } } = {};
-    scansList.forEach((s) => {
-      if (s.product_id) {
-        if (!counts[s.product_id]) {
-          counts[s.product_id] = { count: 0, docIds: [] };
-        }
-        counts[s.product_id].count += 1;
-        counts[s.product_id].docIds.push(s.id);
-      }
-    });
-
-    return Object.keys(counts).map((pId) => {
-      const prod = productService.getProductByBarcode(pId) || productService.getProductById(pId);
-      return {
-        product: prod || ({
-          id: pId,
-          name: 'Unknown Product',
-          nameBN: 'অজানা পণ্য',
-          brand: 'Generic',
-          price: 1000,
-          stock: 0,
-          image: 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=150&auto=format&fit=crop'
-        } as Product),
-        quantity: counts[pId].count,
-        docIds: counts[pId].docIds
-      };
-    });
-  }, [scansList]);
-
-  const handleIncrementMobile = async (productId: string) => {
-    if (!activeSessionId) return;
-    const res = await addProductToSession(activeSessionId, productId);
-    if (!res.success) alert(res.message);
-  };
-
-  const handleDecrementMobile = async (docIds: string[]) => {
-    if (!activeSessionId || docIds.length === 0) return;
-    try {
-      const lastDocId = docIds[docIds.length - 1];
-      await deleteDoc(doc(db, 'pos_sessions', activeSessionId, 'scans', lastDocId));
-    } catch (err) {
-      console.error('Error decrementing scan:', err);
-    }
-  };
-
-  const handleSetQuantityMobile = async (productId: string, docIds: string[], maxStock: number, rawValue: string) => {
-    if (!activeSessionId) return;
-    setEditingQtyMobile(prev => {
-      const next = { ...prev };
-      delete next[productId];
-      return next;
-    });
-
-    const parsed = parseInt(rawValue.trim(), 10);
-    if (isNaN(parsed) || parsed < 0) return;
-
-    if (parsed === 0) {
-      await handleRemoveMobile(docIds);
-      return;
-    }
-
-    let targetQty = parsed;
-    if (targetQty > maxStock) {
-      alert(`Available stock is ${maxStock}. Setting quantity to ${maxStock}.`);
-      targetQty = maxStock;
-    }
-
-    const currentQty = docIds.length;
-    if (targetQty === currentQty) return;
-
-    try {
-      const batch = writeBatch(db);
-      if (targetQty > currentQty) {
-        const diff = targetQty - currentQty;
-        const scansColRef = collection(db, 'pos_sessions', activeSessionId, 'scans');
-        for (let i = 0; i < diff; i++) {
-          const newDocRef = doc(scansColRef);
-          batch.set(newDocRef, {
-            product_id: productId,
-            scanned_at: new Date().toISOString()
-          });
-        }
-      } else {
-        const diff = currentQty - targetQty;
-        const docsToDelete = docIds.slice(docIds.length - diff);
-        for (const dId of docsToDelete) {
-          batch.delete(doc(db, 'pos_sessions', activeSessionId, 'scans', dId));
-        }
-      }
-      await batch.commit();
-    } catch (err) {
-      console.error('Error setting quantity in mobile scanner:', err);
-    }
-  };
-
-  const handleRemoveMobile = async (docIds: string[]) => {
-    if (!activeSessionId || docIds.length === 0) return;
-    try {
-      for (const id of docIds) {
-        await deleteDoc(doc(db, 'pos_sessions', activeSessionId, 'scans', id));
-      }
-    } catch (err) {
-      console.error('Error removing scans:', err);
-    }
-  };
-
-  // Effective count based on context
-  const totalStockInItemsCount = useMemo(() => {
-    return stockInQueue.reduce((acc, item) => acc + (item.quantity || 0), 0);
-  }, [stockInQueue]);
-
-  const effectiveItemCount = context === 'STOCK_IN' ? totalStockInItemsCount : scannedItemsCount;
-
-  // ================= RENDER A: AUTHENTICATION / ACCESS RESTRICTION =================
+  // ================= RENDER A: AUTHENTICATION CHECK =================
   if (!isUserStaff) {
     return (
       <div className="max-w-md mx-auto bg-white p-6 rounded-3xl border border-pink-100 shadow-xl space-y-6 text-xs text-center my-6">
@@ -844,16 +794,9 @@ export default function PosScan({
         <div className="space-y-1.5">
           <h3 className="text-base font-extrabold text-gray-900">Staff Authentication Required</h3>
           <p className="text-gray-500 leading-relaxed font-medium">
-            This live smartphone POS module is restricted exclusively to authorized checkout staff members (admin, super_admin, inventory_manager).
+            This live smartphone POS module is restricted exclusively to authorized staff (admin, super_admin, inventory_manager).
           </p>
         </div>
-
-        {currentUser && (
-          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-left text-slate-700 text-[11px] space-y-1">
-            <p><span className="font-semibold text-gray-900">Logged-in User:</span> {currentUser.name || currentUser.email}</p>
-            <p><span className="font-semibold text-gray-900">Assigned Role:</span> <span className="font-mono font-bold text-rose-600 uppercase">{currentUser.role || 'customer'}</span></p>
-          </div>
-        )}
 
         <form onSubmit={handleStaffLoginSubmit} className="text-left bg-pink-50/20 p-5 rounded-2xl border border-pink-100/50 space-y-4">
           <span className="text-[10px] uppercase font-bold text-pink-700 tracking-wider block">Staff Quick Login</span>
@@ -870,7 +813,7 @@ export default function PosScan({
           </div>
 
           <div>
-            <label className="block text-gray-500 font-semibold mb-1">Assigned Role</label>
+            <label className="block text-gray-500 font-semibold mb-1">Role</label>
             <select
               value={roleInput}
               onChange={(e: any) => setRoleInput(e.target.value)}
@@ -897,13 +840,13 @@ export default function PosScan({
           className="text-[#E91E8C] hover:text-[#FF4B91] font-bold text-xs flex items-center justify-center gap-1 mx-auto cursor-pointer"
         >
           <ArrowLeft size={13} />
-          <span>Return to Store</span>
+          <span>Return</span>
         </button>
       </div>
     );
   }
 
-  // ================= RENDER B: LOADING SESSION STATE =================
+  // ================= RENDER B: LOADING SESSION =================
   if (isLoadingSession) {
     return (
       <div className="max-w-md mx-auto min-h-[60vh] flex flex-col items-center justify-center space-y-4 p-6 text-center">
@@ -911,16 +854,16 @@ export default function PosScan({
           <Loader2 className="animate-spin" size={26} />
         </div>
         <div className="space-y-1">
-          <h3 className="text-base font-extrabold text-gray-900">Starting POS Live Session</h3>
+          <h3 className="text-base font-extrabold text-gray-900">Starting POS Session</h3>
           <p className="text-xs text-pink-600 font-medium font-mono animate-pulse">
-            Connecting session for {currentUser?.name || 'Staff'} ({currentUser?.role})...
+            Connecting session for {currentUser?.name || 'Staff'}...
           </p>
         </div>
       </div>
     );
   }
 
-  // ================= RENDER C: SESSION INITIALIZATION ERROR =================
+  // ================= RENDER C: SESSION ERROR =================
   if (sessionError) {
     return (
       <div className="max-w-md mx-auto my-12 bg-white border border-rose-200 p-6 rounded-3xl shadow-sm text-center space-y-4">
@@ -951,15 +894,10 @@ export default function PosScan({
     );
   }
 
-  // Format operator display role
-  const formattedRole = (activeSession?.userRole || currentUser?.role || '')
-    .replace('_', ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
-
-  // ================= RENDER D: AUTOMATIC LIVE MOBILE POS WORKSTATION =================
+  // ================= RENDER D: MOBILE-FIRST POS SCANNER =================
   return (
-    <div className="max-w-md mx-auto bg-[#FFF5F8] min-h-screen flex flex-col justify-between pb-8">
-      {/* Hidden focusable input for USB/Bluetooth/keyboard-wedge physical barcode scanners */}
+    <div className="max-w-md mx-auto bg-[#FFF5F8] min-h-screen flex flex-col justify-between pb-6 select-none">
+      {/* Hidden input for physical USB/Bluetooth barcode scanners */}
       <form onSubmit={handleHiddenBarcodeSubmit} className="sr-only opacity-0 absolute w-0 h-0 overflow-hidden pointer-events-none">
         <input
           ref={hiddenBarcodeRef}
@@ -972,8 +910,8 @@ export default function PosScan({
         />
       </form>
 
-      {/* 🟢 POS LIVE WORKSTATION HEADER */}
-      <header className="bg-white px-4 py-3 border-b border-pink-100 shadow-xs sticky top-0 z-20 space-y-2">
+      {/* TOP HEADER */}
+      <header className="bg-white/95 backdrop-blur-md px-4 py-3 border-b border-pink-100 sticky top-0 z-30 shadow-xs">
         <div className="flex items-center justify-between">
           <button 
             type="button"
@@ -981,609 +919,413 @@ export default function PosScan({
               stopScanner();
               onBack();
             }}
-            className="p-1.5 hover:bg-pink-50 text-gray-500 rounded-xl cursor-pointer"
-            title="Back"
+            className="p-2 hover:bg-pink-50 text-gray-600 rounded-xl cursor-pointer transition"
+            title="Close / Back"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={20} />
           </button>
 
           <div className="text-center">
-            <div className="flex items-center justify-center gap-1.5">
-              <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full border border-emerald-200 shadow-2xs">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <span>POS LIVE</span>
-              </span>
-            </div>
-            <div className="flex items-center justify-center gap-1 text-[11px] text-gray-600 mt-0.5">
-              <span className="font-bold text-gray-900 truncate max-w-[120px]">
-                {activeSession?.userName || currentUser?.name || 'Staff'}
-              </span>
-              <span>&bull;</span>
-              <span className="text-[#E91E8C] font-semibold text-[10px]">
-                {formattedRole}
-              </span>
-            </div>
+            <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{context === 'STOCK_IN' ? 'STOCK-IN SCAN' : 'POS SCANNER'}</span>
+            </span>
+            <p className="text-[10px] text-gray-500 font-mono mt-0.5">
+              {activeSessionId ? `Session: #${activeSessionId.slice(-6).toUpperCase()}` : 'Ready to scan'}
+            </p>
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* Quick-View Mode Toggle */}
-            <button
-              type="button"
-              onClick={toggleQuickViewMode}
-              className={`p-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 shadow-2xs ${
-                quickViewEnabled 
-                  ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100' 
-                  : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'
-              }`}
-              title={quickViewEnabled ? 'Quick-View Product Modal ON (Inspect details & qty upon scan)' : 'Direct Fast Add (Quick-View Modal OFF)'}
-            >
-              {quickViewEnabled ? <Eye size={13} className="text-purple-600" /> : <EyeOff size={13} />}
-            </button>
-
             {/* Audio Toggle */}
             <button
               type="button"
-              onClick={toggleSound}
-              className={`p-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 shadow-2xs ${
+              onClick={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                try { localStorage.setItem('pos_scan_sound_enabled', String(next)); } catch {}
+                if (next) playSuccessBeep();
+              }}
+              className={`p-2 rounded-xl border transition cursor-pointer ${
                 soundEnabled 
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
                   : 'bg-gray-100 border-gray-200 text-gray-400 hover:bg-gray-200'
               }`}
-              title={soundEnabled ? 'Audio Feedback ON' : 'Audio Feedback MUTED'}
+              title={soundEnabled ? 'Sound ON' : 'Sound MUTED'}
             >
-              {soundEnabled ? <Volume2 size={13} className="text-emerald-600" /> : <VolumeX size={13} />}
+              {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
             </button>
 
-            {/* Cart Count Button */}
+            {/* View Cart / Queue Count Button */}
             <button
               type="button"
-              onClick={() => setActiveTab(activeTab === 'cart' ? 'camera' : 'cart')}
-              className="flex items-center gap-1.5 bg-pink-50 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1.5 rounded-xl font-mono shadow-inner cursor-pointer"
+              onClick={() => setShowCartDrawer(prev => !prev)}
+              className="flex items-center gap-1.5 bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] text-white text-xs font-bold px-3 py-2 rounded-xl shadow-xs hover:opacity-95 transition cursor-pointer"
             >
-              <ShoppingBag size={12} />
-              <span>{scannedItemsCount}</span>
+              <ShoppingBag size={14} />
+              <span>{totalCount}</span>
             </button>
           </div>
-        </div>
-
-        {/* User Session & Device Identifier Sub-bar */}
-        <div className="flex items-center justify-between text-[10px] text-gray-500 bg-pink-50/50 px-3 py-1.5 rounded-xl border border-pink-100/60 font-mono">
-          <span className="flex items-center gap-1 text-slate-700 font-bold">
-            <Smartphone size={11} className="text-[#E91E8C]" />
-            <span className="capitalize">{activeSession?.deviceType || 'Mobile'}</span>
-          </span>
-          <span className="text-gray-400 font-semibold truncate max-w-[180px]">
-            Session: <strong className="text-gray-700 font-bold">{activeSessionId}</strong>
-          </span>
         </div>
       </header>
 
-      {/* MODE TABS (Camera Scan / Manual Entry / Live Cart) */}
-      <nav className="bg-white border-b border-pink-100 px-4 py-2 flex items-center justify-around text-xs font-bold" aria-label="Scanner modes">
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('camera');
-            if (!isCameraActive) setIsCameraActive(true);
-          }}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl transition cursor-pointer ${
-            activeTab === 'camera'
-              ? 'bg-[#E91E8C] text-white shadow-xs'
-              : 'text-gray-500 hover:text-pink-600'
-          }`}
-        >
-          <Camera size={14} />
-          <span>Camera</span>
-        </button>
+      {/* MAIN SCANNER VIEW */}
+      <main className="flex-1 flex flex-col p-4 space-y-3">
+        {/* CAMERA PREVIEW CONTAINER */}
+        <div className="relative w-full aspect-[4/3] max-h-[50vh] bg-black rounded-3xl overflow-hidden shadow-2xl border-4 border-white/60 flex items-center justify-center">
+          {/* Native HTML5 Video Element directly managed with videoRef */}
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className={`w-full h-full object-cover transition-opacity duration-300 ${
+              isCameraActive && !cameraError ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('manual')}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl transition cursor-pointer ${
-            activeTab === 'manual'
-              ? 'bg-[#E91E8C] text-white shadow-xs'
-              : 'text-gray-500 hover:text-pink-600'
-          }`}
-        >
-          <Search size={14} />
-          <span>Manual Input</span>
-        </button>
+          {/* Camera Viewfinder Overlay with corner reticles & animated scanning laser beam */}
+          {isCameraActive && !cameraError && (
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6">
+              <div className="relative w-64 h-36 max-w-[85%] max-h-[70%] rounded-2xl border border-white/25">
+                {/* 4 Corner Markers */}
+                <div className="absolute -top-1 -left-1 w-6 h-6 border-t-3 border-l-3 border-[#E91E8C] rounded-tl shadow-[0_0_8px_#E91E8C]" />
+                <div className="absolute -top-1 -right-1 w-6 h-6 border-t-3 border-r-3 border-[#E91E8C] rounded-tr shadow-[0_0_8px_#E91E8C]" />
+                <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-3 border-l-3 border-[#E91E8C] rounded-bl shadow-[0_0_8px_#E91E8C]" />
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-3 border-r-3 border-[#E91E8C] rounded-br shadow-[0_0_8px_#E91E8C]" />
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('cart')}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl transition cursor-pointer ${
-            activeTab === 'cart'
-              ? 'bg-[#E91E8C] text-white shadow-xs'
-              : 'text-gray-500 hover:text-pink-600'
-          }`}
-        >
-          <ShoppingBag size={14} />
-          <span>Cart ({scannedItemsCount})</span>
-        </button>
-      </nav>
-
-      {/* MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 space-y-4">
-        {/* STATUS NOTIFICATION BANNER */}
-        {scanStatusMsg && (
-          <div className={`w-full max-w-sm p-3 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-md animate-scaleIn ${
-            scanStatusMsg.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'
-          }`}>
-            {scanStatusMsg.type === 'success' ? <CheckCircle size={16} className="text-emerald-600 flex-shrink-0" /> : <AlertCircle size={16} className="text-red-600 flex-shrink-0" />}
-            <span className="truncate">{scanStatusMsg.text}</span>
-          </div>
-        )}
-
-        {/* TAB 1: CAMERA SCANNER */}
-        {activeTab === 'camera' && (
-          <div className="w-full max-w-sm flex flex-col items-center space-y-4">
-            {isCameraActive ? (
-              <div className="w-full aspect-square max-w-[300px] bg-black rounded-3xl overflow-hidden relative border-4 border-[#E91E8C] shadow-2xl">
-                <div id="reader-container" className="w-full h-full"></div>
-                
-                {/* Advanced Visual Scanner Progress HUD Overlay */}
-                <PosScanProgressOverlay
-                  isScanning={isCameraActive}
-                  isAnalyzingPhoto={isPhotoScanning}
-                  zoomLevel={posCameraZoom}
-                  onZoomChange={handlePosZoomChange}
-                  onRefocus={() => applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true })}
-                  onSwitchCamera={() => setUseFrontCamera(!useFrontCamera)}
-                  useFrontCamera={useFrontCamera}
-                  scanStatusMsg={scanStatusMsg}
-                />
+                {/* Laser scan line */}
+                <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-[#E91E8C] to-transparent shadow-[0_0_10px_#E91E8C] animate-pulse top-1/2 -translate-y-1/2" />
               </div>
-            ) : (
-              <div className="w-full aspect-square max-w-[300px] bg-white rounded-3xl border border-pink-100 shadow-inner flex flex-col items-center justify-center p-6 text-center space-y-4">
-                <div className="w-16 h-16 bg-pink-50 text-[#E91E8C] rounded-full flex items-center justify-center shadow-inner">
-                  <Camera size={32} />
-                </div>
-                
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Camera Scanner Ready</h4>
-                  <p className="text-[10px] text-gray-500 leading-relaxed max-w-[220px] mx-auto">
-                    Point camera at retail product barcodes to instantly add items into your session cart.
-                  </p>
-                </div>
 
-                {cameraError && (
-                  <div className="bg-red-50 border border-red-100 text-red-600 text-[10px] p-2.5 rounded-xl font-medium leading-relaxed text-left">
-                    {cameraError}
-                  </div>
-                )}
-
-                <div className="flex gap-2 flex-wrap justify-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsCameraActive(true)}
-                    className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-xs font-bold px-5 py-2.5 rounded-xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center gap-1.5"
-                  >
-                    <Camera size={14} />
-                    <span>START CAMERA SCANNER</span>
-                  </button>
-
-                  <label className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition shadow-md flex items-center gap-1.5">
-                    <Search size={14} />
-                    <span>{isPhotoScanning ? "Analyzing..." : "Lens Photo"}</span>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      capture="environment" 
-                      onChange={handleGoogleLensPhotoScanPos}
-                      className="hidden"
-                      disabled={isPhotoScanning}
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* Live Camera Controls */}
-            {isCameraActive && (
-              <div className="flex flex-col items-center gap-2.5 w-full max-w-xs mx-auto mt-2">
-                <div className="flex items-center gap-2 flex-wrap justify-center">
-                  <div className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded-xl border border-gray-200 text-[10px]">
-                    <span className="text-gray-500 font-bold">Zoom:</span>
-                    {[1.0, 1.5, 2.0, 2.5].map((z) => (
-                      <button
-                        key={z}
-                        type="button"
-                        onClick={() => handlePosZoomChange(z)}
-                        className={`px-1.5 py-0.5 rounded-lg text-[9px] font-extrabold cursor-pointer transition ${
-                          posCameraZoom === z 
-                            ? "bg-[#E91E8C] text-white" 
-                            : "bg-white text-gray-700 hover:bg-gray-200"
-                        }`}
-                      >
-                        {z}x
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => applyCameraTrackConstraints("reader-container", { zoom: posCameraZoom, triggerFocus: true })}
-                    className="bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 text-[10px] font-bold px-2.5 py-1 rounded-xl transition cursor-pointer shadow-2xs flex items-center gap-1"
-                    title="Force camera focus"
-                  >
-                    🎯 Refocus
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setUseFrontCamera(!useFrontCamera)}
-                    className="bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-2xs flex items-center gap-1"
-                  >
-                    <RefreshCw size={12} />
-                    <span>Cam ({useFrontCamera ? "Front" : "Rear"})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopScanner();
-                      setIsCameraActive(false);
-                    }}
-                    className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-[10px] font-bold px-3 py-1 rounded-xl transition cursor-pointer shadow-2xs"
-                  >
-                    Pause
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleLiveLensSnapPos}
-                  disabled={isPhotoScanning}
-                  className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 text-white font-extrabold text-xs py-2 px-3 rounded-xl shadow-md flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-                >
-                  <Search size={14} className={isPhotoScanning ? "animate-spin" : ""} />
-                  <span>{isPhotoScanning ? "Scanning Frame..." : "📸 Instant Lens HD Scan"}</span>
-                </button>
-              </div>
-            )}
-
-            {/* RECENTLY SCANNED ITEM BANNER */}
-            {lastScannedProduct && (
-              <div className="w-full bg-white p-3.5 rounded-2xl border-b-4 border-[#E91E8C] shadow-md flex items-center justify-between gap-3 animate-scaleIn">
-                <div 
-                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
-                  onClick={() => {
-                    setQuickViewProduct(lastScannedProduct);
-                    setIsQuickViewOpen(true);
-                  }}
-                  title="Click to view product details & adjust quantity"
-                >
-                  <img 
-                    src={lastScannedProduct.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
-                    alt={lastScannedProduct.name}
-                    className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-xs flex-shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="flex-1 min-w-0 text-left text-[11px]">
-                    <span className="text-[9px] uppercase font-extrabold text-[#E91E8C] block">Matched & Added to Cart</span>
-                    <h4 className="font-bold text-gray-800 truncate">{lastScannedProduct.name}</h4>
-                    <p className="text-gray-500 font-mono mt-0.5">Price: <strong>৳{getRetailPrice(lastScannedProduct)}</strong> &bull; Stock: {lastScannedProduct.stock}</p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickViewProduct(lastScannedProduct);
-                    setIsQuickViewOpen(true);
-                  }}
-                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 p-2 rounded-xl border border-purple-200 transition cursor-pointer flex-shrink-0 flex items-center gap-1 text-[10px] font-bold"
-                  title="Quick View Product Specs & Quantities"
-                >
-                  <Eye size={13} />
-                  <span>Inspect</span>
-                </button>
-              </div>
-            )}
-
-            {/* BARCODE DEBUG MODE PANEL */}
-            <div className="w-full bg-slate-900 text-slate-100 p-3 rounded-2xl border border-slate-700 shadow-lg text-[10px] space-y-2 text-left font-mono">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                <span className="font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                  <Bug size={12} />
-                  <span>Barcode Inspector</span>
+              <div className="mt-4 bg-black/60 backdrop-blur-md px-3.5 py-1 rounded-full border border-white/10 shadow-lg">
+                <span className="text-[11px] font-bold text-white tracking-wide uppercase">
+                  Point camera at barcode
                 </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleTestSound}
-                    className="bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-bold border border-slate-700 transition cursor-pointer flex items-center gap-1"
-                  >
-                    <Volume2 size={10} />
-                    <span>Beep</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowDebugMode(!showDebugMode)}
-                    className="text-slate-400 hover:text-white underline cursor-pointer text-[9px]"
-                  >
-                    {showDebugMode ? 'Hide' : 'Show'}
-                  </button>
-                </div>
               </div>
-
-              {showDebugMode && (
-                <div className="space-y-1.5">
-                  {debugInfo ? (
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-slate-950 p-2 rounded-xl border border-slate-800 text-[9px]">
-                      <div>
-                        <span className="text-slate-500 block">Raw:</span>
-                        <span className="text-pink-300 font-bold truncate block">{JSON.stringify(debugInfo.rawValue)}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block">Norm:</span>
-                        <span className="text-emerald-300 font-bold truncate block">{debugInfo.normalizedValue || '(empty)'}</span>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="text-slate-500">Status: </span>
-                        <span className={debugInfo.matchFound ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
-                          {debugInfo.matchFound ? `✅ MATCH: ${debugInfo.matchedProductName}` : "❌ NO MATCH"}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-slate-400 italic text-[9px]">
-                      Scan barcode to inspect raw vs normalized values.
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
+          )}
 
+          {/* Camera Loading or Error State */}
+          {(!isCameraActive || cameraError) && (
+            <div className="absolute inset-0 bg-gray-900 text-white flex flex-col items-center justify-center p-6 text-center space-y-3">
+              <Camera size={36} className="text-[#E91E8C] animate-pulse" />
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold">Camera Paused</h4>
+                <p className="text-xs text-gray-400 max-w-[220px]">
+                  {cameraError || 'Camera stream is stopped.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCameraActive(true)}
+                className="px-5 py-2.5 bg-[#E91E8C] text-white rounded-xl text-xs font-bold shadow-lg hover:bg-[#FF4B91] transition cursor-pointer"
+              >
+                Restart Camera
+              </button>
+            </div>
+          )}
+
+          {/* Quick Zoom Pill (1x / 1.5x / 2x) on Top Right of Camera */}
+          {isCameraActive && !cameraError && (
+            <div className="absolute top-3 right-3 flex items-center bg-black/50 backdrop-blur-md rounded-xl p-1 border border-white/20 z-10">
+              {[1.0, 1.5, 2.0].map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => handleZoomChange(z)}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                    posCameraZoom === z 
+                      ? 'bg-[#E91E8C] text-white shadow-xs' 
+                      : 'text-white/80 hover:text-white'
+                  }`}
+                >
+                  {z}x
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* STATUS NOTIFICATION MESSAGE */}
+        {scanStatusMsg && (
+          <div className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl text-xs font-bold shadow-xs animate-scaleIn ${
+            scanStatusMsg.type === 'error' 
+              ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+              : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+          }`}>
+            {scanStatusMsg.type === 'error' ? (
+              <AlertCircle size={16} className="text-rose-500 shrink-0" />
+            ) : (
+              <CheckCircle size={16} className="text-emerald-500 shrink-0" />
+            )}
+            <span className="truncate flex-1">{scanStatusMsg.text}</span>
+            <button 
+              type="button" 
+              onClick={() => setScanStatusMsg(null)}
+              className="text-gray-400 hover:text-gray-600 p-0.5"
+            >
+              <X size={13} />
+            </button>
           </div>
         )}
 
-        {/* TAB 2: MANUAL BARCODE / PRODUCT ENTRY */}
-        {activeTab === 'manual' && (
-          <div className="w-full max-w-sm bg-white p-5 rounded-3xl border border-pink-100 shadow-sm space-y-4 text-xs">
-            <div className="space-y-1 text-center">
-              <h4 className="font-extrabold text-gray-900 uppercase tracking-wider text-xs">
-                Search & Add Product By Name/Barcode
+        {/* SMALL LAST SCANNED PRODUCT INDICATOR (Instant Recognition Feedback) */}
+        {lastScannedProduct && (
+          <div className="bg-white p-3 rounded-2xl border-2 border-[#E91E8C]/30 shadow-md flex items-center justify-between gap-3 animate-fade-in">
+            <img 
+              src={lastScannedProduct.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
+              alt={lastScannedProduct.name}
+              className="w-12 h-12 object-cover rounded-xl border border-pink-100 shrink-0"
+              referrerPolicy="no-referrer"
+            />
+            <div className="flex-1 min-w-0">
+              <span className="text-[9px] uppercase font-black text-[#E91E8C] tracking-wide block">
+                ✓ Just Scanned
+              </span>
+              <h4 className="font-bold text-gray-900 text-xs truncate">
+                {lastScannedProduct.name}
               </h4>
-              <p className="text-[10px] text-gray-500">
-                Type product name, brand, barcode, or ID to add to cart instantly.
+              <p className="text-[11px] text-gray-500 font-mono mt-0.5">
+                {context === 'STOCK_IN' 
+                  ? `Available Stock: ${lastScannedProduct.stock} pcs`
+                  : `৳${getRetailPrice(lastScannedProduct).toLocaleString()} • Stock: ${lastScannedProduct.stock}`}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setQuickViewProduct(lastScannedProduct);
+                setIsQuickViewOpen(true);
+              }}
+              className="p-2 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-xl border border-purple-200 transition cursor-pointer text-[10px] font-bold flex items-center gap-1 shrink-0"
+            >
+              <Eye size={12} />
+              <span>Details</span>
+            </button>
+          </div>
+        )}
 
-            <form onSubmit={handleManualSubmit} className="space-y-3">
-              <div className="relative">
-                <Search size={15} className="text-pink-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  value={manualCode}
-                  onChange={(e) => setManualCode(e.target.value)}
-                  placeholder="Type product name or barcode..."
-                  className="w-full bg-pink-50/20 text-gray-800 text-xs pl-10 pr-3 py-3 rounded-2xl border border-pink-200 outline-none focus:border-[#E91E8C] focus:bg-white font-medium"
-                  autoFocus
-                />
-              </div>
+        {/* PRIMARY CONTROLS BAR */}
+        <div className="grid grid-cols-3 gap-2 pt-1">
+          {/* Camera Flip Button */}
+          <button
+            type="button"
+            onClick={() => setUseFrontCamera(prev => !prev)}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white hover:bg-pink-50 border border-pink-100 rounded-2xl text-xs font-bold text-gray-700 transition shadow-xs cursor-pointer"
+          >
+            <RefreshCw size={14} className="text-[#E91E8C]" />
+            <span>Flip Cam</span>
+          </button>
 
-              {filteredManualProducts.length > 0 && (
-                <div className="bg-pink-50/50 border border-pink-100 rounded-2xl p-2 space-y-1.5 max-h-56 overflow-y-auto">
-                  <span className="text-[9px] font-bold text-gray-400 uppercase px-1">Matching Products ({filteredManualProducts.length}):</span>
-                  {filteredManualProducts.map((p) => (
-                    <div
-                      key={p.id}
-                      className="w-full bg-white hover:bg-pink-100/60 p-2 rounded-xl border border-pink-100 text-left flex items-center justify-between gap-2 transition"
-                    >
-                      <img 
-                        src={p.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
-                        alt={p.name}
-                        className="w-8 h-8 object-cover rounded-lg border border-pink-100 flex-shrink-0 cursor-pointer"
-                        referrerPolicy="no-referrer"
-                        onClick={() => {
-                          setQuickViewProduct(p);
-                          setIsQuickViewOpen(true);
-                        }}
-                      />
-                      <div 
-                        className="min-w-0 flex-1 cursor-pointer"
-                        onClick={() => {
-                          setQuickViewProduct(p);
-                          setIsQuickViewOpen(true);
-                        }}
-                      >
-                        <span className="text-[8px] font-bold text-[#E91E8C] uppercase block truncate">{p.brand}</span>
-                        <h5 className="font-bold text-gray-900 text-[11px] truncate">{p.name}</h5>
-                        <span className="font-mono text-[9px] text-gray-400">৳{getRetailPrice(p)} &bull; Stock: {p.stock}</span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQuickViewProduct(p);
-                            setIsQuickViewOpen(true);
-                          }}
-                          className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg border border-purple-200 cursor-pointer transition"
-                          title="Quick View details"
-                        >
-                          <Eye size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectManualProduct(p, false)}
-                          className="bg-[#E91E8C] hover:bg-[#FF4B91] text-white text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 flex items-center gap-0.5 cursor-pointer transition shadow-xs"
-                        >
-                          <Plus size={10} /> Add
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+          {/* Manual Input Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowManualInput(prev => !prev)}
+            className={`flex items-center justify-center gap-1.5 py-2.5 px-3 border rounded-2xl text-xs font-bold transition shadow-xs cursor-pointer ${
+              showManualInput 
+                ? 'bg-pink-50 border-[#E91E8C] text-[#E91E8C]' 
+                : 'bg-white hover:bg-pink-50 border-pink-100 text-gray-700'
+            }`}
+          >
+            <Search size={14} className="text-[#E91E8C]" />
+            <span>Manual</span>
+          </button>
 
+          {/* Instant Frame Lens Scan */}
+          <button
+            type="button"
+            onClick={handleLiveLensSnap}
+            disabled={isPhotoScanning}
+            className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white hover:bg-blue-50 border border-blue-200 rounded-2xl text-xs font-bold text-blue-700 transition shadow-xs cursor-pointer disabled:opacity-50"
+          >
+            <Camera size={14} className="text-blue-600" />
+            <span>{isPhotoScanning ? 'Scanning...' : 'Snapshot'}</span>
+          </button>
+        </div>
+
+        {/* COLLAPSIBLE MANUAL CODE / PRODUCT SEARCH FORM */}
+        {showManualInput && (
+          <form onSubmit={handleManualSubmit} className="bg-white p-3.5 rounded-3xl border border-pink-200 shadow-md space-y-2.5 animate-scaleIn">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+                placeholder="Type barcode or product name..."
+                className="flex-1 px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-[#E91E8C] focus:bg-white"
+                autoFocus
+              />
               <button
                 type="submit"
                 disabled={!manualCode.trim()}
-                className="w-full bg-[#E91E8C] hover:bg-[#FF4B91] disabled:opacity-50 text-white py-3 rounded-2xl font-bold transition cursor-pointer shadow-md shadow-pink-100 flex items-center justify-center gap-1.5"
+                className="px-4 py-2.5 bg-[#E91E8C] text-white rounded-xl text-xs font-bold hover:bg-[#FF4B91] transition cursor-pointer disabled:opacity-50"
               >
-                <Plus size={15} />
-                <span>Add Product By Code/Name</span>
+                Add
               </button>
-            </form>
-
-            <div className="pt-3 border-t border-pink-50 space-y-2">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Quick Popular Products:</span>
-              <div className="flex flex-wrap gap-1.5">
-                {productsList.slice(0, 6).map((prod) => (
-                  <button
-                    key={prod.id}
-                    type="button"
-                    onClick={() => {
-                      setQuickViewProduct(prod);
-                      setIsQuickViewOpen(true);
-                    }}
-                    className="bg-pink-50 hover:bg-pink-100 border border-pink-100 text-[#E91E8C] text-[10px] font-bold px-2.5 py-1 rounded-xl cursor-pointer transition truncate max-w-[150px]"
-                    title={`View ${prod.name}`}
-                  >
-                    {prod.name}
-                  </button>
-                ))}
-              </div>
             </div>
-          </div>
+
+            {/* Gallery Photo Scan option inside manual fallback */}
+            <div className="flex items-center justify-between pt-1 text-[10px] text-gray-500">
+              <span>Can't read barcode?</span>
+              <label className="text-[#E91E8C] font-bold hover:underline cursor-pointer flex items-center gap-1">
+                <span>Upload Barcode Photo</span>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handlePhotoUploadScan}
+                  className="hidden" 
+                  disabled={isPhotoScanning}
+                />
+              </label>
+            </div>
+          </form>
         )}
 
-        {/* TAB 3: LIVE SESSION CART */}
-        {activeTab === 'cart' && (
-          <div className="w-full max-w-sm bg-white p-5 rounded-3xl border border-pink-100 shadow-sm space-y-4 text-xs">
-            <div className="flex justify-between items-center border-b border-pink-50 pb-2">
-              <h4 className="font-extrabold text-gray-900 uppercase tracking-wider text-xs flex items-center gap-1.5">
-                <ShoppingBag size={15} className="text-[#E91E8C]" />
-                <span>Live Cart Items ({scannedItemsCount})</span>
+        {/* COLLAPSIBLE LIVE CART DRAWER PREVIEW */}
+        {showCartDrawer && (
+          <div className="bg-white p-4 rounded-3xl border border-pink-200 shadow-xl space-y-3 animate-scaleIn max-h-[40vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-pink-100 pb-2">
+              <h4 className="font-extrabold text-gray-900 text-xs flex items-center gap-1.5">
+                <ShoppingBag size={14} className="text-[#E91E8C]" />
+                <span>Current Items ({totalCount})</span>
               </h4>
+              <button
+                type="button"
+                onClick={() => setShowCartDrawer(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer"
+              >
+                <X size={14} />
+              </button>
             </div>
 
-            {mobileCartItems.length === 0 ? (
-              <div className="py-8 text-center text-gray-400 space-y-2">
-                <p className="text-xs">No products scanned yet.</p>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('camera')}
-                  className="text-[#E91E8C] font-bold text-xs hover:underline cursor-pointer"
-                >
-                  Start Scanning
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                {mobileCartItems.map((item) => (
-                  <div key={item.product.id} className="p-3 bg-pink-50/30 rounded-2xl border border-pink-100 flex items-center justify-between gap-3">
-                    <img 
-                      src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} 
-                      alt={item.product.name} 
-                      className="w-10 h-10 object-cover rounded-xl border border-pink-100 flex-shrink-0 cursor-pointer"
-                      referrerPolicy="no-referrer"
-                      onClick={() => {
-                        setQuickViewProduct(item.product);
-                        setIsQuickViewOpen(true);
-                      }}
-                      title="Inspect Product"
-                    />
-                    
-                    <div 
-                      className="flex-1 min-w-0 cursor-pointer"
-                      onClick={() => {
-                        setQuickViewProduct(item.product);
-                        setIsQuickViewOpen(true);
-                      }}
-                    >
-                      <h5 className="font-bold text-gray-800 text-[11px] truncate">{item.product.name}</h5>
-                      <span className="text-[#E91E8C] font-black font-mono text-[10px]">৳{getRetailPrice(item.product)}</span>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {context === 'STOCK_IN' ? (
+                stockInQueue.length === 0 ? (
+                  <p className="text-center text-gray-400 text-xs py-4">No stock-in items yet.</p>
+                ) : (
+                  stockInQueue.map((item) => (
+                    <div key={item.product.id} className="flex items-center justify-between p-2.5 bg-pink-50/40 rounded-xl border border-pink-100 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <h5 className="font-bold text-gray-900 truncate">{item.product.name}</h5>
+                        <span className="text-gray-500 font-mono text-[10px]">Stock: {item.product.stock}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateStockInQty && onUpdateStockInQty(item.product.id, Math.max(1, item.quantity - 1))}
+                          className="w-6 h-6 flex items-center justify-center bg-white border border-pink-200 rounded-lg text-pink-700"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span className="font-bold font-mono text-xs">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => onAddToStockIn && onAddToStockIn(item.product)}
+                          className="w-6 h-6 flex items-center justify-center bg-[#E91E8C] text-white rounded-lg"
+                        >
+                          <Plus size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onRemoveFromStockIn && onRemoveFromStockIn(item.product.id)}
+                          className="text-red-500 hover:text-red-700 p-1 ml-1"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
+                  ))
+                )
+              ) : (
+                optimisticCart.length === 0 ? (
+                  <p className="text-center text-gray-400 text-xs py-4">No cart items yet.</p>
+                ) : (
+                  optimisticCart.map((item) => (
+                    <div key={item.product.id} className="flex items-center justify-between p-2.5 bg-pink-50/40 rounded-xl border border-pink-100 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <h5 className="font-bold text-gray-900 truncate">{item.product.name}</h5>
+                        <span className="text-[#E91E8C] font-mono font-bold text-[10px]">
+                          ৳{getRetailPrice(item.product).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDecrement(item)}
+                          className="w-6 h-6 flex items-center justify-center bg-white border border-pink-200 rounded-lg text-pink-700 cursor-pointer"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span className="font-bold font-mono text-xs">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleIncrement(item.product)}
+                          className="w-6 h-6 flex items-center justify-center bg-[#E91E8C] text-white rounded-lg cursor-pointer"
+                        >
+                          <Plus size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(item)}
+                          className="text-red-500 hover:text-red-700 p-1 ml-1 cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
+            </div>
 
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setQuickViewProduct(item.product);
-                          setIsQuickViewOpen(true);
-                        }}
-                        className="p-1 text-purple-600 hover:bg-purple-50 rounded-lg cursor-pointer mr-0.5"
-                        title="Quick View Details"
-                      >
-                        <Eye size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDecrementMobile(item.docIds)}
-                        className="p-1 bg-white border border-pink-200 text-pink-700 rounded-lg hover:bg-pink-100 cursor-pointer"
-                        title="Decrease quantity"
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <input
-                        type="number"
-                        min="1"
-                        max={item.product.stock}
-                        value={editingQtyMobile[item.product.id] !== undefined ? editingQtyMobile[item.product.id] : item.quantity}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setEditingQtyMobile(prev => ({ ...prev, [item.product.id]: val }));
-                        }}
-                        onFocus={(e) => e.target.select()}
-                        onBlur={(e) => handleSetQuantityMobile(item.product.id, item.docIds, item.product.stock, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        className="w-9 text-center font-bold font-mono text-xs text-gray-900 bg-white border border-pink-200 rounded-lg py-0.5 outline-none focus:border-[#E91E8C] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleIncrementMobile(item.product.id)}
-                        className="p-1 bg-[#E91E8C] text-white rounded-lg hover:bg-[#FF4B91] cursor-pointer"
-                        title="Increase quantity"
-                      >
-                        <Plus size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMobile(item.docIds)}
-                        className="p-1 text-red-500 hover:bg-red-50 rounded-lg ml-1 cursor-pointer"
-                        title="Remove"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                stopScanner();
+                onBack();
+              }}
+              className="w-full py-2.5 bg-[#E91E8C] text-white rounded-xl text-xs font-bold hover:bg-[#FF4B91] transition cursor-pointer shadow-sm text-center"
+            >
+              Done & Checkout ({totalCount} items)
+            </button>
           </div>
         )}
+      </main>
 
-      </div>
-
-      {/* FOOTER BADGE */}
-      <footer className="px-6 text-center space-y-1">
-        <div className="inline-flex items-center gap-1.5 bg-white border border-pink-100 px-3 py-1 rounded-full shadow-xs">
-          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-          <span className="text-[10px] text-gray-600 font-semibold font-mono">
-            {activeSessionId ? `Session: ${activeSessionId}` : 'POS Live Ready'}
+      {/* FOOTER ACTION BUTTON: DONE / PROCEED TO CHECKOUT */}
+      <footer className="px-4">
+        <button
+          type="button"
+          onClick={() => {
+            stopScanner();
+            onBack();
+          }}
+          className="w-full py-3.5 bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-pink-200 hover:opacity-95 transition flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <ShoppingBag size={18} />
+          <span>
+            {context === 'STOCK_IN' 
+              ? `Done Scanning (Queue: ${totalCount})` 
+              : `View Cart & Checkout (${totalCount})`}
           </span>
-        </div>
+        </button>
       </footer>
 
-      {/* POS PRODUCT QUICK-VIEW MODAL UPON SUCCESSFUL SCAN OR INSPECT */}
+      {/* PRODUCT QUICK-VIEW MODAL (ONLY WHEN EXPLICITLY OPENED) */}
       <PosProductQuickViewModal
         product={quickViewProduct}
         isOpen={isQuickViewOpen}
         onClose={() => setIsQuickViewOpen(false)}
-        onConfirmAdd={handleAddProductWithQuantity}
+        onConfirmAdd={(prod, qty) => {
+          for (let i = 0; i < qty; i++) {
+            handleScanDetected(prod.barcode || prod.id);
+          }
+          setIsQuickViewOpen(false);
+        }}
         context={context}
       />
     </div>
   );
-}
+});
+
+export default PosScan;

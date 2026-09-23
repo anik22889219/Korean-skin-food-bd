@@ -25,7 +25,8 @@ export interface BarcodeAuditReport {
 }
 
 export interface ScannerStartOptions {
-  containerId: string;
+  containerId?: string;
+  videoElement?: HTMLVideoElement | null;
   useFrontCamera?: boolean;
   onScanSuccess: (scannedText: string) => void;
   onError?: (errorMessage: string) => void;
@@ -36,6 +37,45 @@ export interface ScannerController {
   stop: () => Promise<void>;
   applyZoom: (zoom: number) => Promise<boolean>;
   triggerRefocus: () => Promise<boolean>;
+}
+
+/**
+ * Builds an O(1) in-memory index of products for instant barcode lookup.
+ * Indexes by normalized barcode, legacy barcode, and product id.
+ */
+export function buildBarcodeIndex(products: Product[]): Map<string, Product> {
+  const map = new Map<string, Product>();
+
+  for (const product of products) {
+    if (product.barcodeNormalized) {
+      map.set(product.barcodeNormalized, product);
+    }
+    if (product.barcode) {
+      const norm = normalizeBarcode(product.barcode);
+      if (norm) map.set(norm, product);
+    }
+    if (product.id) {
+      map.set(product.id, product);
+      map.set(product.id.toLowerCase(), product);
+      const normId = normalizeBarcode(product.id);
+      if (normId) map.set(normId, product);
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Instant O(1) product lookup using a pre-built barcode index map.
+ */
+export function lookupProductByBarcode(
+  barcodeIndex: Map<string, Product>,
+  rawScanText: string
+): { product: Product | undefined; normalizedCode: string } {
+  const extracted = extractCodeFromScanText(rawScanText);
+  const normalized = normalizeBarcode(extracted);
+  const product = barcodeIndex.get(normalized) || barcodeIndex.get(extracted) || barcodeIndex.get(extracted.toLowerCase());
+  return { product, normalizedCode: normalized || extracted };
 }
 
 /**
@@ -444,14 +484,19 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
 }
 
 /**
- * Applies hardware zoom and focus constraints to the active video track in a container.
+ * Applies hardware zoom and focus constraints to the active video track in a container or video element.
  */
 export async function applyCameraTrackConstraints(
-  containerId: string, 
+  target: string | HTMLVideoElement, 
   options: { zoom?: number; triggerFocus?: boolean; highRes?: boolean } = {}
 ): Promise<boolean> {
   try {
-    const videoEl = document.querySelector(`#${containerId} video`) as HTMLVideoElement;
+    let videoEl: HTMLVideoElement | null = null;
+    if (typeof target === 'string') {
+      videoEl = document.querySelector(`#${target} video`) as HTMLVideoElement;
+    } else {
+      videoEl = target;
+    }
     if (!videoEl || !videoEl.srcObject) return false;
 
     const stream = videoEl.srcObject as MediaStream;
@@ -461,7 +506,7 @@ export async function applyCameraTrackConstraints(
     const mainConstraints: any = {};
     const advancedConstraints: any = {};
 
-    if (options.highRes !== false) {
+    if (options.highRes === true) {
       mainConstraints.width = { ideal: 1920, min: 1280 };
       mainConstraints.height = { ideal: 1080, min: 720 };
     }
@@ -566,29 +611,51 @@ export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Pro
 }
 
 /**
- * Start Unified Real-time Camera Barcode Scanner using ZXing + native BarcodeDetector hybrid engine.
- * Includes complete stream lifecycle management, track release, camera switching, and debounce protection.
+ * Start Unified Real-time Camera Barcode Scanner.
+ * - Supports direct videoElement ref or containerId lookup.
+ * - Mobile-friendly camera resolution (1280x720).
+ * - SINGLE-ENGINE execution: Uses native BarcodeDetector throttled to ~120ms with overlapping-detection guard.
+ *   Only starts ZXing if native BarcodeDetector is completely unavailable. Never runs both simultaneously.
+ * - Responsive 800ms duplicate debounce window with instant reaction to different barcodes.
  */
 export async function startUnifiedCameraScanner(options: ScannerStartOptions): Promise<ScannerController> {
-  const { containerId, useFrontCamera = false, onScanSuccess, onError, debounceMs = 1200 } = options;
+  const { containerId, videoElement, useFrontCamera = false, onScanSuccess, onError, debounceMs = 800 } = options;
 
-  const container = document.getElementById(containerId);
-  if (!container) {
-    throw new Error(`Container element #${containerId} not found`);
+  let videoEl: HTMLVideoElement;
+  let createdVideoElement = false;
+  let container: HTMLElement | null = null;
+
+  if (videoElement) {
+    videoEl = videoElement;
+  } else if (containerId) {
+    container = document.getElementById(containerId);
+    if (!container) {
+      throw new Error(`Container element #${containerId} not found`);
+    }
+    const existingVideo = container.querySelector('video') as HTMLVideoElement | null;
+    if (existingVideo) {
+      videoEl = existingVideo;
+    } else {
+      container.innerHTML = '';
+      videoEl = document.createElement('video');
+      videoEl.style.width = '100%';
+      videoEl.style.height = '100%';
+      videoEl.style.objectFit = 'cover';
+      container.appendChild(videoEl);
+      createdVideoElement = true;
+    }
+  } else {
+    throw new Error('Either videoElement or containerId must be provided to start scanner.');
   }
 
-  // Clear existing children from container
-  container.innerHTML = '';
-
-  // Create video element
-  const videoEl = document.createElement('video');
+  // Ensure necessary mobile video attributes are set both via properties and DOM attributes
   videoEl.autoplay = true;
   videoEl.muted = true;
   videoEl.playsInline = true;
-  videoEl.style.width = '100%';
-  videoEl.style.height = '100%';
-  videoEl.style.objectFit = 'cover';
-  container.appendChild(videoEl);
+  videoEl.setAttribute('autoplay', 'true');
+  videoEl.setAttribute('muted', 'true');
+  videoEl.setAttribute('playsinline', 'true');
+  videoEl.setAttribute('webkit-playsinline', 'true');
 
   let mediaStream: MediaStream | null = null;
   let isStopped = false;
@@ -604,28 +671,26 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
         formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
       });
     } catch (e) {
-      console.warn("BarcodeDetector init error:", e);
+      console.warn("BarcodeDetector init note:", e);
+      nativeDetector = null;
     }
   }
 
-  // Setup ZXing BrowserMultiFormatReader
-  const hints = createZXingHints();
-  const reader = new BrowserMultiFormatReader(hints);
   let zxingControls: IScannerControls | null = null;
 
-  // Request Camera Stream
+  // Request Camera Stream with mobile-optimized resolution (1280x720)
   try {
     const targetFacingMode = useFrontCamera ? "user" : "environment";
     const videoConstraints: MediaTrackConstraints = {
       facingMode: { ideal: targetFacingMode },
-      width: { ideal: 1920, min: 1280 },
-      height: { ideal: 1080, min: 720 }
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
     };
 
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
     } catch (firstErr: any) {
-      console.warn("First camera getUserMedia attempt failed, retrying with basic video constraint:", firstErr);
+      console.warn("Target camera getUserMedia fallback to basic facingMode:", firstErr);
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: targetFacingMode }, audio: false });
     }
 
@@ -641,25 +706,30 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
     }
 
     videoEl.srcObject = mediaStream;
-    await videoEl.play().catch(() => {});
 
-    // Apply auto-focus & zoom constraints after track starts
+    // Handle loadedmetadata and safe direct play for cross-browser mobile reliability
+    videoEl.onloadedmetadata = () => {
+      videoEl.play().catch(e => console.warn("Video play on loadedmetadata:", e));
+    };
+    await videoEl.play().catch(e => console.warn("Initial video play warning:", e));
+
+    // Non-blocking auto-focus / zoom optimization
     setTimeout(() => {
-      if (!isStopped) {
-        applyCameraTrackConstraints(containerId, { zoom: 1.5, triggerFocus: true });
+      if (!isStopped && videoEl) {
+        applyCameraTrackConstraints(videoEl, { zoom: 1.5, triggerFocus: true });
       }
-    }, 500);
+    }, 400);
 
-    // Process scan result with debounce
+    // Smart debounced scanner result processor (0ms debounce for different codes, 800ms for duplicate)
     const processScannedResult = (rawText: string) => {
       if (!rawText || isStopped) return;
       const extracted = extractCodeFromScanText(rawText);
       const norm = normalizeBarcode(extracted);
       if (!norm) return;
 
-      const now = Date.now();
+      const now = performance.now();
       if (norm === lastScannedCode && (now - lastScanTime) < debounceMs) {
-        return; // Skip duplicate scan within debounce window
+        return; // Duplicate code within debounce window
       }
 
       lastScannedCode = norm;
@@ -667,42 +737,52 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
       onScanSuccess(norm);
     };
 
-    // 1. Hybrid Native Loop (runs on requestAnimationFrame when native BarcodeDetector is available)
-    let isDecodingFrame = false;
-    const scanNativeFrame = async () => {
-      if (isStopped) return;
-      if (nativeDetector && videoEl.readyState >= 2 && !isDecodingFrame) {
-        isDecodingFrame = true;
-        try {
-          const detected = await nativeDetector.detect(videoEl);
-          if (detected && detected.length > 0 && detected[0].rawValue) {
-            processScannedResult(detected[0].rawValue);
-          }
-        } catch (e) {
-          // ignore frame detect errors
-        } finally {
-          isDecodingFrame = false;
-        }
-      }
-      if (!isStopped) {
-        animationFrameId = requestAnimationFrame(scanNativeFrame);
-      }
-    };
-
+    // Engine Selection: ONLY ONE ENGINE RUNS CONTINUOUSLY
     if (nativeDetector) {
-      animationFrameId = requestAnimationFrame(scanNativeFrame);
-    }
+      // 1. Native BarcodeDetector engine throttled to ~120ms with overlapping-detect guard
+      let detecting = false;
+      let lastDetection = 0;
 
-    // 2. ZXing Continuous Decoder on Video Element
-    try {
-      zxingControls = await reader.decodeFromVideoElement(videoEl, (result, error) => {
+      const scanNativeFrame = async () => {
         if (isStopped) return;
-        if (result && result.getText()) {
-          processScannedResult(result.getText());
+        const now = performance.now();
+
+        if (now - lastDetection >= 120 && !detecting && videoEl.readyState >= 2) {
+          detecting = true;
+          lastDetection = now;
+
+          try {
+            const detected = await nativeDetector.detect(videoEl);
+            if (detected && detected.length > 0 && detected[0].rawValue) {
+              processScannedResult(detected[0].rawValue);
+            }
+          } catch (e) {
+            // ignore frame read error
+          } finally {
+            detecting = false;
+          }
         }
-      });
-    } catch (e) {
-      console.warn("ZXing decodeFromVideoElement error:", e);
+
+        if (!isStopped) {
+          animationFrameId = requestAnimationFrame(scanNativeFrame);
+        }
+      };
+
+      animationFrameId = requestAnimationFrame(scanNativeFrame);
+    } else {
+      // 2. ZXing BrowserMultiFormatReader engine (ONLY when native BarcodeDetector is unsupported)
+      try {
+        const hints = createZXingHints();
+        const reader = new BrowserMultiFormatReader(hints);
+        zxingControls = await reader.decodeFromVideoElement(videoEl, (result, error) => {
+          if (isStopped) return;
+          if (result && result.getText()) {
+            processScannedResult(result.getText());
+          }
+        });
+      } catch (e) {
+        console.warn("ZXing decodeFromVideoElement init note:", e);
+      }
     }
 
   } catch (err: any) {
@@ -725,7 +805,7 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
     throw new Error(errMsg);
   }
 
-  // Define stop cleanup function
+  // Stop cleanup function
   const stop = async () => {
     if (isStopped) return;
     isStopped = true;
@@ -757,9 +837,12 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
 
     if (videoEl) {
       videoEl.srcObject = null;
+      videoEl.onloadedmetadata = null;
     }
 
-    container.innerHTML = '';
+    if (createdVideoElement && container) {
+      container.innerHTML = '';
+    }
   };
 
   // Visibility change listener to stop tracks if page is hidden
@@ -776,10 +859,10 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
       await stop();
     },
     applyZoom: async (zoom: number) => {
-      return await applyCameraTrackConstraints(containerId, { zoom, triggerFocus: true });
+      return await applyCameraTrackConstraints(videoEl, { zoom, triggerFocus: true });
     },
     triggerRefocus: async () => {
-      return await applyCameraTrackConstraints(containerId, { triggerFocus: true });
+      return await applyCameraTrackConstraints(videoEl, { triggerFocus: true });
     }
   };
 }

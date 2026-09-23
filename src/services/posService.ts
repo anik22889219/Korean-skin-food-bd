@@ -384,7 +384,8 @@ onSnapshot(collection(db, 'pos_sessions'), (snapshot) => {
 export async function addProductToSession(
   sessionId: string,
   productId: string,
-  currentCartQuantity?: number
+  currentCartQuantity?: number,
+  quantityToAdd: number = 1
 ): Promise<{ success: boolean; message: string; product?: Product }> {
   if (!sessionId || !productId) {
     return { success: false, message: 'Invalid session or product ID' };
@@ -402,6 +403,7 @@ export async function addProductToSession(
     return { success: false, message: `Product "${product.name}" is out of stock!` };
   }
 
+  const qtyToAdd = Math.max(1, quantityToAdd);
   let currentQty = currentCartQuantity;
   if (currentQty === undefined) {
     try {
@@ -421,7 +423,7 @@ export async function addProductToSession(
     }
   }
 
-  if (currentQty >= product.stock) {
+  if (currentQty + qtyToAdd - 1 >= product.stock) {
     return {
       success: false,
       message: `Cannot add more. Available stock for "${product.name}" is ${product.stock} (Cart already has ${currentQty}).`
@@ -431,10 +433,23 @@ export async function addProductToSession(
   try {
     const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
     const nowIso = new Date().toISOString();
-    await addDoc(scansColRef, {
-      product_id: canonicalProductId,
-      scanned_at: nowIso
-    });
+
+    if (qtyToAdd === 1) {
+      await addDoc(scansColRef, {
+        product_id: canonicalProductId,
+        scanned_at: nowIso
+      });
+    } else {
+      const batch = writeBatch(db);
+      for (let i = 0; i < qtyToAdd; i++) {
+        const newDocRef = doc(scansColRef);
+        batch.set(newDocRef, {
+          product_id: canonicalProductId,
+          scanned_at: nowIso
+        });
+      }
+      await batch.commit();
+    }
 
     setDoc(doc(db, 'pos_sessions', sessionId), {
       lastScanTime: nowIso,
