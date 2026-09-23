@@ -560,6 +560,23 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "wholesaleCustomerId", "amount", "paymentMethod", "createdBy", "createdAt"]
+    },
+    "FcmToken": {
+      "title": "FcmToken",
+      "description": "Firebase Cloud Messaging Web Push certificate registration token and device subscription",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string" },
+        "vapidKey": { "type": "string" },
+        "userId": { "type": "string" },
+        "userRole": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "platform": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastActiveAt": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["token", "vapidKey", "createdAt", "enabled"]
     }
   },
   "firestore": {
@@ -666,6 +683,10 @@
     "/ad_performance/{date}": {
       "schema": "AdPerformance",
       "description": "Daily aggregated marketing performance metrics"
+    },
+    "/fcm_tokens/{tokenId}": {
+      "schema": "FcmToken",
+      "description": "Firebase Cloud Messaging Web Push device tokens and subscriptions"
     }
   }
 }

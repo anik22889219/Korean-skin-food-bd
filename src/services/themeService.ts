@@ -46,6 +46,7 @@ export const DEFAULT_HOME_THEME: HomeThemeSettings = {
     'founderStory',
     'botanicalEssentials',
     'qualityAssurance',
+    'googleReviews',
     'sharedJourney',
     'reachReliability',
     'communityLive'
@@ -256,6 +257,15 @@ export const DEFAULT_HOME_THEME: HomeThemeSettings = {
         sharesCount: 38
       }
     ]
+  },
+  googleReviews: {
+    enabled: true,
+    subtitle: 'VERIFIED CUSTOMER LOVE',
+    title: 'Google Business Reviews & Ratings',
+    shareUrl: 'https://share.google/lEQv5trQv88b0w8WT',
+    writeReviewUrl: 'https://g.page/r/CaiTn1_7AA34EAE/review',
+    showBreakdown: true,
+    maxReviews: 8
   }
 };
 
@@ -369,9 +379,23 @@ class ThemeService {
       return reel;
     });
 
+    const baseOrder = [...(theme.sectionOrder || DEFAULT_HOME_THEME.sectionOrder)].filter(s => s !== 'validatedFormulations');
+    if (!baseOrder.includes('googleReviews')) {
+      const bIdx = baseOrder.indexOf('botanicalEssentials');
+      if (bIdx !== -1) {
+        baseOrder.splice(bIdx + 1, 0, 'googleReviews');
+      } else {
+        baseOrder.push('googleReviews');
+      }
+    }
+
     return {
       ...theme,
-      sectionOrder: (theme.sectionOrder || DEFAULT_HOME_THEME.sectionOrder).filter(s => s !== 'validatedFormulations'),
+      sectionOrder: baseOrder,
+      googleReviews: {
+        ...DEFAULT_HOME_THEME.googleReviews,
+        ...(theme.googleReviews || {})
+      },
       validatedFormulations: {
         ...(theme.validatedFormulations || DEFAULT_HOME_THEME.validatedFormulations),
         enabled: false

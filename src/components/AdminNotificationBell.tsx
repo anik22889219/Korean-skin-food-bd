@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Bell, Package, AlertTriangle, AlertCircle, CheckCheck, 
   ChevronRight, Boxes, ShoppingBag, X,
-  Clock, Sparkles, Smartphone, Monitor, Tablet, Radio
+  Clock, Sparkles, Smartphone, Monitor, Tablet, Radio,
+  BellRing, Send, ShieldCheck, Copy, Check, Settings, ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { orderService } from '../services/orderService';
 import { productService } from '../services/productService';
 import { posService } from '../services/posService';
+import { fcmPushService } from '../services/fcmPushService';
 import { useAuth } from '../context/AuthContext';
 import { Order, Product, PosSessionNotification, PosDeviceType } from '../types';
 
@@ -48,6 +50,81 @@ export const AdminNotificationBell: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [posNotifs, setPosNotifs] = useState<PosSessionNotification[]>([]);
+
+  // Firebase Cloud Messaging Web Push state
+  const [pushSupported, setPushSupported] = useState<boolean>(true);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission>('default');
+  const [fcmToken, setFcmToken] = useState<string | null>(null);
+  const [isEnablingPush, setIsEnablingPush] = useState<boolean>(false);
+  const [isTestingPush, setIsTestingPush] = useState<boolean>(false);
+  const [pushStatusMessage, setPushStatusMessage] = useState<string | null>(null);
+  const [showWebPushModal, setShowWebPushModal] = useState<boolean>(false);
+  const [copiedKey, setCopiedKey] = useState<boolean>(false);
+  const [copiedToken, setCopiedToken] = useState<boolean>(false);
+
+  useEffect(() => {
+    setPushSupported(fcmPushService.isSupported());
+    setPushPermission(fcmPushService.getPermissionStatus());
+    setFcmToken(fcmPushService.getCurrentToken());
+
+    // Register foreground push notifications listener
+    const unsubPromise = fcmPushService.listenForegroundMessages((payload) => {
+      console.log('[AdminNotificationBell] Received foreground push notification:', payload);
+    });
+
+    return () => {
+      unsubPromise.then(unsub => unsub?.());
+    };
+  }, []);
+
+  // Request browser push permissions & generate FCM token using the VAPID key
+  const handleEnablePush = async () => {
+    setIsEnablingPush(true);
+    setPushStatusMessage(null);
+    try {
+      const res = await fcmPushService.requestPermissionAndGetToken(userUid, userRole);
+      setPushPermission(res.permission);
+      if (res.success && res.token) {
+        setFcmToken(res.token);
+        setPushStatusMessage('Web Push successfully enabled using Firebase Certificate!');
+      } else {
+        setPushStatusMessage(res.error || 'Failed to activate Web Push.');
+      }
+    } catch (e: any) {
+      setPushStatusMessage(e.message || 'Push activation error.');
+    } finally {
+      setIsEnablingPush(false);
+      setTimeout(() => setPushStatusMessage(null), 5000);
+    }
+  };
+
+  // Dispatch a test Web Push notification
+  const handleTestPush = async () => {
+    setIsTestingPush(true);
+    try {
+      const res = await fcmPushService.sendTestNotification();
+      setPushStatusMessage(res.message);
+    } catch (e: any) {
+      setPushStatusMessage('Error triggering test notification.');
+    } finally {
+      setIsTestingPush(false);
+      setTimeout(() => setPushStatusMessage(null), 4000);
+    }
+  };
+
+  const handleCopyKey = () => {
+    navigator.clipboard.writeText(fcmPushService.getVapidKey());
+    setCopiedKey(true);
+    setTimeout(() => setCopiedKey(false), 2500);
+  };
+
+  const handleCopyToken = () => {
+    if (fcmToken) {
+      navigator.clipboard.writeText(fcmToken);
+      setCopiedToken(true);
+      setTimeout(() => setCopiedToken(false), 2500);
+    }
+  };
 
   // Independent per-user read and dismissed notification state
   const [readIds, setReadIds] = useState<Set<string>>(() => {
@@ -504,6 +581,14 @@ export const AdminNotificationBell: React.FC = () => {
                   )}
                   <button
                     type="button"
+                    onClick={() => setShowWebPushModal(true)}
+                    className="p-1.5 rounded-lg text-slate-300 hover:text-pink-300 hover:bg-slate-800 transition cursor-pointer min-w-[30px] min-h-[30px] flex items-center justify-center border border-transparent hover:border-slate-700"
+                    title="Web Push Certificate Settings (FCM)"
+                  >
+                    <ShieldCheck size={14} className={pushPermission === 'granted' ? 'text-emerald-400' : 'text-slate-400'} />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setIsOpen(false)}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer min-w-[30px] min-h-[30px] flex items-center justify-center"
                     title="Close Alerts"
@@ -591,6 +676,67 @@ export const AdminNotificationBell: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* Firebase Cloud Messaging Web Push Bar */}
+            <div className="px-3.5 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-2 text-[10px]">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${pushPermission === 'granted' ? 'bg-emerald-400 animate-pulse' : pushPermission === 'denied' ? 'bg-rose-400' : 'bg-amber-400'}`} />
+                <span className="font-semibold text-slate-300 truncate">
+                  {pushPermission === 'granted' ? (
+                    <span className="flex items-center gap-1">
+                      <span className="font-bold text-emerald-400">Web Push Active</span>
+                      <span className="text-slate-400 text-[9px] font-mono hidden sm:inline">(Cert: BOVT-aG...-4A)</span>
+                    </span>
+                  ) : pushPermission === 'denied' ? (
+                    <span className="text-rose-400 font-medium">Browser Push Blocked</span>
+                  ) : (
+                    <span className="text-slate-300 font-medium">Web Push Alerts (FCM)</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {pushPermission === 'granted' ? (
+                  <button
+                    type="button"
+                    onClick={handleTestPush}
+                    disabled={isTestingPush}
+                    className="px-2 py-0.5 rounded-md bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 font-bold border border-emerald-800 transition cursor-pointer flex items-center gap-1 text-[9px]"
+                    title="Send immediate test notification"
+                  >
+                    <Send size={9} />
+                    <span>{isTestingPush ? 'Sending...' : 'Test Push'}</span>
+                  </button>
+                ) : pushPermission !== 'denied' && pushSupported ? (
+                  <button
+                    type="button"
+                    onClick={handleEnablePush}
+                    disabled={isEnablingPush}
+                    className="px-2 py-0.5 rounded-md bg-[#E91E8C] hover:bg-[#d8157e] text-white font-extrabold shadow-2xs transition cursor-pointer flex items-center gap-1 text-[9px]"
+                    title="Activate Firebase Web Push notifications"
+                  >
+                    <BellRing size={9} />
+                    <span>{isEnablingPush ? 'Activating...' : 'Enable Push'}</span>
+                  </button>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => setShowWebPushModal(true)}
+                  className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+                  title="View Certificate Details"
+                >
+                  <Settings size={11} />
+                </button>
+              </div>
+            </div>
+
+            {pushStatusMessage && (
+              <div className="px-3.5 py-1.5 bg-pink-950/60 border-b border-pink-900/60 text-[10px] font-medium text-pink-200 flex items-center gap-1.5">
+                <Sparkles size={11} className="text-pink-400 shrink-0" />
+                <span className="truncate">{pushStatusMessage}</span>
+              </div>
+            )}
 
             {/* Scrollable Notification List */}
             <div className="flex-1 overflow-y-auto p-2.5 sm:p-2 space-y-2 sm:space-y-1.5 max-h-[50vh] sm:max-h-[380px] [scrollbar-width:thin] [scrollbar-color:#f1f5f9_transparent] overscroll-contain">
@@ -800,6 +946,164 @@ export const AdminNotificationBell: React.FC = () => {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Web Push Certificates & FCM Configuration Modal */}
+      <AnimatePresence>
+        {showWebPushModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              {/* Modal Header */}
+              <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#E91E8C] text-white flex items-center justify-center shadow-xs">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black tracking-tight">Web Push certificates</h3>
+                    <p className="text-[11px] text-slate-400">Firebase Cloud Messaging (FCM)</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowWebPushModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-700">
+                <div className="p-3.5 bg-pink-50/70 border border-pink-200/80 rounded-xl space-y-1">
+                  <p className="font-bold text-pink-900">Application Identity Key Pairs</p>
+                  <p className="text-[11px] text-pink-800 leading-relaxed">
+                    Firebase Cloud Messaging can use Application Identity key pairs to connect with external push services and deliver native background notifications to your devices.
+                  </p>
+                </div>
+
+                {/* VAPID Key Block */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                      Public Key (VAPID Certificate)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleCopyKey}
+                      className="text-[11px] text-[#E91E8C] hover:text-[#c2185b] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedKey ? (
+                        <>
+                          <Check size={12} className="text-emerald-600" />
+                          <span className="text-emerald-600">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} />
+                          <span>Copy Key</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="p-3 bg-slate-900 text-pink-300 font-mono text-[11px] rounded-xl border border-slate-800 break-all select-all leading-relaxed shadow-inner">
+                    {fcmPushService.getVapidKey()}
+                  </div>
+                </div>
+
+                {/* Status Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Browser Permission</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${pushPermission === 'granted' ? 'bg-emerald-500' : pushPermission === 'denied' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                      <span className="font-bold text-slate-900 capitalize text-xs">{pushPermission}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Service Worker</span>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <span className="font-bold text-slate-900 text-xs">/firebase-messaging-sw.js</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Device Registration Token */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                      Current Device FCM Token
+                    </label>
+                    {fcmToken && (
+                      <button
+                        type="button"
+                        onClick={handleCopyToken}
+                        className="text-[11px] text-[#E91E8C] hover:text-[#c2185b] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedToken ? (
+                          <>
+                            <Check size={12} className="text-emerald-600" />
+                            <span className="text-emerald-600">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={12} />
+                            <span>Copy Token</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <div className="p-3 bg-slate-50 text-slate-800 font-mono text-[10px] rounded-xl border border-slate-200 break-all select-all leading-normal max-h-24 overflow-y-auto">
+                    {fcmToken || 'No token active on this browser yet. Click "Enable Web Push" below to generate.'}
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleEnablePush}
+                    disabled={isEnablingPush}
+                    className="flex-1 py-2.5 px-4 bg-[#E91E8C] hover:bg-[#d8157e] text-white font-extrabold rounded-xl shadow-xs transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <BellRing size={14} />
+                    <span>{isEnablingPush ? 'Registering with FCM...' : 'Enable / Re-register Push'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTestPush}
+                    disabled={isTestingPush || pushPermission !== 'granted'}
+                    className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Send size={14} />
+                    <span>{isTestingPush ? 'Sending...' : 'Test Push'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowWebPushModal(false)}
+                  className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-xl border border-slate-300 text-xs transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

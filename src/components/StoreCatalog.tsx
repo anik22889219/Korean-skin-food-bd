@@ -23,6 +23,7 @@ import { ImageSearchModal } from './ImageSearchModal';
 import { TopCreatorsSection } from './TopCreatorsSection';
 import { ProductCard } from './ProductCard';
 import { ProductQuickViewModal } from './ProductQuickViewModal';
+import { GoogleBusinessReviewsSection } from './GoogleBusinessReviewsSection';
 import { analytics } from '../services/analyticsService';
 import { getRetailPrice } from '../utils/pricing';
 
@@ -1491,6 +1492,8 @@ export const StoreCatalog: React.FC = () => {
         return renderBotanicalEssentialsSection();
       case 'qualityAssurance':
         return renderQualityAssuranceSection();
+      case 'googleReviews':
+        return <GoogleBusinessReviewsSection theme={theme.googleReviews} />;
       case 'validatedFormulations':
         return renderValidatedFormulationsSection();
       case 'sharedJourney':

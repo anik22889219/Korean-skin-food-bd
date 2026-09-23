@@ -137,12 +137,45 @@ export interface CommunityLiveSection {
   reels: ReelItem[];
 }
 
+export interface GoogleReviewsSection {
+  enabled: boolean;
+  subtitle: string;
+  title: string;
+  shareUrl: string;
+  writeReviewUrl: string;
+  showBreakdown: boolean;
+  maxReviews: number;
+  customReviews?: Array<{
+    id: string;
+    authorName: string;
+    authorPhotoUrl?: string;
+    rating: number;
+    relativeTimeDescription?: string;
+    text: string;
+    productPurchased?: string;
+    isVerifiedCustomer?: boolean;
+    isLocalGuide?: boolean;
+    replyText?: string;
+    likesCount?: number;
+  }>;
+  customRating?: number;
+  customTotalReviews?: number;
+  customRatingBreakdown?: {
+    fiveStar?: number;
+    fourStar?: number;
+    threeStar?: number;
+    twoStar?: number;
+    oneStar?: number;
+  };
+}
+
 export type SectionKey =
   | 'hero'
   | 'featureIcons'
   | 'founderStory'
   | 'botanicalEssentials'
   | 'qualityAssurance'
+  | 'googleReviews'
   | 'validatedFormulations'
   | 'sharedJourney'
   | 'reachReliability'
@@ -181,6 +214,7 @@ export interface HomeThemeSettings {
   founderStory: FounderStorySection;
   botanicalEssentials: BotanicalEssentialsSection;
   qualityAssurance: QualityAssuranceSection;
+  googleReviews: GoogleReviewsSection;
   validatedFormulations: ValidatedFormulationsSection;
   sharedJourney: SharedJourneySection;
   reachReliability: ReachReliabilitySection;

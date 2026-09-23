@@ -820,3 +820,60 @@ export interface WholesalePayment {
   createdBy: string;
   createdAt: string;
 }
+
+export interface GoogleBusinessReview {
+  id: string;
+  authorName: string;
+  authorPhotoUrl?: string;
+  rating: number;
+  relativeTimeDescription: string;
+  text: string;
+  publishTime?: string;
+  profileUrl?: string;
+  isVerifiedCustomer?: boolean;
+  productPurchased?: string;
+  likesCount?: number;
+  isLocalGuide?: boolean;
+  reply?: {
+    text: string;
+    replyDate: string;
+  };
+}
+
+export interface GoogleBusinessProfileData {
+  businessName: string;
+  googleMapsUrl: string;
+  writeReviewUrl: string;
+  shareUrl: string;
+  placeId?: string;
+  kgmid?: string;
+  address: string;
+  city?: string;
+  country?: string;
+  phoneNumber?: string;
+  overallRating: number;
+  totalReviewsCount: number;
+  ratingBreakdown: {
+    fiveStar: number;
+    fourStar: number;
+    threeStar: number;
+    twoStar: number;
+    oneStar: number;
+  };
+  reviews: GoogleBusinessReview[];
+  lastSyncedAt: string;
+  status: 'active' | 'synced' | 'verified';
+  groundingSource?: string;
+  groundingChunks?: Array<{
+    maps?: {
+      uri?: string;
+      title?: string;
+      placeAnswerSources?: any;
+    };
+    web?: {
+      uri?: string;
+      title?: string;
+    };
+  }>;
+}
+

@@ -10,6 +10,7 @@ import {
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
+import { getMessaging, Messaging, isSupported as isMessagingSupported } from 'firebase/messaging';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
 // Silence benign internal gRPC idle stream disconnection notifications
@@ -184,6 +185,25 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
     }
   }
   return cleanObj as T;
+}
+
+// Public FCM VAPID Key from Web Push certificates
+export const FCM_VAPID_KEY = getEnvVar('VITE_FIREBASE_VAPID_KEY') || (firebaseConfigJson as any).vapidKey || 'BOVT-aGTJh1mh9nItIfG3U9d8RBJW0rMmg_hjgbNmKv2OvZDV_M2ugsx9HpfBSIBw5k6rwMqgrLXDsF2Y3iW-4A';
+
+let messagingInstance: Messaging | null = null;
+export async function getFirebaseMessaging(): Promise<Messaging | null> {
+  if (typeof window === 'undefined') return null;
+  if (messagingInstance) return messagingInstance;
+  try {
+    const supported = await isMessagingSupported();
+    if (supported) {
+      messagingInstance = getMessaging(app);
+      return messagingInstance;
+    }
+  } catch (err) {
+    console.warn('[Firebase Messaging] Initialization notice:', err);
+  }
+  return null;
 }
 
 export { app, db, auth, functions, analytics };

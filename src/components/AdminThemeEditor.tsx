@@ -9,7 +9,7 @@ import {
   RotateCcw, Eye, ArrowUp, ArrowDown, EyeOff, Check, Image as ImageIcon,
   Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
   Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
-  Upload, RefreshCw
+  Upload, RefreshCw, Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
@@ -20,6 +20,7 @@ const SECTION_LABELS: Record<SectionKey, { name: string; desc: string }> = {
   founderStory: { name: "Founders' Story (A Legacy of Love & Light)", desc: 'Editorial story layout, founder photo, and quote' },
   botanicalEssentials: { name: 'Botanical Essentials Carousel', desc: 'Heritage favorites product showcase section' },
   qualityAssurance: { name: 'Quality Assurance (Global Standard)', desc: 'Warehouse inventory, direct logistics, and operations note' },
+  googleReviews: { name: 'Google Business Reviews & Ratings', desc: 'Verified 5-star customer ratings, feedback, and Google Maps connection' },
   validatedFormulations: { name: 'Validated Formulations Grid', desc: 'Precision science product collection grid' },
   sharedJourney: { name: 'Shared Journey of Radiance (Community)', desc: '4-column community photo gallery' },
   reachReliability: { name: 'Reach & Reliability (Bridging Continents)', desc: 'Transit statistics and South Korea operations photos' },
@@ -1655,6 +1656,337 @@ export const AdminThemeEditor: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* GOOGLE BUSINESS REVIEWS EDITOR */}
+            <div className="bg-white rounded-[24px] border border-pink-100 overflow-hidden shadow-sm">
+              <div
+                onClick={() => setExpandedSection(expandedSection === 'googleReviews' ? null : 'googleReviews')}
+                className="p-5 bg-gradient-to-r from-pink-50/40 to-white flex items-center justify-between cursor-pointer border-b border-pink-50"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-[#E91E8C] text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                    G
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-gray-900">Google Business Reviews & Ratings</h3>
+                    <p className="text-[10px] text-gray-500 font-semibold">Verified customer reviews & Google Maps connection</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${theme.googleReviews?.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {theme.googleReviews?.enabled ? 'Visible' : 'Hidden'}
+                  </span>
+                  {expandedSection === 'googleReviews' ? <ChevronUp size={18} className="text-[#E91E8C]" /> : <ChevronDown size={18} className="text-gray-400" />}
+                </div>
+              </div>
+
+              {expandedSection === 'googleReviews' && (
+                <div className="p-6 space-y-4 bg-white text-xs">
+                  <div className="flex items-center gap-2 pb-3 border-b border-pink-50">
+                    <input
+                      type="checkbox"
+                      id="gr-enabled"
+                      checked={theme.googleReviews?.enabled ?? true}
+                      onChange={(e) => setTheme({ ...theme, googleReviews: { ...(theme.googleReviews || {} as any), enabled: e.target.checked } })}
+                      className="w-4 h-4 text-[#E91E8C] rounded border-gray-300 focus:ring-[#E91E8C]"
+                    />
+                    <label htmlFor="gr-enabled" className="font-extrabold text-gray-800 cursor-pointer">
+                      Enable Google Business Reviews Section
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Section Subtitle</label>
+                      <input
+                        type="text"
+                        value={theme.googleReviews?.subtitle || ''}
+                        onChange={(e) => setTheme({ ...theme, googleReviews: { ...(theme.googleReviews || {} as any), subtitle: e.target.value } })}
+                        placeholder="VERIFIED CUSTOMER LOVE"
+                        className="w-full px-3.5 py-2 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Section Title</label>
+                      <input
+                        type="text"
+                        value={theme.googleReviews?.title || ''}
+                        onChange={(e) => setTheme({ ...theme, googleReviews: { ...(theme.googleReviews || {} as any), title: e.target.value } })}
+                        placeholder="Google Business Reviews & Ratings"
+                        className="w-full px-3.5 py-2 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Google Business Share Link</label>
+                      <input
+                        type="text"
+                        value={theme.googleReviews?.shareUrl || ''}
+                        onChange={(e) => setTheme({ ...theme, googleReviews: { ...(theme.googleReviews || {} as any), shareUrl: e.target.value } })}
+                        placeholder="https://share.google/lEQv5trQv88b0w8WT"
+                        className="w-full px-3.5 py-2 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Write Review URL</label>
+                      <input
+                        type="text"
+                        value={theme.googleReviews?.writeReviewUrl || ''}
+                        onChange={(e) => setTheme({ ...theme, googleReviews: { ...(theme.googleReviews || {} as any), writeReviewUrl: e.target.value } })}
+                        placeholder="https://share.google/lEQv5trQv88b0w8WT"
+                        className="w-full px-3.5 py-2 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <input
+                      type="checkbox"
+                      id="gr-breakdown"
+                      checked={theme.googleReviews?.showBreakdown ?? true}
+                      onChange={(e) => setTheme({ ...theme, googleReviews: { ...(theme.googleReviews || {} as any), showBreakdown: e.target.checked } })}
+                      className="w-4 h-4 text-[#E91E8C] rounded border-gray-300 focus:ring-[#E91E8C]"
+                    />
+                    <label htmlFor="gr-breakdown" className="font-bold text-gray-700 cursor-pointer">
+                      Show 5-star Rating Breakdown Meter
+                    </label>
+                  </div>
+
+                  {/* Real Reviews Customizer */}
+                  <div className="mt-6 pt-5 border-t border-pink-100 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">
+                          Customer Reviews List ({theme.googleReviews?.customReviews ? theme.googleReviews.customReviews.length : 0} custom real reviews)
+                        </h4>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Add your real Google reviews below. Any reviews entered here will immediately replace default placeholders!
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const existing = theme.googleReviews?.customReviews || [];
+                          const newReview = {
+                            id: `rev-${Date.now()}`,
+                            authorName: '',
+                            rating: 5,
+                            relativeTimeDescription: 'Recent customer',
+                            text: '',
+                            productPurchased: '',
+                            isVerifiedCustomer: true,
+                            isLocalGuide: false,
+                            likesCount: 12
+                          };
+                          setTheme({
+                            ...theme,
+                            googleReviews: {
+                              ...(theme.googleReviews || {} as any),
+                              customReviews: [newReview, ...existing]
+                            }
+                          });
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E91E8C] text-white text-[11px] font-bold rounded-xl hover:bg-[#D8157D] transition-all shadow-xs cursor-pointer"
+                      >
+                        <Plus size={14} />
+                        <span>Add Real Review</span>
+                      </button>
+                    </div>
+
+                    {/* Overall Rating & Review Count Overrides */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-pink-50/50 rounded-2xl border border-pink-100">
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-gray-600 uppercase mb-1">
+                          Display Rating Average (e.g. 4.9 or 5.0)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="1"
+                          max="5"
+                          value={theme.googleReviews?.customRating ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                            setTheme({
+                              ...theme,
+                              googleReviews: {
+                                ...(theme.googleReviews || {} as any),
+                                customRating: val
+                              }
+                            });
+                          }}
+                          placeholder="4.9 (leave blank for auto)"
+                          className="w-full px-3 py-1.5 rounded-xl border border-pink-200 bg-white outline-none text-xs focus:border-[#E91E8C]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-gray-600 uppercase mb-1">
+                          Total Review Count (e.g. 150)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={theme.googleReviews?.customTotalReviews ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                            setTheme({
+                              ...theme,
+                              googleReviews: {
+                                ...(theme.googleReviews || {} as any),
+                                customTotalReviews: val
+                              }
+                            });
+                          }}
+                          placeholder="Auto based on reviews count"
+                          className="w-full px-3 py-1.5 rounded-xl border border-pink-200 bg-white outline-none text-xs focus:border-[#E91E8C]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Review items */}
+                    {(!theme.googleReviews?.customReviews || theme.googleReviews.customReviews.length === 0) ? (
+                      <div className="text-center py-6 px-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                        <Star size={24} className="mx-auto text-amber-400 mb-2 fill-amber-400 opacity-60" />
+                        <p className="text-xs font-bold text-gray-700">No custom reviews added yet</p>
+                        <p className="text-[11px] text-gray-500 mt-1 max-w-sm mx-auto">
+                          Click <strong>"Add Real Review"</strong> above to input real reviews from your Google Business profile.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                        {theme.googleReviews.customReviews.map((rev, rIdx) => (
+                          <div key={rev.id || rIdx} className="p-4 bg-white rounded-2xl border border-pink-100 shadow-xs space-y-3 relative">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-black uppercase text-pink-600 bg-pink-50 px-2 py-0.5 rounded-md">
+                                Review #{rIdx + 1}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...(theme.googleReviews?.customReviews || [])];
+                                  updated.splice(rIdx, 1);
+                                  setTheme({
+                                    ...theme,
+                                    googleReviews: {
+                                      ...(theme.googleReviews || {} as any),
+                                      customReviews: updated
+                                    }
+                                  });
+                                }}
+                                className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                title="Remove review"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Author / Customer Name *</label>
+                                <input
+                                  type="text"
+                                  value={rev.authorName || ''}
+                                  onChange={(e) => {
+                                    const updated = [...(theme.googleReviews?.customReviews || [])];
+                                    updated[rIdx] = { ...updated[rIdx], authorName: e.target.value };
+                                    setTheme({
+                                      ...theme,
+                                      googleReviews: { ...(theme.googleReviews || {} as any), customReviews: updated }
+                                    });
+                                  }}
+                                  placeholder="e.g. Sabrina Akhtar"
+                                  className="w-full px-3 py-1.5 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Rating (Stars)</label>
+                                <select
+                                  value={rev.rating || 5}
+                                  onChange={(e) => {
+                                    const updated = [...(theme.googleReviews?.customReviews || [])];
+                                    updated[rIdx] = { ...updated[rIdx], rating: parseInt(e.target.value, 10) };
+                                    setTheme({
+                                      ...theme,
+                                      googleReviews: { ...(theme.googleReviews || {} as any), customReviews: updated }
+                                    });
+                                  }}
+                                  className="w-full px-3 py-1.5 rounded-xl border border-pink-100 outline-none text-xs bg-white focus:border-[#E91E8C]"
+                                >
+                                  <option value={5}>⭐⭐⭐⭐⭐ 5 Stars</option>
+                                  <option value={4}>⭐⭐⭐⭐ 4 Stars</option>
+                                  <option value={3}>⭐⭐⭐ 3 Stars</option>
+                                  <option value={2}>⭐⭐ 2 Stars</option>
+                                  <option value={1}>⭐ 1 Star</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Review Text *</label>
+                              <textarea
+                                rows={2}
+                                value={rev.text || ''}
+                                onChange={(e) => {
+                                  const updated = [...(theme.googleReviews?.customReviews || [])];
+                                  updated[rIdx] = { ...updated[rIdx], text: e.target.value };
+                                  setTheme({
+                                    ...theme,
+                                    googleReviews: { ...(theme.googleReviews || {} as any), customReviews: updated }
+                                  });
+                                }}
+                                placeholder="Paste the customer's Google review comment here..."
+                                className="w-full px-3 py-1.5 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C] resize-none"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Product Purchased (Optional)</label>
+                                <input
+                                  type="text"
+                                  value={rev.productPurchased || ''}
+                                  onChange={(e) => {
+                                    const updated = [...(theme.googleReviews?.customReviews || [])];
+                                    updated[rIdx] = { ...updated[rIdx], productPurchased: e.target.value };
+                                    setTheme({
+                                      ...theme,
+                                      googleReviews: { ...(theme.googleReviews || {} as any), customReviews: updated }
+                                    });
+                                  }}
+                                  placeholder="e.g. COSRX Snail Mucin 96"
+                                  className="w-full px-3 py-1.5 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-600 mb-0.5">Store Owner Reply (Optional)</label>
+                                <input
+                                  type="text"
+                                  value={rev.replyText || ''}
+                                  onChange={(e) => {
+                                    const updated = [...(theme.googleReviews?.customReviews || [])];
+                                    updated[rIdx] = { ...updated[rIdx], replyText: e.target.value };
+                                    setTheme({
+                                      ...theme,
+                                      googleReviews: { ...(theme.googleReviews || {} as any), customReviews: updated }
+                                    });
+                                  }}
+                                  placeholder="Thank you for trusting us!"
+                                  className="w-full px-3 py-1.5 rounded-xl border border-pink-100 outline-none text-xs focus:border-[#E91E8C]"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

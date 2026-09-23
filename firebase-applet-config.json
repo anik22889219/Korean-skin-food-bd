@@ -6,5 +6,6 @@
   "firestoreDatabaseId": "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4",
   "storageBucket": "gen-lang-client-0633897500.firebasestorage.app",
   "messagingSenderId": "857142946228",
-  "measurementId": "G-CGPWW8JK6V"
+  "measurementId": "G-CGPWW8JK6V",
+  "vapidKey": "BOVT-aGTJh1mh9nItIfG3U9d8RBJW0rMmg_hjgbNmKv2OvZDV_M2ugsx9HpfBSIBw5k6rwMqgrLXDsF2Y3iW-4A"
 }
