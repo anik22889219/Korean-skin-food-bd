@@ -35,6 +35,25 @@
       },
       "required": ["id", "name", "price", "stock"]
     },
+    "TaxonomyItem": {
+      "title": "TaxonomyItem",
+      "description": "Product taxonomy and filter dimension entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["brand", "category", "skin_type", "skin_concern", "target_benefit", "routine_step", "ingredient"] },
+        "name": { "type": "string" },
+        "nameBN": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "descriptionBN": { "type": "string" },
+        "image": { "type": "string" },
+        "displayOrder": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" }
+      },
+      "required": ["id", "type", "name", "slug", "displayOrder", "isActive"]
+    },
     "Order": {
       "title": "Order",
       "description": "Customer order document",
@@ -714,6 +733,10 @@
     "/coupons/{couponId}": {
       "schema": "Coupon",
       "description": "Store discount and free delivery coupon vouchers"
+    },
+    "/taxonomies/{taxonomyId}": {
+      "schema": "TaxonomyItem",
+      "description": "Taxonomy dimensions and filter configurations"
     }
   }
 }

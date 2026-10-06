@@ -6,3 +6,6 @@ export * from './settings';
 export * from './creators';
 export * from './agents';
 export * from './pos';
+export * from './categories';
+export * from './brands';
+export * from './taxonomies';

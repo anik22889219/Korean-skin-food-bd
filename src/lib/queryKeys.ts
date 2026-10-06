@@ -12,6 +12,10 @@ export const queryKeys = {
   brands: {
     all: ['brands'] as const,
   },
+  taxonomies: {
+    all: ['taxonomies'] as const,
+    byType: (type?: string) => ['taxonomies', type || 'all'] as const,
+  },
   inventory: {
     all: ['inventory'] as const,
     // Movements: distinguish realtime recent (200 limit window) vs paginated historical vs filtered

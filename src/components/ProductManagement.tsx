@@ -27,7 +27,7 @@ import {
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
   Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info,
   LayoutGrid, List, Package, AlertTriangle, Layers, Copy, DollarSign, ArrowUpDown,
-  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet, Box
+  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet, Box, SlidersHorizontal
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -35,9 +35,8 @@ import { KOREAN_BRANDS, getUniqueBrandList, isSameBrand, getCanonicalBrandName }
 import { normalizeProductPricing, getRetailPrice, getWholesalePrice, getComboEffectiveStock } from '../utils/pricing';
 import { ComboPackageModal } from './ComboPackageModal';
 
-const CATEGORIES = [
+const SINGLE_CATEGORIES = [
   'All', 
-  'Combo & Sets',
   'Cleanser', 
   'Toner', 
   'Serum & Essence', 
@@ -60,7 +59,7 @@ export const ProductManagement: React.FC = () => {
   const hasSuperAdminAccess = isSuperAdmin || profile?.role === 'super_admin' || user?.email === 'koreanskinfood.bd@gmail.com';
 
   const { data: products = [], isLoading: isProductsLoading, refetch: refetchProducts } = useProducts();
-  const { data: categories = CATEGORIES } = useCategories();
+  const { data: categories = SINGLE_CATEGORIES } = useCategories();
   const { data: brandsData } = useBrands();
 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -90,6 +89,30 @@ export const ProductManagement: React.FC = () => {
   const [copiedBarcode, setCopiedBarcode] = useState<string | null>(null);
   const [isAiGeneratingContent, setIsAiGeneratingContent] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
+  const [showCsvDropdown, setShowCsvDropdown] = useState(false);
+  const csvDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close CSV dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (csvDropdownRef.current && !csvDropdownRef.current.contains(e.target as Node)) {
+        setShowCsvDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filter ONLY Single Products (Strictly excluding combo sets / routine bundles)
+  const singleProducts = useMemo(() => {
+    return products.filter((p) => !p.isCombo && p.category !== 'Combo & Sets' && !p.comboConfig);
+  }, [products]);
+
+  // Count combo packages for cross-navigation badge
+  const comboPackagesCount = useMemo(() => {
+    return products.filter((p) => p.isCombo === true || p.category === 'Combo & Sets' || !!p.comboConfig).length;
+  }, [products]);
 
   const handleCopyBarcode = (e: React.MouseEvent, code: string) => {
     e.stopPropagation();
@@ -103,21 +126,33 @@ export const ProductManagement: React.FC = () => {
     }
   };
 
-  // CSV Export for Super Admin
-  const handleDownloadCSV = () => {
+  // Dynamic Real-time CSV Export for Single Products
+  const handleDownloadCSV = (exportMode: 'all' | 'filtered' = 'all') => {
     if (!hasSuperAdminAccess) {
       setAlertMsg({ type: 'error', text: 'Access Denied: Only Super Admin is authorized to export the product catalog CSV.' });
       setTimeout(() => setAlertMsg(null), 4000);
       return;
     }
 
-    if (!products || products.length === 0) {
-      setAlertMsg({ type: 'warning', text: 'No products available to export.' });
-      setTimeout(() => setAlertMsg(null), 4000);
-      return;
-    }
+    setIsExportingCsv(true);
 
     try {
+      // Pull dynamic fresh products directly from productService live cache & query state
+      const freshAllProducts = productService.getProducts();
+      const freshSingleProducts = (freshAllProducts && freshAllProducts.length > 0)
+        ? freshAllProducts.filter((p) => !p.isCombo && p.category !== 'Combo & Sets' && !p.comboConfig)
+        : singleProducts;
+
+      const targetList = exportMode === 'filtered' ? filteredProducts : freshSingleProducts;
+
+      if (!targetList || targetList.length === 0) {
+        setAlertMsg({ type: 'warning', text: 'No single products available to export.' });
+        setTimeout(() => setAlertMsg(null), 4000);
+        setIsExportingCsv(false);
+        setShowCsvDropdown(false);
+        return;
+      }
+
       const escapeCsvCell = (val: any): string => {
         if (val === null || val === undefined) return '""';
         const str = String(val).replace(/"/g, '""');
@@ -126,14 +161,15 @@ export const ProductManagement: React.FC = () => {
 
       const headers = [
         'Product ID',
+        'Product Type',
         'Product Name',
         'Product Name (Bangla)',
         'Brand',
         'Category',
-        'Barcode',
+        'Barcode / EAN-13',
         'SKU',
         'Volume / Size',
-        'Current Stock',
+        'Current Stock (Units)',
         'Stock Status',
         'Low Stock Alert Threshold',
         'Import Cost (BDT)',
@@ -146,14 +182,18 @@ export const ProductManagement: React.FC = () => {
         'Rating',
         'Reviews Count',
         'Skin Types',
-        'Image URL',
+        'Primary Image URL',
+        'Additional Images Count',
         'SEO / Meta Title',
         'SEO / Meta Description',
         'Product Description (English)',
-        'Product Description (Bangla)'
+        'Product Description (Bangla)',
+        'Dynamic Export Timestamp (BDT)'
       ];
 
-      const rows = products.map((p) => {
+      const nowFormatted = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Dhaka' });
+
+      const rows = targetList.map((p) => {
         const np = normalizeProductPricing(p);
         const stockQty = Number(p.stock) || 0;
         const retailP = getRetailPrice(np);
@@ -164,9 +204,11 @@ export const ProductManagement: React.FC = () => {
             ? 'Low Stock' 
             : 'In Stock';
         const totalValuation = stockQty * retailP;
+        const galleryCount = Array.isArray(p.images) ? p.images.length : 0;
 
         return [
           escapeCsvCell(p.id),
+          escapeCsvCell('Single Product'),
           escapeCsvCell(p.name),
           escapeCsvCell(p.nameBN || ''),
           escapeCsvCell(p.brand || ''),
@@ -188,10 +230,12 @@ export const ProductManagement: React.FC = () => {
           escapeCsvCell(p.reviewsCount ?? 0),
           escapeCsvCell(Array.isArray(p.skinTypes) ? p.skinTypes.join(', ') : ''),
           escapeCsvCell(p.image || ''),
+          escapeCsvCell(galleryCount),
           escapeCsvCell(p.metaTitle || p.seoTitle || ''),
           escapeCsvCell(p.metaDescription || ''),
           escapeCsvCell(p.description || ''),
-          escapeCsvCell(p.descriptionBN || '')
+          escapeCsvCell(p.descriptionBN || ''),
+          escapeCsvCell(nowFormatted)
         ].join(',');
       });
 
@@ -200,9 +244,9 @@ export const ProductManagement: React.FC = () => {
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      const dateStr = new Date().toISOString().slice(0, 10);
+      const dateStr = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
       link.href = url;
-      link.setAttribute('download', `ksf_product_catalog_${dateStr}.csv`);
+      link.setAttribute('download', `ksf_single_products_${exportMode === 'filtered' ? 'filtered_' : 'catalog_'}${dateStr}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -210,9 +254,9 @@ export const ProductManagement: React.FC = () => {
 
       setAlertMsg({
         type: 'success',
-        text: `✅ Product catalog CSV downloaded successfully (${products.length} products).`
+        text: `✅ Dynamic Single Products CSV downloaded (${targetList.length} products with live updated stock & prices).`
       });
-      setTimeout(() => setAlertMsg(null), 4000);
+      setTimeout(() => setAlertMsg(null), 4500);
     } catch (err: any) {
       console.error('Failed to export CSV:', err);
       setAlertMsg({
@@ -220,10 +264,13 @@ export const ProductManagement: React.FC = () => {
         text: 'Failed to export CSV: ' + (err?.message || 'Unknown error')
       });
       setTimeout(() => setAlertMsg(null), 4000);
+    } finally {
+      setIsExportingCsv(false);
+      setShowCsvDropdown(false);
     }
   };
 
-  // Inventory stats summary metrics
+  // Inventory stats summary metrics for SINGLE products
   const inventoryMetrics = useMemo(() => {
     let totalStockUnits = 0;
     let totalValuationBDT = 0;
@@ -231,7 +278,7 @@ export const ProductManagement: React.FC = () => {
     let outOfStockCount = 0;
     let discountedCount = 0;
 
-    products.forEach((p) => {
+    singleProducts.forEach((p) => {
       const np = normalizeProductPricing(p);
       const qty = Number(np.stock) || 0;
       const pr = getRetailPrice(np);
@@ -248,19 +295,19 @@ export const ProductManagement: React.FC = () => {
     });
 
     return {
-      totalProducts: products.length,
+      totalProducts: singleProducts.length,
       totalStockUnits,
       totalValuationBDT,
       lowStockCount,
       outOfStockCount,
       discountedCount
     };
-  }, [products]);
+  }, [singleProducts]);
 
-  // Memoized unique brands for filter (case-deduplicated)
+  // Memoized unique brands for single products filter
   const availableBrandsForFilter = useMemo(() => {
-    return getUniqueBrandList(products);
-  }, [products]);
+    return getUniqueBrandList(singleProducts);
+  }, [singleProducts]);
 
   // Cloudinary media library popup states
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
@@ -1225,9 +1272,9 @@ export const ProductManagement: React.FC = () => {
     setIsMediaModalOpen(true);
   };
 
-  // Filtered list
+  // Filtered Single Products list
   const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
+    return singleProducts.filter((p) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch = !q || 
                             (p.name && p.name.toLowerCase().includes(q)) || 
@@ -1247,33 +1294,129 @@ export const ProductManagement: React.FC = () => {
 
       return matchesSearch && matchesCategory && matchesBrand && matchesStock;
     });
-  }, [products, searchQuery, categoryFilter, brandFilter, stockStatusFilter]);
+  }, [singleProducts, searchQuery, categoryFilter, brandFilter, stockStatusFilter]);
 
   return (
     <div className="bg-white p-4 sm:p-6 lg:p-7 rounded-[28px] border border-pink-100 shadow-sm space-y-6">
       
+      {/* Top Navigation Tabs: Single Products vs Combo Packages */}
+      <div className="flex items-center gap-2 p-1.5 bg-slate-100/80 rounded-2xl border border-slate-200/80 w-fit max-w-full overflow-x-auto">
+        <button
+          type="button"
+          className="px-4 py-2 bg-white text-slate-900 shadow-sm rounded-xl text-xs font-black flex items-center gap-2 transition"
+        >
+          <Box size={14} className="text-[#E91E8C]" />
+          <span>Single Products (একক পণ্য)</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-pink-100 text-[#E91E8C]">
+            {singleProducts.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/combos')}
+          className="px-4 py-2 text-slate-600 hover:text-purple-700 hover:bg-white/60 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer"
+        >
+          <Layers size={14} className="text-purple-600" />
+          <span>Combo Packages (কম্বো প্যাকেজ)</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-purple-700">
+            {comboPackagesCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => navigate('/admin/taxonomies')}
+          className="px-4 py-2 text-slate-600 hover:text-rose-700 hover:bg-white/60 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer"
+        >
+          <SlidersHorizontal size={14} className="text-rose-600" />
+          <span>Taxonomies & Filters (ফিল্টার ও ট্যাক্সোনমি)</span>
+        </button>
+      </div>
+
       {/* Header and CTA */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-pink-50 pb-5">
         <div>
           <div className="flex items-center gap-2 mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#E91E8C]">
             <Package size={13} />
-            <span>Product List & Operations</span>
+            <span>Single Product Catalog & Stock</span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Product & Inventory Management</h2>
-          <p className="text-xs text-slate-500 mt-1">Live store catalog, physical barcode auditing, multi-warehouse stock levels, and Gemini AI copywriting.</p>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Single Product Inventory Management</h2>
+          <p className="text-xs text-slate-500 mt-1">Live single items catalog, barcode auditing, multi-warehouse stock levels, dynamic CSV export, and AI copywriting.</p>
         </div>
 
         <div className="flex gap-2 flex-wrap items-center">
+          {/* Dynamic Real-time CSV Export Dropdown Button */}
           {hasSuperAdminAccess && (
-            <button 
-              type="button"
-              onClick={handleDownloadCSV}
-              className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-2xl text-xs font-extrabold cursor-pointer transition flex items-center gap-2 shadow-sm"
-              title="Download complete product list as CSV (Super Admin Only)"
-            >
-              <Download size={14} className="text-emerald-600" />
-              <span>Download CSV</span>
-            </button>
+            <div className="relative" ref={csvDropdownRef}>
+              <button 
+                type="button"
+                onClick={() => setShowCsvDropdown(!showCsvDropdown)}
+                disabled={isExportingCsv}
+                className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-2xl text-xs font-black cursor-pointer transition flex items-center gap-2 shadow-sm disabled:opacity-50"
+                title="Download live dynamic product catalog as CSV (Super Admin Only)"
+              >
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <FileSpreadsheet size={15} className="text-emerald-600" />
+                <span>{isExportingCsv ? 'Exporting...' : 'Export Dynamic CSV'}</span>
+                <span className="text-[10px] px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 font-mono rounded-md font-extrabold">
+                  {singleProducts.length}
+                </span>
+              </button>
+
+              {/* Dynamic CSV Dropdown Options */}
+              {showCsvDropdown && (
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-emerald-200 z-50 p-2.5 space-y-2 animate-in fade-in zoom-in-95">
+                  <div className="px-2 py-1.5 border-b border-slate-100">
+                    <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-900">
+                      <RefreshCw size={12} className="text-emerald-600 animate-spin" style={{ animationDuration: '3s' }} />
+                      <span>Live Real-time Catalog CSV</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Always downloads freshly updated data from Firestore.
+                    </p>
+                  </div>
+
+                  {/* Option 1: All Single Products */}
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadCSV('all')}
+                    className="w-full text-left p-2.5 rounded-xl hover:bg-emerald-50 transition cursor-pointer flex items-center justify-between group"
+                  >
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 group-hover:text-emerald-800 flex items-center gap-1.5">
+                        <Download size={13} className="text-emerald-600" />
+                        <span>All Single Products</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 block">Complete live single catalog</span>
+                    </div>
+                    <span className="font-mono text-xs font-black text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md">
+                      {singleProducts.length} items
+                    </span>
+                  </button>
+
+                  {/* Option 2: Filtered Results */}
+                  {filteredProducts.length !== singleProducts.length && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadCSV('filtered')}
+                      className="w-full text-left p-2.5 rounded-xl hover:bg-emerald-50 transition cursor-pointer flex items-center justify-between group"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 group-hover:text-emerald-800 flex items-center gap-1.5">
+                          <Search size={13} className="text-emerald-600" />
+                          <span>Current Filtered View</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 block">Matching search & category</span>
+                      </div>
+                      <span className="font-mono text-xs font-black text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md">
+                        {filteredProducts.length} items
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           <button 
@@ -1298,23 +1441,10 @@ export const ProductManagement: React.FC = () => {
             type="button"
             onClick={() => navigate('/admin/combos')}
             className="px-3.5 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-2xl text-xs font-extrabold cursor-pointer transition flex items-center gap-2 shadow-sm"
-            title="View dedicated Combos Management Hub"
+            title="Open Combos Management Hub"
           >
             <Layers size={14} className="text-purple-600" />
             <span>Combo Packages</span>
-          </button>
-
-          <button 
-            type="button"
-            onClick={() => {
-              setComboToEdit(null);
-              setIsComboModalOpen(true);
-            }}
-            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-2xl text-xs font-black cursor-pointer transition flex items-center gap-2 shadow-md hover:shadow-indigo-200"
-            title="Create a new combo bundle or customizable routine set"
-          >
-            <Plus size={15} />
-            <span>New Combo Package</span>
           </button>
 
           <button 
@@ -1328,7 +1458,7 @@ export const ProductManagement: React.FC = () => {
             className="px-4 py-2.5 bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] hover:opacity-95 text-white rounded-2xl text-xs font-black cursor-pointer transition flex items-center gap-2 shadow-md hover:shadow-pink-200"
           >
             <Plus size={15} />
-            <span>Add New Product</span>
+            <span>Add Single Product</span>
           </button>
         </div>
       </div>
@@ -1344,7 +1474,7 @@ export const ProductManagement: React.FC = () => {
 
       {/* Inventory KPI Summary Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Total Products */}
+        {/* Total Single Products */}
         <div 
           onClick={() => setStockStatusFilter('all')}
           className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer ${
@@ -1354,7 +1484,7 @@ export const ProductManagement: React.FC = () => {
           }`}
         >
           <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
-            <span>Total Catalog</span>
+            <span>Single Products Catalog</span>
             <Package size={14} className="text-[#E91E8C]" />
           </div>
           <div className="mt-1.5 flex items-baseline gap-2">
@@ -1404,7 +1534,7 @@ export const ProductManagement: React.FC = () => {
         {/* Total Valuation */}
         <div className="p-3.5 sm:p-4 rounded-2xl border border-pink-100 bg-gradient-to-br from-pink-50/40 via-white to-rose-50/20">
           <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
-            <span>Retail Valuation</span>
+            <span>Single Items Valuation</span>
             <DollarSign size={14} className="text-emerald-600" />
           </div>
           <div className="mt-1.5 flex items-baseline gap-2">
@@ -1424,7 +1554,7 @@ export const ProductManagement: React.FC = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by brand, product title, barcode or SKU..."
+            placeholder="Search by single product brand, title, barcode or SKU..."
             className="w-full pl-10 pr-4 py-2 text-xs border border-pink-200 bg-white rounded-xl outline-none focus:ring-2 focus:ring-[#E91E8C]/20 focus:border-[#E91E8C] transition text-slate-900 placeholder:text-slate-400 font-medium"
           />
           {searchQuery && (
@@ -1464,7 +1594,7 @@ export const ProductManagement: React.FC = () => {
               onChange={(e) => setCategoryFilter(e.target.value)}
               className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[140px] truncate"
             >
-              {CATEGORIES.map((c) => (
+              {SINGLE_CATEGORIES.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
@@ -1534,7 +1664,7 @@ export const ProductManagement: React.FC = () => {
       {/* Results Header Count */}
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-extrabold text-slate-600">
-          Showing <span className="text-[#E91E8C] font-mono font-black">{filteredProducts.length}</span> of {products.length} formulations
+          Showing <span className="text-[#E91E8C] font-mono font-black">{filteredProducts.length}</span> of {singleProducts.length} single formulations
         </span>
       </div>
 
@@ -1731,19 +1861,12 @@ export const ProductManagement: React.FC = () => {
                     {/* Edit Button */}
                     <button 
                       type="button"
-                      onClick={() => {
-                        if (p.isCombo) {
-                          setComboToEdit(p);
-                          setIsComboModalOpen(true);
-                        } else {
-                          handleStartEditProduct(p);
-                        }
-                      }}
+                      onClick={() => handleStartEditProduct(p)}
                       className="flex-1 bg-pink-50 hover:bg-[#E91E8C] text-slate-800 hover:text-white border border-pink-200 py-1.5 px-3 rounded-xl text-xs font-extrabold cursor-pointer transition flex items-center justify-center gap-1.5 shadow-xs"
-                      title={p.isCombo ? "Edit combo package composition & pricing" : "Edit product formulation & inventory specs"}
+                      title="Edit product formulation & inventory specs"
                     >
                       <Edit size={13} />
-                      <span>{p.isCombo ? 'Edit Combo' : 'Edit'}</span>
+                      <span>Edit</span>
                     </button>
 
                     {/* Delete Button */}
@@ -1915,16 +2038,9 @@ export const ProductManagement: React.FC = () => {
                           </button>
                           <button 
                             type="button"
-                            onClick={() => {
-                              if (p.isCombo) {
-                                setComboToEdit(p);
-                                setIsComboModalOpen(true);
-                              } else {
-                                handleStartEditProduct(p);
-                              }
-                            }}
+                            onClick={() => handleStartEditProduct(p)}
                             className="p-1.5 bg-slate-50 hover:bg-pink-50 text-slate-700 hover:text-[#E91E8C] rounded-xl text-xs transition"
-                            title={p.isCombo ? "Edit Combo Package" : "Edit"}
+                            title="Edit single product"
                           >
                             <Edit size={13} />
                           </button>
@@ -2736,7 +2852,7 @@ export const ProductManagement: React.FC = () => {
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                   />
                   <datalist id="product-categories-list">
-                    {CATEGORIES.filter(c => c !== 'All').map(c => (
+                    {categories.filter(c => c !== 'All').map(c => (
                       <option key={c} value={c} />
                     ))}
                   </datalist>

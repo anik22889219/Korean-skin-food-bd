@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryKeys';
 import { productService } from '../../services/productService';
+import { taxonomyService } from '../../services/taxonomyService';
 
 export const CANONICAL_CATEGORIES = [
   'All', 
@@ -24,17 +25,24 @@ export function useCategories() {
   return useQuery({
     queryKey: queryKeys.categories.all,
     queryFn: async () => {
-      const prods = await productService.fetchProducts();
-      const productCategories = Array.from(new Set(prods.map((p) => p.category).filter(Boolean)));
-      
-      const customOnes = productCategories.filter(
-        (c) => !CANONICAL_CATEGORIES.includes(c as any)
-      );
+      const [prods, taxonomyCats] = await Promise.all([
+        productService.fetchProducts(),
+        taxonomyService.fetchTaxonomies('category').catch(() => [])
+      ]);
 
-      return ['All', ...CANONICAL_CATEGORIES.filter((c) => c !== 'All'), ...customOnes];
+      const productCategories = Array.from(new Set(prods.map((p) => p.category).filter(Boolean)));
+      const customTaxonomyCategories = taxonomyCats.filter(c => c.isActive).map(c => c.name);
+
+      const allMerged = Array.from(new Set([
+        ...CANONICAL_CATEGORIES.filter((c) => c !== 'All'),
+        ...customTaxonomyCategories,
+        ...productCategories
+      ]));
+
+      return ['All', ...allMerged];
     },
-    staleTime: 30 * 60 * 1000, // 30 minutes
-    gcTime: 60 * 60 * 1000, // 60 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     initialData: () => Array.from(CANONICAL_CATEGORIES),
   });
 }

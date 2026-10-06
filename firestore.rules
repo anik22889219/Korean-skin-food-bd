@@ -113,6 +113,20 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
+    // taxonomies, brands & categories - Public Read, Staff Write
+    match /taxonomies/{taxonomyId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+    match /brands/{brandId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     // orders - Secured: customer reads/creates own orders, updates safe fields, staff manages all
     match /orders/{orderId} {
       allow read: if isStaff() || (

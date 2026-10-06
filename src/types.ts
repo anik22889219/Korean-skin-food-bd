@@ -41,6 +41,42 @@ export interface Product {
   // Combo Package Fields
   isCombo?: boolean;
   comboConfig?: ComboConfig;
+  // Advanced Filter Taxonomy Dimensions
+  concerns?: string[];
+  benefits?: string[];
+  routineStep?: string;
+  keyIngredients?: string[];
+}
+
+export type TaxonomyDimensionType =
+  | 'brand'
+  | 'category'
+  | 'skin_type'
+  | 'skin_concern'
+  | 'target_benefit'
+  | 'routine_step'
+  | 'ingredient';
+
+export interface TaxonomyItem {
+  id: string;
+  type: TaxonomyDimensionType;
+  name: string;
+  nameBN?: string;
+  slug: string;
+  description?: string;
+  descriptionBN?: string;
+  image?: string;
+  icon?: string;
+  bannerImage?: string;
+  displayOrder: number;
+  isActive: boolean;
+  isFeatured?: boolean;
+  isPopular?: boolean;
+  parentCategoryId?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type ComboType = 'fixed' | 'customizable';

@@ -20,6 +20,7 @@ import { AdminLayout } from './components/AdminLayout';
 import { AdminDashboardHome } from './components/AdminDashboardHome';
 import { ProductManagement } from './components/ProductManagement';
 import { AdminComboPackages } from './components/AdminComboPackages';
+import { AdminTaxonomyManagement } from './components/AdminTaxonomyManagement';
 import { AdminSEO } from './components/AdminSEO';
 import { AdminSocial } from './components/AdminSocial';
 import { AdminChatLeads } from './components/AdminChatLeads';
@@ -221,6 +222,8 @@ export default function App() {
                   <Route path="products" element={<ProductManagement />} />
                   <Route path="combos" element={<AdminComboPackages />} />
                   <Route path="combo-packages" element={<AdminComboPackages />} />
+                  <Route path="taxonomies" element={<AdminTaxonomyManagement />} />
+                  <Route path="filters" element={<AdminTaxonomyManagement />} />
                   <Route path="seo" element={<AdminSEO />} />
                   <Route path="social" element={<AdminSocial />} />
                   <Route path="chat-leads" element={<AdminChatLeads />} />

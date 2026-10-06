@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryKeys';
 import { productService } from '../../services/productService';
+import { taxonomyService } from '../../services/taxonomyService';
 import { getUniqueBrandList, getBrandProductCounts } from '../../data/brands';
 
 export interface BrandsData {
@@ -12,13 +13,22 @@ export function useBrands() {
   return useQuery({
     queryKey: queryKeys.brands.all,
     queryFn: async () => {
-      const prods = await productService.fetchProducts();
-      const brands = getUniqueBrandList(prods);
+      const [prods, taxonomyBrands] = await Promise.all([
+        productService.fetchProducts(),
+        taxonomyService.fetchTaxonomies('brand').catch(() => [])
+      ]);
+
+      const baseBrands = getUniqueBrandList(prods);
+      const customBrands = taxonomyBrands.filter(b => b.isActive).map(b => b.name);
+      const combinedBrands = Array.from(new Set([...baseBrands, ...customBrands])).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' })
+      );
+
       const counts = getBrandProductCounts(prods);
-      return { brands, counts };
+      return { brands: combinedBrands, counts };
     },
-    staleTime: 30 * 60 * 1000, // 30 minutes
-    gcTime: 60 * 60 * 1000, // 60 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     initialData: () => {
       const prods = productService.getProducts();
       return {

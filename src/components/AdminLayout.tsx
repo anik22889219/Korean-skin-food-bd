@@ -7,7 +7,7 @@ import {
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
-  Percent, Layers
+  Percent, Layers, SlidersHorizontal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -116,19 +116,21 @@ export const AdminLayout: React.FC = () => {
       icon: CreditCard,
       highlight: isAdminOrSuperAdmin && activePosCount > 0
     },
-    { to: '/admin/products', label: 'Product List', badge: 'Stock', icon: Boxes },
+    { to: '/admin/products', label: 'Single Products', badge: 'Stock', icon: Boxes },
     { to: '/admin/combos', label: 'Combo Packages', badge: 'Bundles', icon: Layers },
+    { to: '/admin/taxonomies', label: 'Taxonomies & Filters', badge: 'Filters', icon: SlidersHorizontal },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
   ];
 
-  // Inventory Manager user gets access to Dashboard Overview, Skincare Catalog, All Reports & Analytics, Order Fulfillment, WhatsApp Leads, POS Register, Combo Packages
+  // Inventory Manager user gets access to Dashboard Overview, Skincare Catalog, All Reports & Analytics, Order Fulfillment, WhatsApp Leads, POS Register, Combo Packages, Taxonomies
   const inventoryManagerAllowedPaths = [
     '/admin',
     '/admin/products',
     '/admin/combos',
+    '/admin/taxonomies',
     '/admin/reports',
     '/admin/orders',
     '/admin/discounts',
