@@ -10,13 +10,15 @@ import {
   PaymentTransaction,
   FinancialTransaction,
   PaymentMethodType,
-  PaymentStatus
+  PaymentStatus,
+  ComboComponentDetail,
+  ComboType
 } from '../types';
 import { productService } from './productService';
 import { auth, db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
 import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, limit, startAfter, addDoc, getDocs, getDoc, arrayUnion, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
-import { getProductUnitPrice, aggregateProductQuantities } from '../utils/pricing';
+import { getProductUnitPrice, aggregateProductQuantities, getComboEffectiveStock } from '../utils/pricing';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 
@@ -28,6 +30,9 @@ export interface PosCheckoutItemInput {
   barcode?: string;
   name?: string;
   price?: number;
+  isCombo?: boolean;
+  comboType?: ComboType;
+  comboComponents?: ComboComponentDetail[];
 }
 
 export interface PosCheckoutParams {
@@ -399,8 +404,17 @@ export async function addProductToSession(
 
   const canonicalProductId = product.id;
 
-  if (product.stock <= 0) {
-    return { success: false, message: `Product "${product.name}" is out of stock!` };
+  const effectiveProductStock = product.isCombo
+    ? getComboEffectiveStock(product, productService.getProducts())
+    : Number(product.stock ?? 0);
+
+  if (effectiveProductStock <= 0) {
+    return { 
+      success: false, 
+      message: product.isCombo
+        ? `Combo package "${product.name}" is out of stock (one or more component items are sold out)!`
+        : `Product "${product.name}" is out of stock!`
+    };
   }
 
   const qtyToAdd = Math.max(1, quantityToAdd);
@@ -423,10 +437,10 @@ export async function addProductToSession(
     }
   }
 
-  if (currentQty + qtyToAdd - 1 >= product.stock) {
+  if (currentQty + qtyToAdd - 1 >= effectiveProductStock) {
     return {
       success: false,
-      message: `Cannot add more. Available stock for "${product.name}" is ${product.stock} (Cart already has ${currentQty}).`
+      message: `Cannot add more. Available stock for "${product.name}" is ${effectiveProductStock} (Cart already has ${currentQty}).`
     };
   }
 
@@ -1222,16 +1236,55 @@ export const posService = {
           ref: any;
           data: Product;
           currentStock: number;
-          newStock: number;
           quantity: number;
           unitPrice: number;
           barcode?: string;
+          isCombo?: boolean;
+          comboType?: ComboType;
+          comboComponents?: ComboComponentDetail[];
+        }
+
+        interface PhysicalStockDeduction {
+          ref: any;
+          productId: string;
+          productName: string;
+          currentStock: number;
+          quantityToDeduct: number;
+          newStock: number;
+          parentComboName?: string;
         }
 
         const validatedProducts: ValidatedProductSnapshot[] = [];
+        const physicalDeductionsMap = new Map<string, PhysicalStockDeduction>();
 
-        // Aggregate item quantities per product to prevent line-splitting bypass and validate aggregate stock
-        const aggregatedQuantities = aggregateProductQuantities(items);
+        // Cache for product documents read in this transaction
+        const productDocsCache = new Map<string, { ref: any; data: Product; stock: number }>();
+
+        const getOrFetchProduct = async (pId: string): Promise<{ ref: any; data: Product; stock: number }> => {
+          const rawPId = String(pId).trim();
+          const resolvedProd = productService.getProductByBarcode(rawPId) || productService.getProductById(rawPId);
+          const canonicalId = resolvedProd ? resolvedProd.id : rawPId;
+
+          if (productDocsCache.has(canonicalId)) {
+            return productDocsCache.get(canonicalId)!;
+          }
+
+          const prodRef = doc(db, 'products', canonicalId);
+          const prodDoc = await transaction.get(prodRef);
+
+          if (!prodDoc.exists()) {
+            throw new Error(`Product "${rawPId}" does not exist in store catalog.`);
+          }
+
+          const prodData = { id: prodDoc.id, ...prodDoc.data() } as Product;
+          const entry = {
+            ref: prodRef,
+            data: prodData,
+            stock: Number(prodData.stock ?? 0)
+          };
+          productDocsCache.set(canonicalId, entry);
+          return entry;
+        };
 
         for (const item of items) {
           if (!item.productId) {
@@ -1241,40 +1294,105 @@ export const posService = {
             throw new Error(`Invalid item quantity (${item.quantity}) for product "${item.name || item.productId}".`);
           }
 
-          const rawPId = String(item.productId).trim();
-          const resolvedProd = productService.getProductByBarcode(rawPId) || productService.getProductById(rawPId);
-          const canonicalProductId = resolvedProd ? resolvedProd.id : rawPId;
+          const parentEntry = await getOrFetchProduct(item.productId);
+          const prodData = parentEntry.data;
+          const isComboItem = Boolean(item.isCombo || prodData.isCombo);
 
-          const prodRef = doc(db, 'products', canonicalProductId);
-          const prodDoc = await transaction.get(prodRef);
+          if (isComboItem) {
+            // Determine combo components
+            const components: ComboComponentDetail[] = item.comboComponents || (
+              prodData.comboConfig?.items?.map(it => {
+                const childP = productService.getProductById(it.productId);
+                return {
+                  productId: it.productId,
+                  name: childP?.name || it.productId,
+                  quantity: it.quantity,
+                  price: childP?.price,
+                  image: childP?.image,
+                  barcode: childP?.barcode
+                };
+              })
+            ) || [];
 
-          if (!prodDoc.exists()) {
-            throw new Error(`Product "${item.name || item.productId}" does not exist in store catalog.`);
+            if (components.length === 0) {
+              throw new Error(`Combo package "${prodData.name}" has no components configured.`);
+            }
+
+            // Verify and accumulate physical stock requirement for each child component
+            for (const comp of components) {
+              const childEntry = await getOrFetchProduct(comp.productId);
+              const compQty = Math.max(1, Number(comp.quantity || 1)) * item.quantity;
+
+              const existingDed = physicalDeductionsMap.get(childEntry.data.id);
+              const prevDeductQty = existingDed ? existingDed.quantityToDeduct : 0;
+              const totalRequired = prevDeductQty + compQty;
+
+              if (childEntry.stock < totalRequired) {
+                throw new Error(
+                  `Insufficient stock for component "${childEntry.data.name}" in combo "${prodData.name}". Available: ${childEntry.stock}, Required: ${totalRequired}.`
+                );
+              }
+
+              physicalDeductionsMap.set(childEntry.data.id, {
+                ref: childEntry.ref,
+                productId: childEntry.data.id,
+                productName: childEntry.data.name,
+                currentStock: childEntry.stock,
+                quantityToDeduct: totalRequired,
+                newStock: childEntry.stock - totalRequired,
+                parentComboName: prodData.name
+              });
+            }
+
+            // Determine combo unit price
+            const unitPrice = item.price !== undefined && item.price !== null
+              ? Number(item.price)
+              : (prodData.price || 0);
+
+            validatedProducts.push({
+              ref: parentEntry.ref,
+              data: prodData,
+              currentStock: parentEntry.stock,
+              quantity: item.quantity,
+              unitPrice,
+              barcode: item.barcode || prodData.barcode,
+              isCombo: true,
+              comboType: item.comboType || prodData.comboConfig?.type || 'fixed',
+              comboComponents: components
+            });
+          } else {
+            // Regular standalone product
+            const existingDed = physicalDeductionsMap.get(parentEntry.data.id);
+            const prevDeductQty = existingDed ? existingDed.quantityToDeduct : 0;
+            const totalRequired = prevDeductQty + item.quantity;
+
+            if (parentEntry.stock < totalRequired) {
+              throw new Error(
+                `Insufficient stock for "${prodData.name}". Available in stock: ${parentEntry.stock}, Total Requested: ${totalRequired}.`
+              );
+            }
+
+            physicalDeductionsMap.set(parentEntry.data.id, {
+              ref: parentEntry.ref,
+              productId: parentEntry.data.id,
+              productName: prodData.name,
+              currentStock: parentEntry.stock,
+              quantityToDeduct: totalRequired,
+              newStock: parentEntry.stock - totalRequired
+            });
+
+            const unitPrice = getProductUnitPrice(prodData, pricingMode, totalRequired, pricingMode === 'wholesale');
+
+            validatedProducts.push({
+              ref: parentEntry.ref,
+              data: prodData,
+              currentStock: parentEntry.stock,
+              quantity: item.quantity,
+              unitPrice,
+              barcode: item.barcode || prodData.barcode,
+              isCombo: false
+            });
           }
-
-          const prodData = { id: prodDoc.id, ...prodDoc.data() } as Product;
-          const currentStock = Number(prodData.stock ?? 0);
-          const totalRequestedQtyForProd = aggregatedQuantities[item.productId] || aggregatedQuantities[canonicalProductId] || item.quantity;
-
-          // Atomic stock ceiling guard against aggregate requested quantity
-          if (currentStock < totalRequestedQtyForProd) {
-            throw new Error(
-              `Insufficient stock for "${prodData.name}". Available in stock: ${currentStock}, Total Requested: ${totalRequestedQtyForProd}.`
-            );
-          }
-
-          // Authoritative price calculation using total aggregated quantity for tier calculation and strict wholesale check
-          const unitPrice = getProductUnitPrice(prodData, pricingMode, totalRequestedQtyForProd, pricingMode === 'wholesale');
-
-          validatedProducts.push({
-            ref: prodRef,
-            data: prodData,
-            currentStock,
-            newStock: currentStock - item.quantity,
-            quantity: item.quantity,
-            unitPrice,
-            barcode: item.barcode || prodData.barcode
-          });
         }
 
         // =========================================================================
@@ -1377,7 +1495,10 @@ export const posService = {
             price: p.unitPrice,
             quantity: p.quantity,
             scannedQuantity: p.quantity,
-            barcode: p.barcode
+            barcode: p.barcode,
+            isCombo: p.isCombo,
+            comboType: p.comboType,
+            comboComponents: p.comboComponents
           })),
           totalAmount,
           status: 'delivered',
@@ -1399,11 +1520,11 @@ export const posService = {
         // B.3 Commit Order Document
         transaction.set(orderRef, sanitizeForFirestore(newOrder));
 
-        // B.4 Commit Stock Deductions, Inventory Logs, and Stock Movements
-        for (const p of validatedProducts) {
+        // B.4 Commit Stock Deductions, Inventory Logs, and Stock Movements for Physical Items
+        for (const ded of physicalDeductionsMap.values()) {
           // 1. Decrement product stock in Firestore
-          transaction.update(p.ref, {
-            stock: p.newStock,
+          transaction.update(ded.ref, {
+            stock: ded.newStock,
             updated_at: nowIso
           });
 
@@ -1411,14 +1532,16 @@ export const posService = {
           const logRef = doc(collection(db, 'inventory_logs'));
           transaction.set(logRef, sanitizeForFirestore({
             id: logRef.id,
-            productId: p.data.id,
-            productName: p.data.name,
+            productId: ded.productId,
+            productName: ded.productName,
             type: 'sale',
-            quantity: p.newStock,
-            change: -p.quantity,
-            prevStock: p.currentStock,
-            newStock: p.newStock,
-            note: `POS Checkout - Order #${orderId}`,
+            quantity: ded.newStock,
+            change: -ded.quantityToDeduct,
+            prevStock: ded.currentStock,
+            newStock: ded.newStock,
+            note: ded.parentComboName
+              ? `POS Checkout (Combo: ${ded.parentComboName}) - Order #${orderId}`
+              : `POS Checkout - Order #${orderId}`,
             source: 'POS',
             orderId,
             sessionId,
@@ -1432,16 +1555,18 @@ export const posService = {
           const movementRef = doc(collection(db, 'stock_movements'));
           transaction.set(movementRef, sanitizeForFirestore({
             id: movementRef.id,
-            productId: p.data.id,
-            productName: p.data.name,
+            productId: ded.productId,
+            productName: ded.productName,
             orderId,
-            quantity: -p.quantity,
+            quantity: -ded.quantityToDeduct,
             type: 'sale',
             source: 'POS',
             performedBy: operatorName,
-            previousStock: p.currentStock,
-            newStock: p.newStock,
-            reason: 'POS In-Store Checkout',
+            previousStock: ded.currentStock,
+            newStock: ded.newStock,
+            reason: ded.parentComboName
+              ? `POS In-Store Checkout (Combo: ${ded.parentComboName})`
+              : 'POS In-Store Checkout',
             sessionId,
             timestamp: nowIso,
             createdAt: nowIso
@@ -1723,12 +1848,15 @@ export const posService = {
       };
     }
 
-    // Find item in order by productId or normalized barcode
+    // Find item in order by productId, normalized barcode, or combo component
     const itemIndex = order.items.findIndex(item => {
       if (item.productId === matchedProd.id) return true;
       if (item.barcode && matchedProd.barcode && item.barcode.trim() === matchedProd.barcode.trim()) return true;
       const itemProd = productService.getProductById(item.productId);
       if (itemProd && itemProd.barcodeNormalized && matchedProd.barcodeNormalized && itemProd.barcodeNormalized === matchedProd.barcodeNormalized) return true;
+      if (item.comboComponents && item.comboComponents.some(c => c.productId === matchedProd.id || (c.barcode && matchedProd.barcode && c.barcode.trim() === matchedProd.barcode.trim()))) {
+        return true;
+      }
       return false;
     });
 
@@ -1812,42 +1940,94 @@ export const posService = {
         if (!prod) {
           return { success: false, message: `Product "${item.name}" not found in inventory catalog.` };
         }
-        if (prod.stock < item.quantity) {
-          return {
-            success: false,
-            message: `Insufficient stock for "${prod.name}". Available in stock: ${prod.stock}, Required: ${item.quantity}. Fulfillment blocked.`
-          };
+
+        if (item.isCombo || prod.isCombo) {
+          const components = item.comboComponents || prod.comboConfig?.items?.map(it => ({ productId: it.productId, quantity: it.quantity, name: '' })) || [];
+          for (const comp of components) {
+            const child = products.find(p => p.id === comp.productId);
+            if (!child) {
+              return { success: false, message: `Component "${comp.name || comp.productId}" for combo "${item.name}" not found in catalog.` };
+            }
+            const requiredChildQty = Number(comp.quantity || 1) * item.quantity;
+            if (child.stock < requiredChildQty) {
+              return {
+                success: false,
+                message: `Insufficient stock for combo component "${child.name}" in "${item.name}". Available: ${child.stock}, Required: ${requiredChildQty}. Fulfillment blocked.`
+              };
+            }
+          }
+        } else {
+          if (prod.stock < item.quantity) {
+            return {
+              success: false,
+              message: `Insufficient stock for "${prod.name}". Available in stock: ${prod.stock}, Required: ${item.quantity}. Fulfillment blocked.`
+            };
+          }
         }
       }
 
       // All checks passed! Deduct stock atomically and log movements
       for (const item of order.items) {
         const prod = products.find(p => p.id === item.productId)!;
-        const prevStock = prod.stock;
-        prod.stock -= item.quantity;
-        productService.updateProduct(prod);
 
-        productService.logInventory(
-          prod.id,
-          'sale',
-          item.quantity,
-          prevStock,
-          prod.stock,
-          `Website Order Fulfillment - Order #${order.id}`
-        );
+        if (item.isCombo || prod.isCombo) {
+          const components = item.comboComponents || prod.comboConfig?.items?.map(it => ({ productId: it.productId, quantity: it.quantity, name: '' })) || [];
+          for (const comp of components) {
+            const child = products.find(p => p.id === comp.productId)!;
+            const requiredChildQty = Number(comp.quantity || 1) * item.quantity;
+            const prevStock = child.stock;
+            child.stock -= requiredChildQty;
+            productService.updateProduct(child);
 
-        productService.logStockMovement({
-          productId: prod.id,
-          productName: prod.name,
-          orderId: order.id,
-          quantity: -item.quantity,
-          type: 'sale',
-          source: 'WEBSITE',
-          performedBy: staffName,
-          previousStock: prevStock,
-          newStock: prod.stock,
-          reason: `Website Order Verification & Fulfillment`
-        });
+            productService.logInventory(
+              child.id,
+              'sale',
+              requiredChildQty,
+              prevStock,
+              child.stock,
+              `Website Order Fulfillment - Combo: ${item.name} (Order #${order.id})`
+            );
+
+            productService.logStockMovement({
+              productId: child.id,
+              productName: child.name,
+              orderId: order.id,
+              quantity: -requiredChildQty,
+              type: 'sale',
+              source: 'WEBSITE',
+              performedBy: staffName,
+              previousStock: prevStock,
+              newStock: child.stock,
+              reason: `Website Order Combo Fulfillment (${item.name})`
+            });
+          }
+        } else {
+          const prevStock = prod.stock;
+          prod.stock -= item.quantity;
+          productService.updateProduct(prod);
+
+          productService.logInventory(
+            prod.id,
+            'sale',
+            item.quantity,
+            prevStock,
+            prod.stock,
+            `Website Order Fulfillment - Order #${order.id}`
+          );
+
+          productService.logStockMovement({
+            productId: prod.id,
+            productName: prod.name,
+            orderId: order.id,
+            quantity: -item.quantity,
+            type: 'sale',
+            source: 'WEBSITE',
+            performedBy: staffName,
+            previousStock: prevStock,
+            newStock: prod.stock,
+            reason: `Website Order Verification & Fulfillment`
+          });
+        }
       }
     } else {
       // For wholesale orders, stock was already deducted at order creation.
@@ -1921,7 +2101,48 @@ export const posService = {
       const products = productService.getProducts();
       for (const item of order.items) {
         const prod = products.find(p => p.id === item.productId);
-        if (prod) {
+
+        if (item.isCombo || prod?.isCombo) {
+          const components = item.comboComponents || (
+            prod?.comboConfig?.items?.map(it => ({
+              productId: it.productId,
+              name: '',
+              quantity: it.quantity
+            }))
+          ) || [];
+
+          for (const comp of components) {
+            const child = products.find(p => p.id === comp.productId);
+            if (child) {
+              const compQty = Math.max(1, Number(comp.quantity || 1)) * item.quantity;
+              const prevStock = child.stock;
+              child.stock += compQty;
+              productService.updateProduct(child);
+
+              productService.logInventory(
+                child.id,
+                'stock_in',
+                compQty,
+                prevStock,
+                child.stock,
+                `Cancelled Combo Return - #${order.id} (${item.name})`
+              );
+
+              productService.logStockMovement({
+                productId: child.id,
+                productName: child.name,
+                orderId: order.id,
+                quantity: compQty,
+                type: 'return',
+                source: order.order_source || 'WEBSITE',
+                performedBy: staffName,
+                previousStock: prevStock,
+                newStock: child.stock,
+                reason: `Order Cancelled Combo Return - ${item.name}`
+              });
+            }
+          }
+        } else if (prod) {
           const prevStock = prod.stock;
           prod.stock += item.quantity;
           productService.updateProduct(prod);

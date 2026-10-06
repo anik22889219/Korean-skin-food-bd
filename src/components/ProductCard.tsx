@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { ShoppingBag, Heart, Star, Eye, Sparkles, Check, Droplets, Building2 } from 'lucide-react';
+import { ShoppingBag, Heart, Star, Eye, Sparkles, Check, Droplets, Building2, Layers } from 'lucide-react';
 import { motion } from 'motion/react';
 import { analytics } from '../services/analyticsService';
 import {
@@ -12,8 +12,12 @@ import {
   hasRetailDiscount,
   getRetailDiscountPercentage,
   getRetailSavingsAmount,
-  getWholesalePrice
+  getWholesalePrice,
+  getComboEffectiveStock,
+  getComboSavings,
+  getComboEffectivePrice
 } from '../utils/pricing';
+import { useProducts } from '../hooks/queries/products';
 
 interface ProductCardProps {
   product: Product;
@@ -30,11 +34,17 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const navigate = useNavigate();
   const { addToCart, language } = useCart();
   const { profile } = useAuth();
+  const { data: allProducts = [] } = useProducts();
   const [isAdded, setIsAdded] = useState(false);
 
   const hasWholesaleAccess = profile?.wholesaleAccess === true;
   const wholesaleTier1 = getWholesalePrice(product, 1);
   const wholesaleTier2 = getWholesalePrice(product, 50);
+
+  // Dynamic Effective Stock for Combos
+  const effectiveStock = product.isCombo
+    ? getComboEffectiveStock(product, allProducts)
+    : (product.stock || 0);
 
   // Local Wishlist State
   const [isWishlisted, setIsWishlisted] = useState<boolean>(() => {
@@ -70,17 +80,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (product.stock === 0) return;
+    if (effectiveStock === 0) return;
+    
+    // For customizable combos, always direct customer to PDP to pick their items
+    if (product.isCombo && product.comboConfig?.type === 'customizable') {
+      navigate(`/product/${product.id}`);
+      return;
+    }
+
     addToCart(product);
     setIsAdded(true);
     setTimeout(() => setIsAdded(false), 1800);
   };
 
-  const effectivePrice = getRetailPrice(product);
-  const originalPrice = getRetailOriginalPrice(product);
-  const hasDiscount = hasRetailDiscount(product);
-  const discountPercent = getRetailDiscountPercentage(product);
-  const savings = getRetailSavingsAmount(product);
+  // Pricing calculations
+  const comboSavingsData = product.isCombo ? getComboSavings(product, allProducts) : null;
+  const effectivePrice = comboSavingsData ? comboSavingsData.finalPrice : getRetailPrice(product);
+  const originalPrice = comboSavingsData ? comboSavingsData.originalSum : getRetailOriginalPrice(product);
+  const hasDiscount = comboSavingsData ? (comboSavingsData.savings > 0) : hasRetailDiscount(product);
+  const discountPercent = comboSavingsData ? comboSavingsData.percentage : getRetailDiscountPercentage(product);
+  const savings = comboSavingsData ? comboSavingsData.savings : getRetailSavingsAmount(product);
 
   const displayName = language === 'bn' ? (product.nameBN || product.name) : product.name;
 
@@ -106,7 +125,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
         {/* Top Badges Stack (Left) */}
         <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1 pointer-events-none">
-          {hasWholesaleAccess && (
+          {product.isCombo && (
+            <span className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-purple-700 to-indigo-700 text-white text-[9px] font-black uppercase tracking-wider shadow-md flex items-center gap-1">
+              <Layers size={10} />
+              {product.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo Pack'}
+            </span>
+          )}
+
+          {hasWholesaleAccess && !product.isCombo && (
             <span className="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-md flex items-center gap-1">
               <Building2 size={10} /> Wholesale Access
             </span>
@@ -118,13 +144,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             </span>
           )}
 
-          {product.stock === 0 ? (
+          {effectiveStock === 0 ? (
             <span className="px-2 py-0.5 rounded-lg bg-slate-900/90 text-white text-[8px] sm:text-[9px] font-extrabold uppercase backdrop-blur-xs shadow-xs">
               Sold Out
             </span>
-          ) : product.stock <= 5 ? (
+          ) : effectiveStock <= 5 ? (
             <span className="px-2 py-0.5 rounded-lg bg-amber-500/90 text-white text-[8px] sm:text-[9px] font-extrabold uppercase backdrop-blur-xs shadow-xs">
-              Only {product.stock} Left
+              Only {effectiveStock} Left
             </span>
           ) : null}
 
@@ -262,12 +288,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <button
             type="button"
             onClick={handleAddToCart}
-            disabled={product.stock === 0}
+            disabled={effectiveStock === 0}
             className={`w-full py-2 sm:py-2.5 rounded-xl text-xs font-extrabold transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
               isAdded
                 ? 'bg-emerald-600 text-white shadow-emerald-500/20'
-                : product.stock === 0
+                : effectiveStock === 0
                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                : product.isCombo && product.comboConfig?.type === 'customizable'
+                ? 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white shadow-md shadow-purple-500/20 active:scale-[0.98]'
                 : 'bg-gradient-to-r from-[#E91E8C] to-pink-600 hover:from-[#FF4B91] hover:to-[#E91E8C] text-white shadow-md shadow-pink-500/20 hover:shadow-pink-500/35 active:scale-[0.98]'
             }`}
           >
@@ -276,8 +304,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 <Check size={13} className="animate-bounce" />
                 <span>Added to Bag</span>
               </>
-            ) : product.stock === 0 ? (
+            ) : effectiveStock === 0 ? (
               <span>Out of Stock</span>
+            ) : product.isCombo && product.comboConfig?.type === 'customizable' ? (
+              <>
+                <Sparkles size={13} />
+                <span>Customize Routine</span>
+              </>
             ) : (
               <>
                 <ShoppingBag size={13} />

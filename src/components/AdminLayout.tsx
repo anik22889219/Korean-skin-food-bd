@@ -6,7 +6,8 @@ import {
   Building2, CreditCard, Boxes, TrendingUp, Wand2, MessageCircle, 
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
-  PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt
+  PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
+  Percent, Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -106,6 +107,7 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
     { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
     { to: '/admin/orders', label: 'Order Fulfillment', badge: 'Orders', icon: Package },
+    { to: '/admin/discounts', label: 'Discounts & Promos', badge: 'Sale', icon: Percent },
     { to: '/admin/theme-editor', label: 'Theme Editor', badge: 'New', icon: Palette },
     { 
       to: '/admin/pos', 
@@ -115,18 +117,21 @@ export const AdminLayout: React.FC = () => {
       highlight: isAdminOrSuperAdmin && activePosCount > 0
     },
     { to: '/admin/products', label: 'Product List', badge: 'Stock', icon: Boxes },
+    { to: '/admin/combos', label: 'Combo Packages', badge: 'Bundles', icon: Layers },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
   ];
 
-  // Inventory Manager user gets access to Dashboard Overview, Skincare Catalog, All Reports & Analytics, Order Fulfillment, WhatsApp Leads, POS Register
+  // Inventory Manager user gets access to Dashboard Overview, Skincare Catalog, All Reports & Analytics, Order Fulfillment, WhatsApp Leads, POS Register, Combo Packages
   const inventoryManagerAllowedPaths = [
     '/admin',
     '/admin/products',
+    '/admin/combos',
     '/admin/reports',
     '/admin/orders',
+    '/admin/discounts',
     '/admin/chat-leads',
     '/admin/pos',
   ];

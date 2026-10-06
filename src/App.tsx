@@ -19,11 +19,13 @@ import { AdminRoute } from './components/AdminRoute';
 import { AdminLayout } from './components/AdminLayout';
 import { AdminDashboardHome } from './components/AdminDashboardHome';
 import { ProductManagement } from './components/ProductManagement';
+import { AdminComboPackages } from './components/AdminComboPackages';
 import { AdminSEO } from './components/AdminSEO';
 import { AdminSocial } from './components/AdminSocial';
 import { AdminChatLeads } from './components/AdminChatLeads';
 import { AdminThemeEditor } from './components/AdminThemeEditor';
 import { AdminOrders } from './components/AdminOrders';
+import { AdminDiscounts } from './components/AdminDiscounts';
 import { AdminSlackSettings } from './components/AdminSlackSettings';
 import { AdminAIAgents } from './components/AdminAIAgents';
 import { AdminWholesaleManagement } from './components/AdminWholesaleManagement';
@@ -213,9 +215,12 @@ export default function App() {
                   <Route path="wholesale" element={<AdminWholesaleManagement />} />
                    <Route path="wholesale/:customerId" element={<WholesaleCustomerDetailsPage />} />
                   <Route path="orders" element={<AdminOrders />} />
+                  <Route path="discounts" element={<AdminDiscounts />} />
                   <Route path="theme-editor" element={<AdminThemeEditor />} />
                   <Route path="pos" element={<PosRegisterRouteWrapper />} />
                   <Route path="products" element={<ProductManagement />} />
+                  <Route path="combos" element={<AdminComboPackages />} />
+                  <Route path="combo-packages" element={<AdminComboPackages />} />
                   <Route path="seo" element={<AdminSEO />} />
                   <Route path="social" element={<AdminSocial />} />
                   <Route path="chat-leads" element={<AdminChatLeads />} />

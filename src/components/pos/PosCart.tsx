@@ -146,10 +146,11 @@ export const PosCart: React.FC<PosCartProps> = ({
               <button
                 type="button"
                 onClick={onClearCart}
-                className="text-gray-400 hover:text-red-600 text-xs font-semibold px-2 py-1 transition cursor-pointer"
+                className="group text-gray-500 hover:text-red-600 hover:bg-red-50 text-xs font-semibold px-2.5 py-1 rounded-xl transition cursor-pointer flex items-center gap-1 active:scale-95 border border-transparent hover:border-red-200"
                 title="Clear all cart items"
               >
-                Clear
+                <Trash2 size={13} className="text-gray-400 group-hover:text-red-600 transition-colors" />
+                <span>Clear</span>
               </button>
             )}
           </div>
@@ -188,10 +189,26 @@ export const PosCart: React.FC<PosCartProps> = ({
                       referrerPolicy="no-referrer"
                     />
                     <div className="min-w-0 flex-1">
-                      <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">
-                        {item.product.brand}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">
+                          {item.product.brand}
+                        </span>
+                        {item.product.isCombo && (
+                          <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200">
+                            {item.product.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo'}
+                          </span>
+                        )}
+                      </div>
                       <h4 className="font-bold text-gray-900 truncate text-xs">{item.product.name}</h4>
+                      
+                      {item.product.isCombo && item.product.comboConfig?.items && (
+                        <div className="text-[10px] text-purple-700 mt-0.5 line-clamp-1">
+                          Contains: {item.product.comboConfig.items.map(ci => {
+                            return `${ci.quantity}x item`;
+                          }).join(', ')}
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-[#E91E8C] font-extrabold font-mono text-xs">৳{price}</span>
                         {pricingMode === 'wholesale' && (
@@ -213,7 +230,9 @@ export const PosCart: React.FC<PosCartProps> = ({
                             <span>Cash Rate {item.product.cashPrice ? `(৳${item.product.cashPrice})` : '(Retail Rate)'}</span>
                           </span>
                         )}
-                        <span className="text-[10px] text-gray-400">Stock: {item.product.stock}</span>
+                        <span className="text-[10px] text-gray-400">
+                          {item.product.isCombo ? 'Dynamic Stock' : `Stock: ${item.product.stock}`}
+                        </span>
                       </div>
                     </div>
                   </div>

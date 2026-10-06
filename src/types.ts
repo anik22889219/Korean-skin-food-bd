@@ -38,6 +38,44 @@ export interface Product {
   generatedSocialPost?: string;
   autoDiscountReason?: string;
   isSlowMoving?: boolean;
+  // Combo Package Fields
+  isCombo?: boolean;
+  comboConfig?: ComboConfig;
+}
+
+export type ComboType = 'fixed' | 'customizable';
+
+export interface ComboFixedItem {
+  productId: string;
+  quantity: number;
+}
+
+export interface ComboStepConfig {
+  id: string;
+  title: string;
+  titleBN?: string;
+  minSelections: number;
+  maxSelections: number;
+  allowedProductIds: string[];
+}
+
+export interface ComboConfig {
+  type: ComboType;
+  items?: ComboFixedItem[];
+  steps?: ComboStepConfig[];
+  pricingMode: 'fixed_price' | 'dynamic_discount';
+  packagePrice?: number;
+  discountPercentage?: number;
+}
+
+export interface ComboComponentDetail {
+  productId: string;
+  name: string;
+  quantity: number;
+  price?: number;
+  image?: string;
+  barcode?: string;
+  scannedQuantity?: number;
 }
 
 export type OrderStatus = 'pending' | 'packing' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
@@ -51,6 +89,9 @@ export interface OrderItem {
   quantity: number;
   scannedQuantity?: number;
   barcode?: string;
+  isCombo?: boolean;
+  comboType?: ComboType;
+  comboComponents?: ComboComponentDetail[];
 }
 
 export interface CourierData {
@@ -277,6 +318,10 @@ export interface Order {
   items: OrderItem[];
   totalAmount: number;
   discountAmount?: number;
+  couponCode?: string;
+  couponDiscount?: number;
+  isFreeDelivery?: boolean;
+  shippingCharge?: number;
   pointsEarned?: number;
   pointsRedeemed?: number;
   status: OrderStatus;
@@ -803,7 +848,39 @@ export interface SlashCommandPayload {
   userName: string;
 }
 
+export type CouponDiscountType = 'percentage' | 'fixed_amount' | 'free_delivery';
+export type CouponScope = 'all' | 'specific_products' | 'categories' | 'brands';
 
+export interface Coupon {
+  id: string;
+  code: string;
+  description?: string;
+  discountType: CouponDiscountType;
+  discountValue: number;
+  minOrderAmount?: number;
+  maxDiscountCap?: number;
+  appliesTo: CouponScope;
+  applicableProductIds?: string[];
+  applicableBrands?: string[];
+  applicableCategories?: string[];
+  startDate?: string;
+  endDate?: string;
+  usageLimit?: number;
+  usageCount: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+}
+
+export interface BulkDiscountParams {
+  target: 'all' | 'brand' | 'category' | 'specific_products';
+  targetValue?: string; // brand name, category name, or comma-separated IDs
+  productIds?: string[];
+  discountType: 'percentage' | 'fixed_amount';
+  discountValue: number; // e.g., 10 for 10%, or 200 for 200 BDT off
+  clearDiscount?: boolean;
+}
 
 export type WholesalePaymentMethod = 'Cash' | 'bKash' | 'Bank' | 'Other';
 

@@ -494,14 +494,15 @@ export async function applyCameraTrackConstraints(
     let videoEl: HTMLVideoElement | null = null;
     if (typeof target === 'string') {
       videoEl = document.querySelector(`#${target} video`) as HTMLVideoElement;
-    } else {
+    } else if (target instanceof HTMLVideoElement) {
       videoEl = target;
     }
     if (!videoEl || !videoEl.srcObject) return false;
 
     const stream = videoEl.srcObject as MediaStream;
     const track = stream.getVideoTracks()[0];
-    if (!track) return false;
+    // Ensure track exists and is active (readyState === 'live')
+    if (!track || track.readyState !== 'live') return false;
 
     const mainConstraints: any = {};
     const advancedConstraints: any = {};
@@ -534,17 +535,26 @@ export async function applyCameraTrackConstraints(
     }
 
     if (Object.keys(finalConstraints).length > 0) {
+      if (track.readyState !== 'live') return false;
       await track.applyConstraints(finalConstraints);
 
-      if (options.triggerFocus && track.getCapabilities) {
+      if (options.triggerFocus && track.getCapabilities && track.readyState === 'live') {
         const caps = track.getCapabilities() as any;
         if (caps.focusMode && caps.focusMode.includes('single-shot') && caps.focusMode.includes('continuous')) {
           setTimeout(async () => {
             try {
-              await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] } as any);
-              setTimeout(async () => {
-                await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as any);
-              }, 120);
+              if (track.readyState === 'live') {
+                await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] } as any);
+                setTimeout(async () => {
+                  try {
+                    if (track.readyState === 'live') {
+                      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] } as any);
+                    }
+                  } catch (e) {
+                    // quiet fail
+                  }
+                }, 120);
+              }
             } catch (e) {
               // quiet fail
             }
@@ -561,10 +571,16 @@ export async function applyCameraTrackConstraints(
 
 /**
  * Captures a high-resolution, sharp frame directly from the active live video stream.
+ * Supports either containerId (string) or direct HTMLVideoElement reference.
  */
-export async function scanBarcodeFromLiveVideoSnapshot(containerId: string): Promise<string | null> {
+export async function scanBarcodeFromLiveVideoSnapshot(target: string | HTMLVideoElement): Promise<string | null> {
   try {
-    const videoEl = document.querySelector(`#${containerId} video`) as HTMLVideoElement;
+    let videoEl: HTMLVideoElement | null = null;
+    if (typeof target === 'string') {
+      videoEl = document.querySelector(`#${target} video`) as HTMLVideoElement;
+    } else if (target instanceof HTMLVideoElement) {
+      videoEl = target;
+    }
     if (!videoEl || videoEl.readyState < 2) {
       console.warn("Live video not ready for snapshot");
       return null;

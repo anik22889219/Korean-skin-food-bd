@@ -5,7 +5,8 @@ import { X, Search, Upload, Check, Trash2, Image, Wand2, Film, Play, Info } from
 interface MediaLibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectImage: (url: string) => void;
+  onSelectImage?: (url: string) => void;
+  onSelect?: (url: string) => void;
   title?: string;
 }
 
@@ -13,6 +14,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
   isOpen,
   onClose,
   onSelectImage,
+  onSelect,
   title = "Cloudinary Media Library"
 }) => {
   const [images, setImages] = useState<CloudinaryImage[]>([]);
@@ -54,7 +56,11 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
 
   const handleConfirmSelect = () => {
     if (selectedUrl) {
-      onSelectImage(selectedUrl);
+      if (typeof onSelectImage === 'function') {
+        onSelectImage(selectedUrl);
+      } else if (typeof onSelect === 'function') {
+        onSelect(selectedUrl);
+      }
       onClose();
     }
   };

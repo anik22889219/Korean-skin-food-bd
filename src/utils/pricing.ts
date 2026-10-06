@@ -210,5 +210,145 @@ export function normalizeProductPricing(product: Partial<Product>): Product {
     rating: Number(product.rating ?? 5),
     reviewsCount: Number(product.reviewsCount ?? 0),
     barcode: product.barcode || '',
+    isCombo: product.isCombo,
+    comboConfig: product.comboConfig,
   } as Product;
+}
+
+/**
+ * Calculates the dynamic effective stock of a combo product package.
+ * For fixed bundles: Determined by the limiting component product.
+ * For customizable sets: Determined by the minimum available pool across required steps.
+ */
+export function getComboEffectiveStock(product?: Partial<Product> | null, allProducts: Product[] = []): number {
+  if (!product) return 0;
+  if (!product.isCombo || !product.comboConfig) {
+    return Number(product.stock ?? 0);
+  }
+
+  const { type, items, steps } = product.comboConfig;
+
+  if (type === 'fixed') {
+    if (!items || items.length === 0) return 0;
+    let minStock = Infinity;
+    for (const item of items) {
+      const child = allProducts.find(p => p.id === item.productId);
+      if (!child || (child.stock ?? 0) <= 0) {
+        return 0;
+      }
+      const requiredQty = Math.max(1, Number(item.quantity || 1));
+      const possibleCombos = Math.floor(Number(child.stock) / requiredQty);
+      if (possibleCombos < minStock) {
+        minStock = possibleCombos;
+      }
+    }
+    return minStock === Infinity ? 0 : Math.max(0, minStock);
+  }
+
+  if (type === 'customizable') {
+    if (!steps || steps.length === 0) return 0;
+    let minStepStock = Infinity;
+    for (const step of steps) {
+      if (!step.allowedProductIds || step.allowedProductIds.length === 0) return 0;
+      // Total available stock across selectable options for this step
+      const stepTotalStock = step.allowedProductIds.reduce((sum, pid) => {
+        const child = allProducts.find(p => p.id === pid);
+        return sum + Math.max(0, Number(child?.stock ?? 0));
+      }, 0);
+      if (stepTotalStock < minStepStock) {
+        minStepStock = stepTotalStock;
+      }
+    }
+    return minStepStock === Infinity ? 0 : Math.max(0, minStepStock);
+  }
+
+  return Number(product.stock ?? 0);
+}
+
+/**
+ * Calculates the original retail sum of the components in a combo package.
+ */
+export function getComboOriginalSum(
+  product?: Partial<Product> | null,
+  allProducts: Product[] = [],
+  selectedStepProducts?: Record<string, string>
+): number {
+  if (!product || !product.comboConfig) {
+    return getRetailOriginalPrice(product);
+  }
+
+  const { type, items, steps } = product.comboConfig;
+
+  if (type === 'fixed') {
+    if (!items || items.length === 0) return getRetailOriginalPrice(product);
+    return items.reduce((sum, item) => {
+      const child = allProducts.find(p => p.id === item.productId);
+      const unitRetail = child ? getRetailPrice(child) : 0;
+      return sum + (unitRetail * Math.max(1, Number(item.quantity || 1)));
+    }, 0);
+  }
+
+  if (type === 'customizable') {
+    if (!steps || steps.length === 0) return getRetailOriginalPrice(product);
+    // If user has chosen products for steps, sum the chosen ones
+    if (selectedStepProducts && Object.keys(selectedStepProducts).length > 0) {
+      return Object.values(selectedStepProducts).reduce((sum, pid) => {
+        const child = allProducts.find(p => p.id === pid);
+        return sum + (child ? getRetailPrice(child) : 0);
+      }, 0);
+    }
+    // Otherwise, calculate estimate from first available option in each step
+    return steps.reduce((sum, step) => {
+      const firstPid = step.allowedProductIds[0];
+      const child = allProducts.find(p => p.id === firstPid);
+      return sum + (child ? getRetailPrice(child) : 0);
+    }, 0);
+  }
+
+  return getRetailOriginalPrice(product);
+}
+
+/**
+ * Calculates the effective final price for a combo package.
+ */
+export function getComboEffectivePrice(
+  product?: Partial<Product> | null,
+  allProducts: Product[] = [],
+  selectedStepProducts?: Record<string, string>
+): number {
+  if (!product) return 0;
+  if (!product.isCombo || !product.comboConfig) {
+    return getRetailPrice(product);
+  }
+
+  const { type, pricingMode, packagePrice, discountPercentage } = product.comboConfig;
+
+  if (pricingMode === 'fixed_price' && packagePrice && packagePrice > 0) {
+    return packagePrice;
+  }
+
+  const originalSum = getComboOriginalSum(product, allProducts, selectedStepProducts);
+
+  if (pricingMode === 'dynamic_discount' && discountPercentage && discountPercentage > 0) {
+    const discounted = originalSum * (1 - discountPercentage / 100);
+    return Math.round(discounted);
+  }
+
+  return packagePrice && packagePrice > 0 ? packagePrice : (getRetailPrice(product) || originalSum);
+}
+
+/**
+ * Returns total savings in BDT and percentage for a combo package.
+ */
+export function getComboSavings(
+  product?: Partial<Product> | null,
+  allProducts: Product[] = [],
+  selectedStepProducts?: Record<string, string>
+): { savings: number; percentage: number; originalSum: number; finalPrice: number } {
+  const originalSum = getComboOriginalSum(product, allProducts, selectedStepProducts);
+  const finalPrice = getComboEffectivePrice(product, allProducts, selectedStepProducts);
+  const savings = Math.max(0, originalSum - finalPrice);
+  const percentage = originalSum > 0 ? Math.round((savings / originalSum) * 100) : 0;
+
+  return { savings, percentage, originalSum, finalPrice };
 }

@@ -304,5 +304,14 @@ service cloud.firestore {
       allow create, update: if true;
       allow delete: if isStaff() || (request.auth != null && resource != null && resource.data.userId == request.auth.uid);
     }
+
+    // Promotional coupons and vouchers
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow create, delete: if isStaff();
+      allow update: if isStaff() || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount', 'updatedAt'])
+      );
+    }
   }
 }

@@ -36,7 +36,8 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  X
+  X,
+  Layers
 } from 'lucide-react';
 import { PosProductQuickViewModal } from './pos/PosProductQuickViewModal';
 
@@ -139,6 +140,22 @@ export function playErrorBeep(volume: number = 0.2) {
   } catch {}
 }
 
+/**
+ * Voice speech notification helper for mobile hands-free operations
+ */
+export function speakVoiceAnnouncement(text: string) {
+  try {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    utterance.volume = 0.9;
+    utterance.lang = 'en-US';
+    window.speechSynthesis.speak(utterance);
+  } catch {}
+}
+
 export const PosScan = React.memo(function PosScan({ 
   sessionId: propSessionId, 
   onBack, 
@@ -171,6 +188,8 @@ export const PosScan = React.memo(function PosScan({
   // Last scanned item & notification banner
   const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [scanStatusMsg, setScanStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const lastHandledScanTimeRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
 
   // Camera video ref and state
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -208,9 +227,16 @@ export const PosScan = React.memo(function PosScan({
     }
   });
 
-  // Hidden barcode input for physical USB/Bluetooth/Keyboard-wedge scanners
-  const [hiddenBarcode, setHiddenBarcode] = useState<string>('');
-  const hiddenBarcodeRef = useRef<HTMLInputElement>(null);
+  // Batch Quantity per scan (defaults to 1, user can customize manually: 1, 2, 5, 10, etc.)
+  const [scanBatchQty, setScanBatchQty] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('pos_scan_batch_qty');
+      const parsed = Number(saved);
+      return parsed > 0 ? parsed : 1;
+    } catch {
+      return 1;
+    }
+  });
 
   // Products list & O(1) Barcode Index
   const [productsList, setProductsList] = useState<Product[]>(() => productService.getProducts());
@@ -223,19 +249,6 @@ export const PosScan = React.memo(function PosScan({
   const barcodeIndex = useMemo(() => {
     return buildBarcodeIndex(productsList);
   }, [productsList]);
-
-  // Keep hidden input focused for physical hardware scanners
-  useEffect(() => {
-    const focusInterval = setInterval(() => {
-      if (hiddenBarcodeRef.current && document.activeElement !== hiddenBarcodeRef.current) {
-        const activeTag = document.activeElement?.tagName;
-        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
-          hiddenBarcodeRef.current.focus();
-        }
-      }
-    }, 500);
-    return () => clearInterval(focusInterval);
-  }, []);
 
   // Warm up audio context on interaction
   useEffect(() => {
@@ -416,6 +429,16 @@ export const PosScan = React.memo(function PosScan({
     if (!rawText) return;
     const tStart = performance.now();
 
+    // Prevent identical rapid scan detection bursts within 1200ms
+    const normalizedRaw = String(rawText).trim();
+    if (
+      lastHandledScanTimeRef.current.code === normalizedRaw &&
+      tStart - lastHandledScanTimeRef.current.time < 1200
+    ) {
+      return;
+    }
+    lastHandledScanTimeRef.current = { code: normalizedRaw, time: tStart };
+
     // 1. O(1) Map Lookup
     const { product, normalizedCode } = lookupProductByBarcode(barcodeIndex, rawText);
     const tLookup = performance.now();
@@ -440,14 +463,19 @@ export const PosScan = React.memo(function PosScan({
       return;
     }
 
-    // 2. Instant Feedback: Beep + Vibration immediately
+    // 2. Instant Feedback: Beep + Vibration + Voice notification immediately
     if (soundEnabled) playSuccessBeep(0.25);
     if (navigator.vibrate) navigator.vibrate(80);
+
+    // Voice announcement as requested: "Already added to cart" (or Stock in queue)
+    if (soundEnabled) {
+      speakVoiceAnnouncement(context === 'STOCK_IN' ? 'Added to stock queue' : 'Already added to cart');
+    }
 
     setLastScannedProduct(product);
     setScanStatusMsg({
       type: 'success',
-      text: `Added "${product.name}"`
+      text: `Added "${product.name}"${scanBatchQty > 1 ? ` (+${scanBatchQty} pcs)` : ''}`
     });
 
     // If Quick-View is explicitly toggled by user, open inspection modal
@@ -458,9 +486,13 @@ export const PosScan = React.memo(function PosScan({
     }
 
     // 3. OPTIMISTIC LOCAL CART UPDATE (< 2ms)
+    const qtyToAdd = Math.max(1, scanBatchQty || 1);
+
     if (context === 'STOCK_IN') {
       if (onAddToStockIn) {
-        onAddToStockIn(product);
+        for (let i = 0; i < qtyToAdd; i++) {
+          onAddToStockIn(product);
+        }
       }
     } else {
       let currentCartQty = 0;
@@ -468,45 +500,35 @@ export const PosScan = React.memo(function PosScan({
         const existing = prev.find((it) => it.product.id === product.id);
         if (existing) {
           currentCartQty = existing.quantity;
-          if (currentCartQty >= product.stock) {
+          const allowedAdd = Math.min(qtyToAdd, Math.max(0, product.stock - currentCartQty));
+          if (allowedAdd <= 0) {
             return prev;
           }
           return prev.map((it) =>
-            it.product.id === product.id ? { ...it, quantity: it.quantity + 1 } : it
+            it.product.id === product.id ? { ...it, quantity: it.quantity + allowedAdd } : it
           );
         }
-        return [{ product, quantity: 1, docIds: [] }, ...prev];
+        const initialQty = Math.min(qtyToAdd, product.stock);
+        return [{ product, quantity: initialQty, docIds: [] }, ...prev];
       });
 
+      // If parent supplied onAddToCart, let the parent handle the cart state and Firestore sync.
+      // Do NOT call both onAddToCart AND addProductToSession to prevent double-inserting records.
       if (onAddToCart) {
-        onAddToCart(product, 1);
-      }
-
-      const tUI = performance.now();
-
-      // 4. Background Firestore Synchronization (Non-blocking)
-      if (activeSessionId) {
-        addProductToSession(activeSessionId, product.id, currentCartQty, 1)
+        onAddToCart(product, qtyToAdd);
+      } else if (activeSessionId) {
+        // Fallback: standalone mode without parent handler
+        addProductToSession(activeSessionId, product.id, currentCartQty, qtyToAdd)
           .then((res) => {
-            const tSync = performance.now();
-            console.log(
-              `[POS Scan Timing]\n` +
-              `Detection & Lookup: ${(tLookup - tStart).toFixed(1)} ms\n` +
-              `UI Update: ${(tUI - tLookup).toFixed(1)} ms\n` +
-              `Firestore Sync: ${(tSync - tUI).toFixed(1)} ms\n` +
-              `Total: ${(tSync - tStart).toFixed(1)} ms`
-            );
-
             if (!res.success) {
-              // Rollback optimistic update on error
               setOptimisticCart((prev) => {
                 const item = prev.find((it) => it.product.id === product.id);
                 if (!item) return prev;
-                if (item.quantity <= 1) {
+                if (item.quantity <= qtyToAdd) {
                   return prev.filter((it) => it.product.id !== product.id);
                 }
                 return prev.map((it) =>
-                  it.product.id === product.id ? { ...it, quantity: it.quantity - 1 } : it
+                  it.product.id === product.id ? { ...it, quantity: it.quantity - qtyToAdd } : it
                 );
               });
               if (soundEnabled) playErrorBeep();
@@ -518,35 +540,56 @@ export const PosScan = React.memo(function PosScan({
           })
           .catch((err) => {
             console.error('[PosScan] Background session sync error:', err);
-            // Rollback optimistic update
             setOptimisticCart((prev) => {
               const item = prev.find((it) => it.product.id === product.id);
               if (!item) return prev;
-              if (item.quantity <= 1) {
+              if (item.quantity <= qtyToAdd) {
                 return prev.filter((it) => it.product.id !== product.id);
               }
               return prev.map((it) =>
-                it.product.id === product.id ? { ...it, quantity: it.quantity - 1 } : it
+                it.product.id === product.id ? { ...it, quantity: it.quantity - qtyToAdd } : it
               );
             });
             if (soundEnabled) playErrorBeep();
-            setScanStatusMsg({
-              type: 'error',
-              text: 'Failed to sync scan with session.'
-            });
           });
       }
     }
-  }, [barcodeIndex, context, soundEnabled, quickViewEnabled, onAddToStockIn, onAddToCart, activeSessionId]);
+  }, [barcodeIndex, context, soundEnabled, quickViewEnabled, onAddToStockIn, onAddToCart, activeSessionId, scanBatchQty]);
 
-  // Physical Barcode Scanner Submission (Enter key)
-  const handleHiddenBarcodeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const code = hiddenBarcode.trim();
-    if (!code) return;
-    setHiddenBarcode('');
-    await handleScanDetected(code);
-  };
+  // Physical USB/Bluetooth Barcode Scanner Keyboard-wedge Listener without triggering mobile virtual keyboard
+  useEffect(() => {
+    let keyBuffer = '';
+    let lastKeyTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // If typing inside an actual form text input or textarea, let normal input handle it
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      const now = performance.now();
+      // Hardware barcode scanners send characters very rapidly (< 50ms apart)
+      if (now - lastKeyTime > 300) {
+        keyBuffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        const code = keyBuffer.trim();
+        if (code.length >= 3) {
+          e.preventDefault();
+          handleScanDetected(code);
+        }
+        keyBuffer = '';
+      } else if (e.key.length === 1) {
+        keyBuffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleScanDetected]);
 
   // ================= 5. CAMERA CONTROLLER LIFECYCLE =================
   useEffect(() => {
@@ -582,7 +625,7 @@ export const PosScan = React.memo(function PosScan({
               setIsCameraActive(false);
             }
           },
-          debounceMs: 800
+          debounceMs: 1500
         });
 
         if (active) {
@@ -897,19 +940,6 @@ export const PosScan = React.memo(function PosScan({
   // ================= RENDER D: MOBILE-FIRST POS SCANNER =================
   return (
     <div className="max-w-md mx-auto bg-[#FFF5F8] min-h-screen flex flex-col justify-between pb-6 select-none">
-      {/* Hidden input for physical USB/Bluetooth barcode scanners */}
-      <form onSubmit={handleHiddenBarcodeSubmit} className="sr-only opacity-0 absolute w-0 h-0 overflow-hidden pointer-events-none">
-        <input
-          ref={hiddenBarcodeRef}
-          type="text"
-          value={hiddenBarcode}
-          onChange={(e) => setHiddenBarcode(e.target.value)}
-          placeholder="Hidden Barcode Scanner Input"
-          tabIndex={-1}
-          aria-label="Hidden Barcode Scanner Input"
-        />
-      </form>
-
       {/* TOP HEADER */}
       <header className="bg-white/95 backdrop-blur-md px-4 py-3 border-b border-pink-100 sticky top-0 z-30 shadow-xs">
         <div className="flex items-center justify-between">
@@ -1105,6 +1135,76 @@ export const PosScan = React.memo(function PosScan({
           </div>
         )}
 
+        {/* MANUAL SCAN QUANTITY SELECTOR (User requests setting scan quantity manually, default 1) */}
+        <div className="bg-white/90 backdrop-blur-sm p-2 rounded-2xl border border-pink-100 shadow-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 pl-1">
+            <Layers size={14} className="text-[#E91E8C]" />
+            <span className="text-[11px] font-bold text-gray-700">Scan Qty:</span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {[1, 2, 3, 5, 10].map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => {
+                  setScanBatchQty(q);
+                  try {
+                    localStorage.setItem('pos_scan_batch_qty', q.toString());
+                  } catch {}
+                }}
+                className={`w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center ${
+                  scanBatchQty === q
+                    ? 'bg-[#E91E8C] text-white shadow-xs scale-105'
+                    : 'bg-pink-50/70 text-gray-700 hover:bg-pink-100 hover:text-[#E91E8C]'
+                }`}
+              >
+                {q}
+              </button>
+            ))}
+
+            {/* Manual custom quantity counter */}
+            <div className="flex items-center bg-gray-50 border border-pink-200 rounded-xl px-1 py-0.5 ml-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const n = Math.max(1, scanBatchQty - 1);
+                  setScanBatchQty(n);
+                  try { localStorage.setItem('pos_scan_batch_qty', n.toString()); } catch {}
+                }}
+                className="w-5 h-5 flex items-center justify-center text-xs font-bold text-gray-600 hover:text-black cursor-pointer"
+                title="Decrease Qty"
+              >
+                -
+              </button>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                value={scanBatchQty}
+                onChange={(e) => {
+                  const val = Math.max(1, parseInt(e.target.value) || 1);
+                  setScanBatchQty(val);
+                  try { localStorage.setItem('pos_scan_batch_qty', val.toString()); } catch {}
+                }}
+                className="w-8 text-center text-xs font-black text-gray-900 bg-transparent focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const n = scanBatchQty + 1;
+                  setScanBatchQty(n);
+                  try { localStorage.setItem('pos_scan_batch_qty', n.toString()); } catch {}
+                }}
+                className="w-5 h-5 flex items-center justify-center text-xs font-bold text-gray-600 hover:text-black cursor-pointer"
+                title="Increase Qty"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* PRIMARY CONTROLS BAR */}
         <div className="grid grid-cols-3 gap-2 pt-1">
           {/* Camera Flip Button */}
@@ -1153,7 +1253,6 @@ export const PosScan = React.memo(function PosScan({
                 onChange={(e) => setManualCode(e.target.value)}
                 placeholder="Type barcode or product name..."
                 className="flex-1 px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-[#E91E8C] focus:bg-white"
-                autoFocus
               />
               <button
                 type="submit"

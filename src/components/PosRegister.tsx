@@ -10,7 +10,7 @@ import { Product, Order, StockReceipt, PaymentMethodType } from '../types';
 import { InvoiceDocument } from './InvoiceDocument';
 import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 import { playSuccessBeep } from './PosScan';
-import { getProductUnitPrice } from '../utils/pricing';
+import { getProductUnitPrice, getComboEffectiveStock } from '../utils/pricing';
 
 // Modular POS subcomponents
 import { PosTab, PricingMode, DeliveryArea, CartItem, StockInQueueItem, ScannerConnectionInfo } from './pos/types';
@@ -425,12 +425,13 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const handleAddToCart = async (product: Product, quantityToAdd: number = 1) => {
     if (!sessionId) return;
     const currentCartQty = cartQuantitiesMap[product.id] || 0;
-    if (product.stock <= 0) {
+    const effectiveStock = product.isCombo ? getComboEffectiveStock(product, products) : Number(product.stock ?? 0);
+    if (effectiveStock <= 0) {
       alert(`"${product.name}" is out of stock!`);
       return;
     }
-    if (currentCartQty + quantityToAdd - 1 >= product.stock) {
-      alert(`Cannot add more. Available warehouse stock is ${product.stock}.`);
+    if (currentCartQty + quantityToAdd > effectiveStock) {
+      alert(`Cannot add more. Available warehouse stock is ${effectiveStock}.`);
       return;
     }
 
@@ -471,8 +472,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     if (!sessionId) return;
     const currentQty = cartQuantitiesMap[productId] || 0;
     const prod = productService.getProductById(productId) || productService.getProductByBarcode(productId);
-    if (prod && currentQty >= prod.stock) {
-      alert(`Cannot add more. Available warehouse stock is ${prod.stock}.`);
+    const effectiveStock = prod?.isCombo ? getComboEffectiveStock(prod, products) : Number(prod?.stock ?? 0);
+    if (prod && currentQty >= effectiveStock) {
+      alert(`Cannot add more. Available warehouse stock is ${effectiveStock}.`);
       return;
     }
     const tempDoc = {
@@ -572,14 +574,33 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   };
 
   const handleClearCart = async () => {
-    if (!sessionId || scans.length === 0) return;
-    if (!window.confirm('Are you sure you want to clear all items in the POS cart?')) return;
+    if (scans.length === 0) return;
+    const scansToDelete = [...scans];
+    
+    // Instant optimistic clearing on single click
+    setScans([]);
+    setEditingQty({});
+
+    if (!sessionId) return;
+
     try {
-      const batch = writeBatch(db);
-      for (const s of scans) {
-        batch.delete(doc(db, 'pos_sessions', sessionId, 'scans', s.id));
+      // Delete in chunks of 400 to respect Firestore batch limit (500 max)
+      const batchSize = 400;
+      for (let i = 0; i < scansToDelete.length; i += batchSize) {
+        const chunk = scansToDelete.slice(i, i + batchSize);
+        const batch = writeBatch(db);
+        for (const s of chunk) {
+          batch.delete(doc(db, 'pos_sessions', sessionId, 'scans', s.id));
+        }
+        await batch.commit();
       }
-      await batch.commit();
+
+      // Synchronize empty items to pos_sessions session document
+      await updateDoc(doc(db, 'pos_sessions', sessionId), sanitizeForFirestore({
+        items: [],
+        totalScannedItems: 0,
+        updated_at: new Date().toISOString()
+      })).catch(() => {});
     } catch (err) {
       console.error('Error clearing cart:', err);
     }

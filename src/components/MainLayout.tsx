@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Tv, Globe, MessageSquare, Menu, ChevronLeft, 
   ChevronRight, Home, Compass, BarChart3, CreditCard, Boxes, 
   TrendingUp, Wand2, MessageCircle, Gift, Lock, Camera, Sparkles,
-  Search, Video, Award, Heart, HelpCircle, Building2, Truck
+  Search, Video, Award, Heart, HelpCircle, Building2, Truck, Tag, Percent, Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -33,8 +33,13 @@ export const MainLayout: React.FC = () => {
     lastCreatedOrder, calculateCartSubtotal, calculateShipping, 
     handleCheckoutSubmit, activeTranslations, updateCartQty, removeFromCart,
     useLoyaltyPoints, setUseLoyaltyPoints, availablePoints, pointsDiscount,
+    appliedCoupon, couponDiscount, couponError, isFreeDelivery, applyCoupon, removeCoupon,
     calculateGrandTotal, calculatePointsEarned, addToCart
   } = useCart();
+
+  const [couponInput, setCouponInput] = useState('');
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponNotice, setCouponNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -599,9 +604,16 @@ export const MainLayout: React.FC = () => {
                               <div className="flex items-center gap-3 min-w-0">
                                 <img src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
                                 <div className="min-w-0">
-                                  <h4 className="font-bold text-gray-800 leading-tight truncate">
-                                    {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
-                                  </h4>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <h4 className="font-bold text-gray-800 leading-tight truncate">
+                                      {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
+                                    </h4>
+                                    {item.product.isCombo && (
+                                      <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200">
+                                        Combo
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                     <span className="text-[#E91E8C] font-extrabold font-mono">
                                       ৳{unitPrice.toLocaleString()}
@@ -612,6 +624,16 @@ export const MainLayout: React.FC = () => {
                                       </span>
                                     )}
                                   </div>
+                                  {/* Combo Components Breakdown */}
+                                  {item.comboComponents && item.comboComponents.length > 0 && (
+                                    <div className="mt-1 space-y-0.5 text-[10px] text-slate-500 pl-2 border-l-2 border-purple-200">
+                                      {item.comboComponents.map((comp, cIdx) => (
+                                        <div key={cIdx} className="truncate text-slate-600">
+                                          • {comp.quantity}x {comp.name}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
@@ -772,6 +794,94 @@ export const MainLayout: React.FC = () => {
                         />
                       </div>
 
+                      {/* Promo / Coupon Code Section */}
+                      <div className="bg-slate-50/90 p-3.5 rounded-2xl border border-slate-200/80 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-gray-700 flex items-center gap-1.5">
+                            <Tag size={13} className="text-[#E91E8C]" />
+                            <span>{language === 'bn' ? 'প্রমো কোড / কুপন' : 'Promo / Discount Code'}</span>
+                          </span>
+                          {appliedCoupon && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                removeCoupon();
+                                setCouponNotice({ type: 'error', message: 'Coupon removed' });
+                                setTimeout(() => setCouponNotice(null), 2500);
+                              }}
+                              className="text-[10px] text-red-600 hover:underline font-bold cursor-pointer"
+                            >
+                              {language === 'bn' ? 'মুছে ফেলুন' : 'Remove'}
+                            </button>
+                          )}
+                        </div>
+
+                        {appliedCoupon ? (
+                          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="bg-emerald-600 text-white font-mono font-bold px-2 py-0.5 rounded text-[11px] uppercase tracking-wide">
+                                {appliedCoupon.code}
+                              </span>
+                              <span className="text-emerald-800 font-semibold text-[11px]">
+                                {appliedCoupon.discountType === 'free_delivery'
+                                  ? (language === 'bn' ? 'ফ্রি ডেলিভারি সক্রিয়!' : 'Free Delivery Activated!')
+                                  : `৳${couponDiscount} discount applied`}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={removeCoupon}
+                              className="text-gray-400 hover:text-red-500 cursor-pointer p-0.5"
+                              title="Remove coupon"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={couponInput}
+                              onChange={(e) => {
+                                setCouponInput(e.target.value.toUpperCase());
+                                if (couponNotice) setCouponNotice(null);
+                              }}
+                              placeholder={language === 'bn' ? 'কুপন কোড লিখুন...' : 'Enter promo code (e.g. FREEDELIVERY)'}
+                              className="flex-1 bg-white text-gray-800 uppercase tracking-wider font-mono px-3 py-2 rounded-xl border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
+                            />
+                            <button
+                              type="button"
+                              disabled={couponLoading || !couponInput.trim()}
+                              onClick={async () => {
+                                if (!couponInput.trim()) return;
+                                setCouponLoading(true);
+                                setCouponNotice(null);
+                                const res = await applyCoupon(couponInput.trim());
+                                setCouponLoading(false);
+                                if (res.success) {
+                                  setCouponInput('');
+                                  setCouponNotice({ type: 'success', message: res.message });
+                                } else {
+                                  setCouponNotice({ type: 'error', message: res.message });
+                                }
+                              }}
+                              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs cursor-pointer transition shrink-0"
+                            >
+                              {couponLoading ? '...' : (language === 'bn' ? 'প্রয়োগ' : 'Apply')}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Coupon notification / validation error */}
+                        {(couponNotice || couponError) && (
+                          <p className={`text-[11px] font-medium ${
+                            couponNotice?.type === 'success' ? 'text-emerald-600' : 'text-rose-600'
+                          }`}>
+                            {couponNotice?.message || couponError}
+                          </p>
+                        )}
+                      </div>
+
                       {/* Loyalty Points Redemption Box */}
                       {user && availablePoints > 0 && (
                         <div className="bg-gradient-to-r from-pink-50/80 to-purple-50/80 p-3.5 rounded-2xl border border-pink-200/80 space-y-2">
@@ -809,8 +919,21 @@ export const MainLayout: React.FC = () => {
                         </div>
                         <div className="flex justify-between font-medium">
                           <span>{activeTranslations.shipping}</span>
-                          <span>৳{calculateShipping()}</span>
+                          {isFreeDelivery ? (
+                            <span className="text-emerald-600 font-bold flex items-center gap-1">
+                              <span className="line-through text-gray-400 font-normal">৳{checkoutForm.area === 'dhaka' ? 80 : 150}</span>
+                              <span>৳0 (Free Delivery)</span>
+                            </span>
+                          ) : (
+                            <span>৳{calculateShipping()}</span>
+                          )}
                         </div>
+                        {couponDiscount > 0 && appliedCoupon && (
+                          <div className="flex justify-between font-bold text-emerald-600">
+                            <span>Coupon ({appliedCoupon.code})</span>
+                            <span>-৳{couponDiscount}</span>
+                          </div>
+                        )}
                         {useLoyaltyPoints && pointsDiscount > 0 && (
                           <div className="flex justify-between font-bold text-emerald-600">
                             <span>Loyalty Discount</span>

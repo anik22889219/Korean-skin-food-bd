@@ -1,6 +1,6 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings } from '../types/theme';
+import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, ReelItem } from '../types/theme';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 
@@ -23,8 +23,8 @@ export const DEFAULT_GLOBAL_THEME: GlobalThemeSettings = {
   secondaryColor: '#FF62B2',
   accentColor: '#0F172A',
   backgroundColor: '#FFF5F8',
-  headingFont: 'Playfair Display',
-  bodyFont: 'Plus Jakarta Sans',
+  headingFont: 'Hind Siliguri',
+  bodyFont: 'Open Sans',
   siteTitle: 'Korean Skin Food BD',
   siteTagline: '100% Authentic Korean Cosmeceuticals straight from Seoul',
   contactPhone: '+880 1700-000000',
@@ -228,33 +228,69 @@ export const DEFAULT_HOME_THEME: HomeThemeSettings = {
     reels: [
       {
         id: 'reel-1',
-        title: 'Korean Skincare Routine & Beauty Secrets',
+        title: 'Korean Skincare Routine & Glow Secrets',
         coverUrl: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60',
-        videoUrl: 'https://www.facebook.com/share/r/1Epn8LCGMT/',
+        videoUrl: 'https://res.cloudinary.com/demo/video/upload/q_auto,f_auto/v1611158652/samples/cld-sample-video.mp4',
+        postUrl: 'https://www.facebook.com/share/r/1Epn8LCGMT/',
         createdAt: '2026-07-20',
-        viewsCount: 2450,
-        likesCount: 380,
-        sharesCount: 64
+        viewsCount: 3450,
+        likesCount: 580,
+        sharesCount: 94
       },
       {
         id: 'reel-2',
         title: 'Glass Skin Glow & Authentic K-Beauty Unboxing',
         coverUrl: 'https://images.unsplash.com/photo-1616683693504-3ea7e9ad6fec?w=600&auto=format&fit=crop&q=60',
-        videoUrl: 'https://www.facebook.com/share/r/1DHQbuWo9Y/',
+        videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
+        postUrl: 'https://www.facebook.com/share/r/1DHQbuWo9Y/',
         createdAt: '2026-07-15',
-        viewsCount: 4120,
-        likesCount: 590,
-        sharesCount: 112
+        viewsCount: 5120,
+        likesCount: 790,
+        sharesCount: 142
       },
       {
         id: 'reel-3',
         title: 'Daily Hydration & Botanical Care Highlights',
         coverUrl: 'https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=600&auto=format&fit=crop&q=60',
-        videoUrl: 'https://www.facebook.com/share/r/18oiK3D2Vd/',
+        videoUrl: 'https://res.cloudinary.com/demo/video/upload/samples/sea-turtle.mp4',
+        postUrl: 'https://www.facebook.com/share/r/18oiK3D2Vd/',
         createdAt: '2026-07-08',
-        viewsCount: 1890,
-        likesCount: 210,
-        sharesCount: 38
+        viewsCount: 2890,
+        likesCount: 340,
+        sharesCount: 58
+      },
+      {
+        id: 'reel-4',
+        title: 'Pure Centella & Calming Facial Ritual',
+        coverUrl: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600&auto=format&fit=crop&q=60',
+        videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+        postUrl: 'https://www.facebook.com/share/r/1Epn8LCGMT/',
+        createdAt: '2026-07-02',
+        viewsCount: 4210,
+        likesCount: 630,
+        sharesCount: 110
+      },
+      {
+        id: 'reel-5',
+        title: 'Seoul Direct Cargo & Luxury Packaging Quality',
+        coverUrl: 'https://images.unsplash.com/photo-1512290900672-1f487e4157eb?w=600&auto=format&fit=crop&q=60',
+        videoUrl: 'https://res.cloudinary.com/demo/video/upload/elephants.mp4',
+        postUrl: 'https://www.facebook.com/share/r/1DHQbuWo9Y/',
+        createdAt: '2026-06-28',
+        viewsCount: 3190,
+        likesCount: 480,
+        sharesCount: 82
+      },
+      {
+        id: 'reel-6',
+        title: 'Customer Favorites: Barrier Repair & Moisture Boost',
+        coverUrl: 'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60',
+        videoUrl: 'https://res.cloudinary.com/demo/video/upload/dog.mp4',
+        postUrl: 'https://www.facebook.com/share/r/18oiK3D2Vd/',
+        createdAt: '2026-06-22',
+        viewsCount: 4950,
+        likesCount: 710,
+        sharesCount: 135
       }
     ]
   },
@@ -325,8 +361,8 @@ export function applyGlobalThemeToDOM(globalTheme: GlobalThemeSettings) {
   const secondary = globalTheme.secondaryColor || '#FF62B2';
   const accent = globalTheme.accentColor || '#0F172A';
   const bg = globalTheme.backgroundColor || '#FFF5F8';
-  const headingFont = globalTheme.headingFont || 'Playfair Display';
-  const bodyFont = globalTheme.bodyFont || 'Plus Jakarta Sans';
+  const headingFont = globalTheme.headingFont || 'Hind Siliguri';
+  const bodyFont = globalTheme.bodyFont || 'Open Sans';
 
   styleTag.innerHTML = `
     :root {
@@ -334,13 +370,13 @@ export function applyGlobalThemeToDOM(globalTheme: GlobalThemeSettings) {
       --secondary-color: ${secondary};
       --accent-color: ${accent};
       --bg-color: ${bg};
-      --font-heading: '${headingFont}', serif;
-      --font-body: '${bodyFont}', sans-serif;
+      --font-heading: '${headingFont}', 'Hind Siliguri', serif;
+      --font-body: '${bodyFont}', 'Hind Siliguri', sans-serif;
     }
-    body {
+    body, html {
       font-family: var(--font-body) !important;
     }
-    h1, h2, h3, h4, .font-serif {
+    h1, h2, h3, h4, h5, h6, .font-serif, .font-serif-luxury, .font-heading {
       font-family: var(--font-heading) !important;
     }
     .theme-primary-bg {
@@ -371,13 +407,33 @@ class ThemeService {
     const defaultReels = DEFAULT_HOME_THEME.communityLive.reels;
     const currentReels = theme.communityLive?.reels || defaultReels;
     
-    // Replace generic placeholder links with real Facebook Reel links if present
-    const updatedReels = currentReels.map((reel, idx) => {
-      if (!reel.videoUrl || reel.videoUrl === 'https://facebook.com' || reel.videoUrl === '#') {
-        return defaultReels[idx] || reel;
+    // Ensure reels have playable video streams while preserving social postUrls
+    let updatedReels: ReelItem[] = currentReels.map((reel, idx) => {
+      const def = defaultReels[idx] || defaultReels[idx % defaultReels.length];
+      let videoUrl = reel.videoUrl;
+      let postUrl = reel.postUrl || '';
+
+      // If user had stored the Facebook share link in videoUrl, move it to postUrl
+      if (!postUrl && videoUrl && (videoUrl.includes('facebook.com') || videoUrl.includes('fb.watch') || videoUrl.includes('instagram.com'))) {
+        postUrl = videoUrl;
       }
-      return reel;
+
+      // If videoUrl is not a direct video or is broken mixkit, use default playable stream
+      if (!videoUrl || videoUrl.includes('mixkit.co') || videoUrl.includes('facebook.com') || videoUrl.includes('fb.watch') || videoUrl === '#' || videoUrl === 'https://facebook.com') {
+        videoUrl = def?.videoUrl || 'https://res.cloudinary.com/demo/video/upload/q_auto,f_auto/v1611158652/samples/cld-sample-video.mp4';
+      }
+
+      return {
+        ...reel,
+        videoUrl,
+        postUrl: postUrl || def?.postUrl || reel.postUrl || ''
+      };
     });
+
+    if (updatedReels.length < 6) {
+      const additional = defaultReels.slice(updatedReels.length);
+      updatedReels = [...updatedReels, ...additional];
+    }
 
     const baseOrder = [...(theme.sectionOrder || DEFAULT_HOME_THEME.sectionOrder)].filter(s => s !== 'validatedFormulations');
     if (!baseOrder.includes('googleReviews')) {
@@ -425,7 +481,14 @@ class ThemeService {
     try {
       const cachedGlobal = localStorage.getItem(GLOBAL_STORAGE_KEY);
       if (cachedGlobal) {
-        this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME, ...JSON.parse(cachedGlobal) };
+        const parsed = JSON.parse(cachedGlobal);
+        if (parsed.headingFont === 'Playfair Display' || !parsed.headingFont) {
+          parsed.headingFont = 'Hind Siliguri';
+        }
+        if (parsed.bodyFont === 'Plus Jakarta Sans' || !parsed.bodyFont) {
+          parsed.bodyFont = 'Open Sans';
+        }
+        this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME, ...parsed };
       } else {
         this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME };
       }
@@ -478,7 +541,9 @@ class ThemeService {
         (snapshot) => {
           if (snapshot.exists()) {
             const data = snapshot.data() as GlobalThemeSettings;
-            this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME, ...data };
+            const headingFont = (!data.headingFont || data.headingFont === 'Playfair Display') ? 'Hind Siliguri' : data.headingFont;
+            const bodyFont = (!data.bodyFont || data.bodyFont === 'Plus Jakarta Sans') ? 'Open Sans' : data.bodyFont;
+            this.currentGlobalTheme = { ...DEFAULT_GLOBAL_THEME, ...data, headingFont, bodyFont };
             localStorage.setItem(GLOBAL_STORAGE_KEY, JSON.stringify(this.currentGlobalTheme));
             applyGlobalThemeToDOM(this.currentGlobalTheme);
             this.notifyGlobalListeners();

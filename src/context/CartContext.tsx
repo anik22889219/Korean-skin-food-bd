@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Product, Order, OrderItem } from '../types';
+import { Product, Order, OrderItem, Coupon, ComboComponentDetail } from '../types';
 import { posService } from '../services/posService';
+import { discountService } from '../services/discountService';
 import { useAuth } from './AuthContext';
 import { db, sanitizeForFirestore } from '../services/firebase';
 import { doc, setDoc } from 'firebase/firestore';
@@ -8,14 +9,15 @@ import { analytics } from '../services/analyticsService';
 import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
 import { getProductUnitPrice, getRetailPrice } from '../utils/pricing';
 
-interface CartItem {
+export interface CartItem {
   product: Product;
   quantity: number;
+  comboComponents?: ComboComponentDetail[];
 }
 
 interface CartContextType {
   cart: CartItem[];
-  addToCart: (product: Product, quantity?: number) => void;
+  addToCart: (product: Product, quantity?: number, comboComponents?: ComboComponentDetail[]) => void;
   removeFromCart: (productId: string) => void;
   updateCartQty: (productId: string, delta: number) => void;
   clearCart: () => void;
@@ -48,6 +50,13 @@ interface CartContextType {
   setUseLoyaltyPoints: (use: boolean) => void;
   availablePoints: number;
   pointsDiscount: number;
+  // Coupons & Promo Codes
+  appliedCoupon: Coupon | null;
+  couponDiscount: number;
+  couponError: string | null;
+  isFreeDelivery: boolean;
+  applyCoupon: (code: string) => Promise<{ success: boolean; message: string }>;
+  removeCoupon: () => void;
   calculateGrandTotal: () => number;
   calculatePointsEarned: () => number;
 }
@@ -183,6 +192,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [useLoyaltyPoints, setUseLoyaltyPoints] = useState<boolean>(false);
 
+  // Coupon state
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(() => {
+    try {
+      const saved = localStorage.getItem('ksf_applied_coupon');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [couponDiscount, setCouponDiscount] = useState<number>(0);
+  const [couponError, setCouponError] = useState<string | null>(null);
+
   const [checkoutForm, setCheckoutForm] = useState({
     name: '',
     phone: '',
@@ -232,9 +253,78 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, 0);
   };
 
+  const isFreeDelivery = appliedCoupon?.discountType === 'free_delivery';
+
   const calculateShipping = () => {
     if (cart.length === 0) return 0;
+    if (isFreeDelivery) return 0;
     return checkoutForm.area === 'dhaka' ? 80 : 150;
+  };
+
+  // Recalculate coupon validity and discount amount whenever cart or applied coupon changes
+  useEffect(() => {
+    if (!appliedCoupon) {
+      setCouponDiscount(0);
+      setCouponError(null);
+      localStorage.removeItem('ksf_applied_coupon');
+      return;
+    }
+
+    const subtotal = calculateCartSubtotal();
+    if (cart.length === 0 || subtotal <= 0) {
+      setCouponDiscount(0);
+      return;
+    }
+
+    // Validate coupon against current cart
+    discountService.validateCoupon(appliedCoupon.code, cart, subtotal).then((res) => {
+      if (res.isValid) {
+        setCouponDiscount(res.discountAmount);
+        setCouponError(null);
+        localStorage.setItem('ksf_applied_coupon', JSON.stringify(appliedCoupon));
+      } else {
+        // Did not meet minimum order after cart items changed
+        setCouponDiscount(0);
+        setCouponError(res.message || 'Coupon requirement not met');
+      }
+    }).catch((err) => {
+      console.warn('Coupon re-validation error:', err);
+    });
+  }, [cart, appliedCoupon]);
+
+  const applyCoupon = async (code: string): Promise<{ success: boolean; message: string }> => {
+    const subtotal = calculateCartSubtotal();
+    if (subtotal <= 0 || cart.length === 0) {
+      const msg = language === 'bn' ? 'কুপন প্রয়োগের জন্য কার্টে পণ্য যোগ করুন।' : 'Please add items to cart before applying a coupon.';
+      setCouponError(msg);
+      return { success: false, message: msg };
+    }
+
+    try {
+      const res = await discountService.validateCoupon(code, cart, subtotal);
+      if (res.isValid && res.coupon) {
+        setAppliedCoupon(res.coupon);
+        setCouponDiscount(res.discountAmount);
+        setCouponError(null);
+        localStorage.setItem('ksf_applied_coupon', JSON.stringify(res.coupon));
+        return { success: true, message: res.message || 'Coupon applied successfully!' };
+      } else {
+        const errorMsg = res.message || 'Invalid coupon code';
+        setCouponError(errorMsg);
+        return { success: false, message: errorMsg };
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to apply coupon';
+      setCouponError(msg);
+      return { success: false, message: msg };
+    }
+  };
+
+  const removeCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponDiscount(0);
+    setCouponError(null);
+    localStorage.removeItem('ksf_applied_coupon');
   };
 
   // 1 Point = ৳1 discount. Maximum discount cannot exceed subtotal.
@@ -246,7 +336,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const subtotal = calculateCartSubtotal();
     if (subtotal === 0) return 0;
     const ship = calculateShipping();
-    return Math.max(0, subtotal + ship - pointsDiscount);
+    return Math.max(0, subtotal + ship - pointsDiscount - couponDiscount);
   };
 
   // Earning rate: 1 point for every ৳10 spent
@@ -255,16 +345,25 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return Math.floor(total / 10);
   };
 
-  const addToCart = (product: Product, quantity: number = 1) => {
+  const addToCart = (product: Product, quantity: number = 1, comboComponents?: ComboComponentDetail[]) => {
     const validQty = Math.max(1, Number(quantity) || 1);
     setCart((prev) => {
-      const existingIdx = prev.findIndex((item) => item.product.id === product.id);
+      // For products with custom combo components, match both productId and components
+      const existingIdx = prev.findIndex((item) => {
+        if (item.product.id !== product.id) return false;
+        if (!comboComponents && !item.comboComponents) return true;
+        // Compare combo component IDs
+        const curKeys = (item.comboComponents || []).map(c => `${c.productId}_${c.quantity}`).sort().join('|');
+        const newKeys = (comboComponents || []).map(c => `${c.productId}_${c.quantity}`).sort().join('|');
+        return curKeys === newKeys;
+      });
+
       if (existingIdx !== -1) {
         const updated = [...prev];
         updated[existingIdx].quantity += validQty;
         return updated;
       }
-      return [...prev, { product, quantity: validQty }];
+      return [...prev, { product, quantity: validQty, comboComponents }];
     });
     setIsCartOpen(true);
     setCheckoutStep('cart');
@@ -304,6 +403,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCheckoutStep('cart');
     setLastCreatedOrder(null);
     setUseLoyaltyPoints(false);
+    removeCoupon();
   };
 
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
@@ -328,13 +428,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           price: unitPrice,
           quantity: item.quantity,
           pricingType: isWholesale ? 'wholesale' : 'retail',
-          pricingTier: tier
+          pricingTier: tier,
+          barcode: item.product.barcode,
+          isCombo: item.product.isCombo,
+          comboType: item.product.comboConfig?.type,
+          comboComponents: item.comboComponents || (item.product as any).comboComponents
         };
       });
 
       const grandTotal = calculateGrandTotal();
       const earnedPts = calculatePointsEarned();
       const redeemedPts = pointsDiscount; // 1 point = ৳1
+      const totalDiscount = redeemedPts + couponDiscount;
       const attribution = getStoredAttribution();
       
       const attributionPayload: Record<string, any> = {};
@@ -363,7 +468,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         address: checkoutForm.address,
         items: orderItems,
         totalAmount: grandTotal,
-        discountAmount: redeemedPts,
+        discountAmount: totalDiscount,
+        couponCode: appliedCoupon?.code || undefined,
+        couponDiscount: couponDiscount > 0 ? couponDiscount : undefined,
+        isFreeDelivery: isFreeDelivery || undefined,
+        shippingCharge: calculateShipping(),
         pointsEarned: earnedPts,
         pointsRedeemed: redeemedPts,
         paymentMethod: 'COD' as const,
@@ -375,6 +484,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Track Authoritative Purchase immediately on order placement
       analytics.trackPurchase(createdOrder).catch(console.warn);
+
+      // Record coupon redemption count if applicable
+      if (appliedCoupon?.id) {
+        discountService.incrementCouponUsage(appliedCoupon.id).catch(console.warn);
+      }
 
       // Update user's loyalty points balance in Firestore
       if (user?.uid) {
@@ -393,6 +507,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCheckoutStep('success');
       setCart([]);
       setUseLoyaltyPoints(false);
+      removeCoupon();
       localStorage.removeItem('ksf_online_cart_v1');
     } catch (err) {
       console.error('Online checkout failed:', err);
@@ -428,6 +543,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUseLoyaltyPoints,
         availablePoints,
         pointsDiscount,
+        appliedCoupon,
+        couponDiscount,
+        couponError,
+        isFreeDelivery,
+        applyCoupon,
+        removeCoupon,
         calculateGrandTotal,
         calculatePointsEarned,
       }}

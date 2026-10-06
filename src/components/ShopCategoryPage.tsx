@@ -25,6 +25,7 @@ import { getRetailPrice } from '../utils/pricing';
 
 const CATEGORIES = [
   'All',
+  'Combo & Sets',
   'Cleanser',
   'Toner',
   'Serum & Essence',
@@ -43,6 +44,7 @@ const CATEGORIES = [
 
 const getCategoryIcon = (category: string) => {
   switch (category) {
+    case 'Combo & Sets': return <Layers size={13} className="text-purple-300 shrink-0" />;
     case 'Cleanser': return <Droplets size={13} className="text-sky-300 shrink-0" />;
     case 'Toner': return <Droplet size={13} className="text-teal-300 shrink-0" />;
     case 'Serum & Essence': return <Sparkles size={13} className="text-amber-300 shrink-0" />;

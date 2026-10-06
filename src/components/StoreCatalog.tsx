@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { themeService } from '../services/themeService';
-import { HomeThemeSettings, SectionKey, ReelItem } from '../types/theme';
+import { HomeThemeSettings, SectionKey, ReelItem, CommunityPhotoItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { useProducts } from '../hooks/queries/products';
 import { useCategories } from '../hooks/queries/categories';
@@ -14,9 +14,9 @@ import {
   Globe, Store, Zap, ShieldCheck, FileText, ChevronRight, ChevronLeft,
   ArrowRight, Play, Pause, Star, Sparkles, MapPin, Package, Truck,
   Award, Heart, RefreshCw, Send, Volume2, VolumeX, ExternalLink,
-  Eye, Share2, Clock, Calendar, Filter, Tag, Camera
+  Eye, Share2, Clock, Calendar, Filter, Tag, Camera, Maximize2, ZoomIn
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
 import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
@@ -29,6 +29,7 @@ import { getRetailPrice } from '../utils/pricing';
 
 const CATEGORIES = [
   'All', 
+  'Combo & Sets',
   'Cleanser', 
   'Toner', 
   'Serum & Essence', 
@@ -132,15 +133,111 @@ export const StoreCatalog: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Botanical Essentials Carousel State & Scroll Handlers
+  const botanicalScrollRef = useRef<HTMLDivElement>(null);
+  const [beCanScrollLeft, setBeCanScrollLeft] = useState(false);
+  const [beCanScrollRight, setBeCanScrollRight] = useState(true);
+  const [beAutoPlay, setBeAutoPlay] = useState(true);
+  const [beIsHovered, setBeIsHovered] = useState(false);
+
+  const checkBeScroll = () => {
+    if (!botanicalScrollRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = botanicalScrollRef.current;
+    setBeCanScrollLeft(scrollLeft > 15);
+    setBeCanScrollRight(scrollLeft < scrollWidth - clientWidth - 15);
+  };
+
+  const scrollBotanical = (direction: 'left' | 'right') => {
+    if (!botanicalScrollRef.current) return;
+    const container = botanicalScrollRef.current;
+    const firstCard = container.querySelector('.botanical-carousel-card') as HTMLElement | null;
+    const cardStep = firstCard ? firstCard.offsetWidth + 16 : 240;
+    const numCardsToScroll = window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3;
+    const scrollAmount = cardStep * numCardsToScroll;
+
+    if (direction === 'right') {
+      if (container.scrollLeft >= container.scrollWidth - container.clientWidth - 20) {
+        container.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        container.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      }
+    } else {
+      if (container.scrollLeft <= 20) {
+        container.scrollTo({ left: container.scrollWidth, behavior: 'smooth' });
+      } else {
+        container.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+      }
+    }
+  };
+
   // Auto Slide state for Community Live (Reels)
   const [clActiveIndex, setClActiveIndex] = useState(0);
   const [clAutoPlay, setClAutoPlay] = useState(true);
   const [clIsHovered, setClIsHovered] = useState(false);
 
-  // Auto Slide state for Shared Journey (Community Photos)
-  const [sjActiveIndex, setSjActiveIndex] = useState(0);
+  // Auto Slide & Carousel state for Shared Journey (Community Photos)
+  const sjScrollRef = useRef<HTMLDivElement>(null);
+  const [sjCanScrollLeft, setSjCanScrollLeft] = useState(false);
+  const [sjCanScrollRight, setSjCanScrollRight] = useState(true);
   const [sjAutoPlay, setSjAutoPlay] = useState(true);
   const [sjIsHovered, setSjIsHovered] = useState(false);
+  const [selectedLightboxPhoto, setSelectedLightboxPhoto] = useState<{ photo: CommunityPhotoItem; index: number } | null>(null);
+
+  const checkSjScroll = () => {
+    if (!sjScrollRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = sjScrollRef.current;
+    setSjCanScrollLeft(scrollLeft > 15);
+    setSjCanScrollRight(scrollLeft < scrollWidth - clientWidth - 15);
+  };
+
+  const scrollSharedJourney = (direction: 'left' | 'right') => {
+    if (!sjScrollRef.current) return;
+    const container = sjScrollRef.current;
+    const firstCard = container.querySelector('.sj-carousel-card') as HTMLElement | null;
+    const cardStep = firstCard ? firstCard.offsetWidth + 16 : 280;
+    const numCardsToScroll = window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3;
+    const scrollAmount = cardStep * numCardsToScroll;
+
+    const maxScroll = container.scrollWidth - container.clientWidth;
+    if (direction === 'right' && container.scrollLeft >= maxScroll - 20) {
+      container.scrollTo({ left: 0, behavior: 'smooth' });
+    } else if (direction === 'left' && container.scrollLeft <= 20) {
+      container.scrollTo({ left: maxScroll, behavior: 'smooth' });
+    } else {
+      container.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+    setTimeout(checkSjScroll, 350);
+  };
+
+  // Keyboard navigation for Lightbox
+  useEffect(() => {
+    if (!selectedLightboxPhoto) return;
+    const photos = theme.sharedJourney?.photos || [];
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedLightboxPhoto(null);
+      } else if (e.key === 'ArrowRight') {
+        setSelectedLightboxPhoto((prev) => {
+          if (!prev || photos.length === 0) return null;
+          const nextIdx = (prev.index + 1) % photos.length;
+          return { photo: photos[nextIdx], index: nextIdx };
+        });
+      } else if (e.key === 'ArrowLeft') {
+        setSelectedLightboxPhoto((prev) => {
+          if (!prev || photos.length === 0) return null;
+          const prevIdx = (prev.index - 1 + photos.length) % photos.length;
+          return { photo: photos[prevIdx], index: prevIdx };
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedLightboxPhoto, theme.sharedJourney?.photos]);
 
   const hasTrackedItemListRef = useRef(false);
 
@@ -174,14 +271,37 @@ export const StoreCatalog: React.FC = () => {
     return () => clearInterval(timer);
   }, [clAutoPlay, clIsHovered, theme.communityLive?.reels?.length]);
 
-  // Shared Journey Auto Slide Timer
+  // Shared Journey Carousel Scroll Listener
+  useEffect(() => {
+    const container = sjScrollRef.current;
+    if (!container) return;
+    checkSjScroll();
+    container.addEventListener('scroll', checkSjScroll, { passive: true });
+    window.addEventListener('resize', checkSjScroll);
+    return () => {
+      container.removeEventListener('scroll', checkSjScroll);
+      window.removeEventListener('resize', checkSjScroll);
+    };
+  }, [theme.sharedJourney?.photos]);
+
+  // Shared Journey Auto Slide Timer across all screen sizes
   useEffect(() => {
     const photosCount = theme.sharedJourney?.photos?.length || 0;
     if (!sjAutoPlay || sjIsHovered || photosCount <= 1) return;
 
     const timer = setInterval(() => {
-      setSjActiveIndex((prev) => (prev + 1) % photosCount);
-    }, 3500);
+      if (!sjScrollRef.current) return;
+      const container = sjScrollRef.current;
+      const maxScroll = container.scrollWidth - container.clientWidth;
+      if (container.scrollLeft >= maxScroll - 25) {
+        container.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        const firstCard = container.querySelector('.sj-carousel-card') as HTMLElement | null;
+        const cardStep = firstCard ? firstCard.offsetWidth + 16 : 280;
+        container.scrollBy({ left: cardStep, behavior: 'smooth' });
+      }
+      checkSjScroll();
+    }, 3200);
 
     return () => clearInterval(timer);
   }, [sjAutoPlay, sjIsHovered, theme.sharedJourney?.photos?.length]);
@@ -210,6 +330,45 @@ export const StoreCatalog: React.FC = () => {
       return matchesSearch && matchesCategory && matchesBrand && matchesSkinType;
     });
   }, [products, searchQuery, selectedCategory, selectedBrand, selectedSkinType]);
+
+  // Resolve products for Botanical Essentials Carousel
+  const botanicalProducts = useMemo(() => {
+    const selectedIds = theme.botanicalEssentials?.selectedProductIds || [];
+    if (selectedIds.length > 0) {
+      const explicit = selectedIds
+        .map((id) => products.find((p) => p.id === id))
+        .filter((p): p is Product => !!p);
+      if (explicit.length > 0) return explicit;
+    }
+    // Fallback: take first 12 products
+    return products.slice(0, 12);
+  }, [theme.botanicalEssentials?.selectedProductIds, products]);
+
+  useEffect(() => {
+    checkBeScroll();
+  }, [botanicalProducts]);
+
+  // Botanical Essentials Smooth Auto Slide Timer
+  useEffect(() => {
+    if (!beAutoPlay || beIsHovered || botanicalProducts.length <= 1) return;
+    if (!theme.botanicalEssentials?.enabled) return;
+
+    const timer = setInterval(() => {
+      if (!botanicalScrollRef.current) return;
+      const container = botanicalScrollRef.current;
+      const firstCard = container.querySelector('.botanical-carousel-card') as HTMLElement | null;
+      const cardStep = firstCard ? firstCard.offsetWidth + 16 : 240;
+
+      // When reaching near the end, loop smoothly back to start
+      if (container.scrollLeft >= container.scrollWidth - container.clientWidth - 20) {
+        container.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        container.scrollBy({ left: cardStep, behavior: 'smooth' });
+      }
+    }, 3500);
+
+    return () => clearInterval(timer);
+  }, [beAutoPlay, beIsHovered, botanicalProducts.length, theme.botanicalEssentials?.enabled]);
 
   const handleCalculateShipping = (e: React.FormEvent) => {
     e.preventDefault();
@@ -401,8 +560,8 @@ export const StoreCatalog: React.FC = () => {
     if (!be || !be.enabled) return null;
 
     return (
-      <div key="botanicalEssentials" className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 border-b border-pink-100 pb-3">
+      <div key="botanicalEssentials" className="space-y-4 sm:space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-pink-100 pb-3">
           <div>
             <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
               {be.subtitle}
@@ -411,21 +570,111 @@ export const StoreCatalog: React.FC = () => {
               {be.title}
             </h2>
           </div>
-          <Link to="/shop" className="text-xs font-extrabold text-[#E91E8C] hover:underline flex items-center gap-1">
-            <span>View Full Collection</span>
-            <ChevronRight size={14} />
-          </Link>
+
+          <div className="flex items-center gap-3">
+            {/* Auto slide play/pause toggle indicator */}
+            <button
+              type="button"
+              onClick={() => setBeAutoPlay((prev) => !prev)}
+              title={beAutoPlay ? 'Auto-slide সক্রিয় (ক্লিক করে পজ করুন)' : 'Auto-slide পজ করা (ক্লিক করে চালু করুন)'}
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border border-pink-100 bg-pink-50/60 hover:bg-pink-100/70"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${beAutoPlay && !beIsHovered ? 'bg-[#E91E8C] animate-pulse' : 'bg-slate-300'}`} />
+              <span className={beAutoPlay ? 'text-[#E91E8C]' : 'text-slate-500'}>
+                {beAutoPlay ? (beIsHovered ? 'Paused (Hover)' : 'Auto') : 'Manual'}
+              </span>
+            </button>
+
+            {/* Carousel Navigation Arrows in Header */}
+            <div className="flex items-center gap-1.5 bg-pink-50/80 p-1 rounded-xl border border-pink-100">
+              <button
+                type="button"
+                onClick={() => scrollBotanical('left')}
+                disabled={!beCanScrollLeft}
+                aria-label="Previous products"
+                className={`p-1.5 rounded-lg text-slate-700 transition cursor-pointer ${
+                  !beCanScrollLeft ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white hover:text-[#E91E8C] shadow-2xs active:scale-95'
+                }`}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollBotanical('right')}
+                disabled={!beCanScrollRight}
+                aria-label="Next products"
+                className={`p-1.5 rounded-lg text-slate-700 transition cursor-pointer ${
+                  !beCanScrollRight ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white hover:text-[#E91E8C] shadow-2xs active:scale-95'
+                }`}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+
+            <Link to="/shop" className="text-xs font-extrabold text-[#E91E8C] hover:underline flex items-center gap-1">
+              <span>View Full Collection</span>
+              <ChevronRight size={14} />
+            </Link>
+          </div>
         </div>
 
-        {/* Botanical Essentials Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
-          {filteredProducts.slice(0, 6).map((prod) => (
-            <ProductCard
-              key={prod.id}
-              product={prod}
-              onQuickView={(p) => navigate(`/product/${p.id}`)}
-            />
-          ))}
+        {/* Botanical Essentials Carousel Track (All Display Sizes) */}
+        <div
+          className="relative group/botanical"
+          onMouseEnter={() => setBeIsHovered(true)}
+          onMouseLeave={() => setBeIsHovered(false)}
+          onTouchStart={() => setBeIsHovered(true)}
+          onTouchEnd={() => setBeIsHovered(false)}
+        >
+          {/* Floating Left Arrow (Tablet & Desktop) */}
+          <button
+            type="button"
+            onClick={() => scrollBotanical('left')}
+            disabled={!beCanScrollLeft}
+            aria-label="Scroll left"
+            className={`hidden md:flex absolute -left-4 lg:-left-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 backdrop-blur-md shadow-xl border border-pink-100 items-center justify-center text-slate-700 transition-all duration-200 cursor-pointer ${
+              !beCanScrollLeft
+                ? 'opacity-0 pointer-events-none'
+                : 'opacity-0 group-hover/botanical:opacity-100 hover:bg-[#E91E8C] hover:text-white hover:border-[#E91E8C] hover:scale-110 active:scale-95'
+            }`}
+          >
+            <ChevronLeft size={22} />
+          </button>
+
+          {/* Floating Right Arrow (Tablet & Desktop) */}
+          <button
+            type="button"
+            onClick={() => scrollBotanical('right')}
+            disabled={!beCanScrollRight}
+            aria-label="Scroll right"
+            className={`hidden md:flex absolute -right-4 lg:-right-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 backdrop-blur-md shadow-xl border border-pink-100 items-center justify-center text-slate-700 transition-all duration-200 cursor-pointer ${
+              !beCanScrollRight
+                ? 'opacity-0 pointer-events-none'
+                : 'opacity-0 group-hover/botanical:opacity-100 hover:bg-[#E91E8C] hover:text-white hover:border-[#E91E8C] hover:scale-110 active:scale-95'
+            }`}
+          >
+            <ChevronRight size={22} />
+          </button>
+
+          {/* Scrollable Container for All Screen Sizes */}
+          <div
+            ref={botanicalScrollRef}
+            onScroll={checkBeScroll}
+            className="flex gap-3 sm:gap-4 md:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory scroll-smooth pb-4 pt-1 px-1 -mx-1"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
+            {botanicalProducts.map((prod) => (
+              <div
+                key={prod.id}
+                className="botanical-carousel-card w-[65vw] xs:w-[210px] sm:w-[230px] md:w-[240px] lg:w-[260px] xl:w-[270px] shrink-0 snap-start flex flex-col"
+              >
+                <ProductCard
+                  product={prod}
+                  onQuickView={(p) => navigate(`/product/${p.id}`)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -900,7 +1149,7 @@ export const StoreCatalog: React.FC = () => {
     );
   };
 
-  // SECTION 7: SHARED JOURNEY (COMMUNITY PHOTOS)
+  // SECTION 7: SHARED JOURNEY (COMMUNITY PHOTOS) - SMOOTH CAROUSEL & LIGHTBOX
   const renderSharedJourneySection = () => {
     const sj = theme.sharedJourney;
     if (!sj || !sj.enabled) return null;
@@ -908,37 +1157,14 @@ export const StoreCatalog: React.FC = () => {
     const photos = sj.photos || [];
     if (photos.length === 0) return null;
 
-    const handleNextPhoto = () => {
-      setSjActiveIndex((prev) => (prev + 1) % photos.length);
-    };
-
-    const handlePrevPhoto = () => {
-      setSjActiveIndex((prev) => (prev - 1 + photos.length) % photos.length);
-    };
-
-    // Calculate visible photos slice (displays 2 items on mobile, 4 on desktop)
-    const getVisiblePhotos = () => {
-      const maxVisible = isMobile ? 2 : 4;
-      if (photos.length <= maxVisible) return photos;
-      const visible = [];
-      for (let i = 0; i < Math.min(maxVisible, photos.length); i++) {
-        visible.push(photos[(sjActiveIndex + i) % photos.length]);
-      }
-      return visible;
-    };
-
-    const visiblePhotos = getVisiblePhotos();
-
     return (
       <div 
         key="sharedJourney" 
         className="bg-[#fbf2ed] p-5 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden select-none"
         onMouseEnter={() => setSjIsHovered(true)}
         onMouseLeave={() => setSjIsHovered(false)}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={() => handleTouchEnd(handleNextPhoto, handlePrevPhoto)}
       >
+        {/* Header with Title and Auto-Slide Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-100/80 pb-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -956,6 +1182,7 @@ export const StoreCatalog: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3 self-end sm:self-center">
+            {/* Play/Pause Auto-Slide Toggle */}
             <button
               type="button"
               onClick={() => setSjAutoPlay(!sjAutoPlay)}
@@ -966,19 +1193,20 @@ export const StoreCatalog: React.FC = () => {
               <span className="hidden md:inline">{sjAutoPlay ? "Pause" : "Auto Play"}</span>
             </button>
 
+            {/* Navigation Arrows in Header */}
             <div className="flex items-center gap-1.5 bg-white p-1 rounded-2xl border border-pink-200 shadow-xs">
               <button
                 type="button"
-                onClick={handlePrevPhoto}
-                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                onClick={() => scrollSharedJourney('left')}
+                className={`p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer ${!sjCanScrollLeft ? 'opacity-40' : ''}`}
                 aria-label="Previous Photo"
               >
                 <ChevronLeft size={18} />
               </button>
               <button
                 type="button"
-                onClick={handleNextPhoto}
-                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                onClick={() => scrollSharedJourney('right')}
+                className={`p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer ${!sjCanScrollRight ? 'opacity-40' : ''}`}
                 aria-label="Next Photo"
               >
                 <ChevronRight size={18} />
@@ -987,47 +1215,92 @@ export const StoreCatalog: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {visiblePhotos.map((p) => (
-            <motion.div
-              key={`${p.id}-${sjActiveIndex}`}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.35 }}
-              className="relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm group border border-pink-100"
-            >
-              <img
-                src={p.imageUrl}
-                alt={p.altText}
-                className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                referrerPolicy="no-referrer"
-              />
-              {p.hoverText && (
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 text-white text-[10px] font-extrabold opacity-0 group-hover:opacity-100 transition">
-                  {p.hoverText}
-                </div>
-              )}
-            </motion.div>
-          ))}
-        </div>
+        {/* Carousel Track with Hover Floating Arrows */}
+        <div className="relative group/sjtrack">
+          {/* Floating Left Arrow (Tablet & Desktop) */}
+          <button
+            type="button"
+            onClick={() => scrollSharedJourney('left')}
+            aria-label="Previous photos"
+            className="hidden md:flex absolute -left-4 lg:-left-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 backdrop-blur-md shadow-xl border border-pink-100 items-center justify-center text-slate-700 transition-all duration-200 cursor-pointer opacity-0 group-hover/sjtrack:opacity-100 hover:bg-[#E91E8C] hover:text-white hover:border-[#E91E8C] hover:scale-110 active:scale-95"
+          >
+            <ChevronLeft size={22} />
+          </button>
 
-        {photos.length > 1 && (
-          <div className="flex items-center justify-center gap-2 pt-2">
-            {photos.map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setSjActiveIndex(idx)}
-                className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${
-                  sjActiveIndex === idx
-                    ? 'w-8 bg-[#E91E8C] shadow-xs'
-                    : 'w-2 bg-pink-200 hover:bg-pink-300'
-                }`}
-                aria-label={`Go to photo ${idx + 1}`}
-              />
+          {/* Floating Right Arrow (Tablet & Desktop) */}
+          <button
+            type="button"
+            onClick={() => scrollSharedJourney('right')}
+            aria-label="Next photos"
+            className="hidden md:flex absolute -right-4 lg:-right-5 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-white/95 backdrop-blur-md shadow-xl border border-pink-100 items-center justify-center text-slate-700 transition-all duration-200 cursor-pointer opacity-0 group-hover/sjtrack:opacity-100 hover:bg-[#E91E8C] hover:text-white hover:border-[#E91E8C] hover:scale-110 active:scale-95"
+          >
+            <ChevronRight size={22} />
+          </button>
+
+          {/* Smooth Continuous Scroll Track across all display sizes */}
+          <div
+            ref={sjScrollRef}
+            className="flex items-stretch gap-4 sm:gap-5 overflow-x-auto scrollbar-none snap-x snap-mandatory py-2 scroll-smooth"
+            onMouseEnter={() => setSjIsHovered(true)}
+            onMouseLeave={() => setSjIsHovered(false)}
+            onTouchStart={() => setSjIsHovered(true)}
+            onTouchEnd={() => setSjIsHovered(false)}
+          >
+            {photos.map((p, idx) => (
+              <div
+                key={p.id || idx}
+                onClick={() => setSelectedLightboxPhoto({ photo: p, index: idx })}
+                className="sj-carousel-card shrink-0 w-[74vw] sm:w-[260px] md:w-[280px] lg:w-[310px] snap-start relative aspect-[3/4] rounded-2xl overflow-hidden shadow-sm group border border-pink-100 cursor-pointer bg-slate-900 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 select-none"
+                title="Click to view full image"
+              >
+                <img
+                  src={p.imageUrl}
+                  alt={p.altText || `Community photo ${idx + 1}`}
+                  className="w-full h-full object-cover group-hover:scale-108 transition duration-500"
+                  referrerPolicy="no-referrer"
+                  loading="lazy"
+                />
+
+                {/* Dark Vignette Overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-85 transition-opacity" />
+
+                {/* Click to Zoom Badge overlay */}
+                <div className="absolute top-3 right-3 z-10 px-2.5 py-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white border border-white/20 text-[10px] font-extrabold flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-1 group-hover:translate-y-0">
+                  <Maximize2 size={12} className="text-[#FF62B2]" />
+                  <span>Full View</span>
+                </div>
+
+                {/* Caption / Hover text at bottom */}
+                <div className="absolute inset-x-0 bottom-0 p-4 text-white z-10 flex flex-col justify-end">
+                  {p.hoverText ? (
+                    <span className="text-xs sm:text-sm font-black drop-shadow-md text-pink-100 group-hover:text-white transition line-clamp-2">
+                      {p.hoverText}
+                    </span>
+                  ) : (
+                    <span className="text-xs sm:text-sm font-black drop-shadow-md text-pink-100 group-hover:text-white transition line-clamp-1">
+                      {p.altText || `Community Highlight #${idx + 1}`}
+                    </span>
+                  )}
+                  <span className="text-[10px] font-semibold text-white/75 mt-1 flex items-center gap-1">
+                    <Eye size={11} className="text-[#FF62B2]" />
+                    <span>Click for full screen</span>
+                  </span>
+                </div>
+              </div>
             ))}
           </div>
-        )}
+        </div>
+
+        {/* Gallery Counter & Swipe Hint on Mobile */}
+        <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 pt-1 border-t border-pink-100/60">
+          <span className="flex items-center gap-1.5 text-gray-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#E91E8C]" />
+            <span>{photos.length} Community Highlights</span>
+          </span>
+          <span className="text-[10px] text-gray-400 sm:hidden">
+            👈 Swipe to explore 👉
+          </span>
+        </div>
       </div>
     );
   };
@@ -1558,6 +1831,126 @@ export const StoreCatalog: React.FC = () => {
           setIsCartOpen(true);
         }}
       />
+
+      {/* Full Image View Lightbox Modal for Shared Journey */}
+      <AnimatePresence>
+        {selectedLightboxPhoto && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-between p-3 sm:p-6"
+            onClick={() => setSelectedLightboxPhoto(null)}
+          >
+            {/* Modal Top Bar */}
+            <div 
+              className="w-full max-w-5xl flex items-center justify-between z-10 text-white pb-3 border-b border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-xs font-bold border border-white/20 text-pink-300">
+                  {selectedLightboxPhoto.index + 1} of {theme.sharedJourney?.photos?.length || 0}
+                </span>
+                <span className="text-xs sm:text-sm font-bold text-white/90 truncate max-w-[200px] sm:max-w-md">
+                  {selectedLightboxPhoto.photo.hoverText || selectedLightboxPhoto.photo.altText || 'Community Photo'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline text-[11px] text-white/50 font-medium mr-2">
+                  Use ← / → keys or Esc to close
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLightboxPhoto(null)}
+                  className="w-10 h-10 rounded-full bg-white/10 hover:bg-[#E91E8C] text-white flex items-center justify-center transition cursor-pointer backdrop-blur-md border border-white/20 active:scale-95"
+                  aria-label="Close Full Image View"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Image Viewport with Previous & Next Controls */}
+            <div 
+              className="relative w-full max-w-5xl flex-1 flex items-center justify-center my-3 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Previous Button inside Lightbox */}
+              {(theme.sharedJourney?.photos?.length || 0) > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const photos = theme.sharedJourney?.photos || [];
+                    const prevIdx = (selectedLightboxPhoto.index - 1 + photos.length) % photos.length;
+                    setSelectedLightboxPhoto({ photo: photos[prevIdx], index: prevIdx });
+                  }}
+                  className="absolute left-2 sm:left-4 z-20 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/50 hover:bg-[#E91E8C] text-white flex items-center justify-center transition cursor-pointer backdrop-blur-md border border-white/20 active:scale-90"
+                  aria-label="Previous image"
+                >
+                  <ChevronLeft size={26} />
+                </button>
+              )}
+
+              {/* The Full Image */}
+              <motion.img
+                key={selectedLightboxPhoto.photo.imageUrl}
+                src={selectedLightboxPhoto.photo.imageUrl}
+                alt={selectedLightboxPhoto.photo.altText || 'Full size community photo'}
+                initial={{ opacity: 0, scale: 0.92 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.92 }}
+                transition={{ duration: 0.25 }}
+                className="max-h-[75vh] sm:max-h-[82vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/10 select-none"
+              />
+
+              {/* Next Button inside Lightbox */}
+              {(theme.sharedJourney?.photos?.length || 0) > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const photos = theme.sharedJourney?.photos || [];
+                    const nextIdx = (selectedLightboxPhoto.index + 1) % photos.length;
+                    setSelectedLightboxPhoto({ photo: photos[nextIdx], index: nextIdx });
+                  }}
+                  className="absolute right-2 sm:right-4 z-20 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/50 hover:bg-[#E91E8C] text-white flex items-center justify-center transition cursor-pointer backdrop-blur-md border border-white/20 active:scale-90"
+                  aria-label="Next image"
+                >
+                  <ChevronRight size={26} />
+                </button>
+              )}
+            </div>
+
+            {/* Modal Bottom Caption Bar */}
+            <div 
+              className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-2 z-10 text-white pt-2 border-t border-white/10 text-center sm:text-left"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div>
+                <p className="text-xs sm:text-sm font-semibold text-white/90">
+                  {selectedLightboxPhoto.photo.hoverText || 'Korean Skin Food Authentic Community Highlight'}
+                </p>
+                {selectedLightboxPhoto.photo.altText && (
+                  <p className="text-[11px] text-white/50 mt-0.5">
+                    {selectedLightboxPhoto.photo.altText}
+                  </p>
+                )}
+              </div>
+
+              <a
+                href={selectedLightboxPhoto.photo.imageUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-pink-200 text-xs font-bold transition border border-white/20"
+              >
+                <ExternalLink size={13} />
+                <span>Open Original</span>
+              </a>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

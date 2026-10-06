@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Product } from '../../types';
 import { Search, X, Plus, Package, Check, Sparkles, Filter, ScanLine } from 'lucide-react';
-import { getProductUnitPrice, getRetailPrice } from '../../utils/pricing';
+import { getProductUnitPrice, getRetailPrice, getComboEffectiveStock } from '../../utils/pricing';
 import { PricingMode } from './types';
 
 interface PosProductSearchProps {
@@ -185,8 +185,9 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
           filteredProducts.map((p) => {
             const inCartQty = cartQuantities[p.id] || 0;
             const inStockInQty = stockInQuantities[p.id] || 0;
-            const isOutOfStock = p.stock <= 0;
-            const isMaxCart = mode === 'sale' && inCartQty >= p.stock;
+            const effectiveStock = p.isCombo ? getComboEffectiveStock(p, products) : Number(p.stock ?? 0);
+            const isOutOfStock = effectiveStock <= 0;
+            const isMaxCart = mode === 'sale' && inCartQty >= effectiveStock;
 
             return (
               <div
@@ -215,6 +216,11 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
                     <span className="text-[9px] uppercase font-bold text-pink-600 truncate max-w-[110px]">
                       {p.brand}
                     </span>
+                    {p.isCombo && (
+                      <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200">
+                        {p.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo'}
+                      </span>
+                    )}
                     {p.barcode && (
                       <span className="text-[9px] text-gray-400 font-mono">
                         #{p.barcode}
@@ -234,11 +240,12 @@ export const PosProductSearch: React.FC<PosProductSearchProps> = ({
                     <div className="flex items-center gap-1.5">
                       {isOutOfStock ? (
                         <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-100">
-                          Stock 0
+                          {p.isCombo ? 'Sold Out' : 'Stock 0'}
                         </span>
                       ) : (
                         <span className="text-[10px] text-gray-500">
-                          Stock: <strong className="text-emerald-600">{p.stock}</strong>
+                          {p.isCombo ? 'Bundle: ' : 'Stock: '}
+                          <strong className="text-emerald-600">{effectiveStock}</strong>
                         </span>
                       )}
                     </div>

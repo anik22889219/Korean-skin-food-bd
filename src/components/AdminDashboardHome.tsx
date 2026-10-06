@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store, FileText, Landmark, Receipt, Building2 } from 'lucide-react';
+import { BarChart3, Bot, Boxes, ShoppingBag, Sparkles, MessageCircle, CreditCard, Palette, ShieldCheck, Search, Megaphone, Users, ChevronRight, Store, FileText, Landmark, Receipt, Building2, Percent, Layers } from 'lucide-react';
 
 interface AdminNavCard { title: string; description: string; to: string; icon: React.ElementType; tone: string; iconTone: string; badge?: string; }
 
@@ -14,7 +14,9 @@ const navCards: AdminNavCard[] = [
   { title: 'Creator Hub', description: 'Approve creators, moderate reels, manage points, tiers & leaderboard.', to: '/admin/creators', icon: Sparkles, tone: 'from-pink-50 to-rose-50 border-pink-100', iconTone: 'bg-pink-100 text-pink-600', badge: 'CREATORS' },
   { title: 'User Management', description: 'Super Admin & HR user accounts and access control.', to: '/admin/users', icon: Users, tone: 'from-indigo-50 to-purple-50 border-indigo-100', iconTone: 'bg-indigo-100 text-indigo-600', badge: 'HR' },
   { title: 'AI Agent Manager', description: 'Manage AI agents, permissions, quotas and activity.', to: '/admin/ai-agents', icon: Bot, tone: 'from-purple-50 to-indigo-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'AI' },
+  { title: 'Discounts & Coupons', description: 'Set product discounts, storewide sales & free delivery vouchers.', to: '/admin/discounts', icon: Percent, tone: 'from-pink-50 to-rose-50 border-pink-100', iconTone: 'bg-rose-100 text-rose-600', badge: 'SALE' },
   { title: 'Product List', description: 'Products, stock, barcode tools and product intelligence.', to: '/admin/products', icon: Boxes, tone: 'from-emerald-50 to-teal-50 border-emerald-100', iconTone: 'bg-emerald-100 text-emerald-600', badge: 'STOCK' },
+  { title: 'Combo Packages', description: 'Curated skincare bundles, customizable routine sets & package deals.', to: '/admin/combos', icon: Layers, tone: 'from-purple-50 to-indigo-50 border-purple-100', iconTone: 'bg-purple-100 text-purple-600', badge: 'COMBO' },
   { title: 'Order Fulfillment', description: 'Review orders and manage the fulfillment workflow.', to: '/admin/orders', icon: ShoppingBag, tone: 'from-amber-50 to-yellow-50 border-amber-100', iconTone: 'bg-amber-100 text-amber-600', badge: 'OPS' },
   { title: 'SEO Optimizer', description: 'Generate and refine search-friendly product content.', to: '/admin/seo', icon: Search, tone: 'from-blue-50 to-cyan-50 border-blue-100', iconTone: 'bg-blue-100 text-blue-600', badge: 'AI' },
   { title: 'Social Copy Studio', description: 'Create campaign-ready social media content with AI.', to: '/admin/social', icon: Megaphone, tone: 'from-fuchsia-50 to-pink-50 border-fuchsia-100', iconTone: 'bg-fuchsia-100 text-fuchsia-600', badge: 'AI' },
@@ -31,8 +33,10 @@ export const AdminDashboardHome: React.FC = () => {
   const isInventoryManager = profile?.role === 'inventory_manager';
   const inventoryManagerAllowedPaths = [
     '/admin/products',
+    '/admin/combos',
     '/admin/reports',
     '/admin/orders',
+    '/admin/discounts',
     '/admin/chat-leads',
     '/admin/pos',
   ];

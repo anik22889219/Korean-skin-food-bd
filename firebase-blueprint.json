@@ -577,6 +577,29 @@
         "enabled": { "type": "boolean" }
       },
       "required": ["token", "vapidKey", "createdAt", "enabled"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Promotional discount vouchers and free delivery coupons",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "description": { "type": "string" },
+        "discountType": { "type": "string", "enum": ["percentage", "fixed_amount", "free_delivery"] },
+        "discountValue": { "type": "number" },
+        "minOrderAmount": { "type": "number" },
+        "maxDiscountCap": { "type": "number" },
+        "appliesTo": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "usageLimit": { "type": "number" },
+        "usageCount": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "code", "discountType", "discountValue", "isActive", "createdAt"]
     }
   },
   "firestore": {
@@ -687,6 +710,10 @@
     "/fcm_tokens/{tokenId}": {
       "schema": "FcmToken",
       "description": "Firebase Cloud Messaging Web Push device tokens and subscriptions"
+    },
+    "/coupons/{couponId}": {
+      "schema": "Coupon",
+      "description": "Store discount and free delivery coupon vouchers"
     }
   }
 }

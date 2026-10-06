@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME } from '../services/themeService';
-import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, SectionKey, ReelItem } from '../types/theme';
+import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, SectionKey, ReelItem, CommunityPhotoItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
@@ -9,7 +9,7 @@ import {
   RotateCcw, Eye, ArrowUp, ArrowDown, EyeOff, Check, Image as ImageIcon,
   Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
   Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
-  Upload, RefreshCw, Star
+  Upload, RefreshCw, Star, Package, Search, CheckCircle, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
@@ -38,6 +38,7 @@ const COLOR_PRESETS = [
 ];
 
 const HEADING_FONT_OPTIONS = [
+  'Hind Siliguri',
   'Playfair Display',
   'Plus Jakarta Sans',
   'Inter',
@@ -51,11 +52,12 @@ const HEADING_FONT_OPTIONS = [
 ];
 
 const BODY_FONT_OPTIONS = [
+  'Open Sans',
+  'Hind Siliguri',
   'Plus Jakarta Sans',
   'Inter',
   'Roboto',
   'Poppins',
-  'Open Sans',
   'Nunito',
   'Lato',
   'Work Sans'
@@ -86,8 +88,15 @@ export const AdminThemeEditor: React.FC = () => {
   const faviconInputRef = React.useRef<HTMLInputElement>(null);
   const logoInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Shared Journey (Community Photos) Upload & Manage state
+  const [uploadingSjPhotoIdx, setUploadingSjPhotoIdx] = useState<number | null>(null);
+  const [isAddingSjPhoto, setIsAddingSjPhoto] = useState(false);
+  const newSjPhotoInputRef = React.useRef<HTMLInputElement>(null);
+
   // Products list for selection
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [beProductSearch, setBeProductSearch] = useState('');
+  const [beCategoryFilter, setBeCategoryFilter] = useState('All');
 
   useEffect(() => {
     // Subscribe to theme service
@@ -100,11 +109,15 @@ export const AdminThemeEditor: React.FC = () => {
     const unsubscribeShop = themeService.subscribeShop((data) => {
       setShopTheme(data);
     });
+    const unsubscribeProducts = productService.subscribe((prods) => {
+      setAllProducts(prods);
+    });
     setAllProducts(productService.getProducts());
     return () => {
       unsubscribeHome();
       unsubscribeGlobal();
       unsubscribeShop();
+      unsubscribeProducts();
     };
   }, []);
 
@@ -194,6 +207,122 @@ export const AdminThemeEditor: React.FC = () => {
       setIsUploadingLogo(false);
       if (e.target) e.target.value = '';
     }
+  };
+
+  // Shared Journey (Community Photos) Handlers
+  const handleSjPhotoDeviceUpload = async (file: File, index: number) => {
+    setUploadingSjPhotoIdx(index);
+    try {
+      const res = await uploadFileToCloudinary(file, {
+        folder: 'theme_community',
+        resourceType: 'image'
+      });
+      if (res?.secureUrl) {
+        const newPhotos = [...(theme.sharedJourney?.photos || [])];
+        newPhotos[index].imageUrl = res.secureUrl;
+        setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
+      }
+    } catch (err) {
+      console.warn('Direct upload fallback to FileReader:', err);
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        if (ev.target?.result) {
+          const newPhotos = [...(theme.sharedJourney?.photos || [])];
+          newPhotos[index].imageUrl = ev.target.result as string;
+          setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
+        }
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setUploadingSjPhotoIdx(null);
+    }
+  };
+
+  const handleAddNewSjPhoto = async (file?: File) => {
+    const newId = `photo-${Date.now()}`;
+    let imageUrl = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=800&auto=format&fit=crop';
+
+    if (file) {
+      setIsAddingSjPhoto(true);
+      try {
+        const res = await uploadFileToCloudinary(file, {
+          folder: 'theme_community',
+          resourceType: 'image'
+        });
+        if (res?.secureUrl) {
+          imageUrl = res.secureUrl;
+        }
+      } catch {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (ev.target?.result) {
+            const newPhoto: CommunityPhotoItem = {
+              id: newId,
+              imageUrl: ev.target.result as string,
+              altText: `Community Photo ${(theme.sharedJourney?.photos?.length || 0) + 1}`,
+              hoverText: 'Authentic Customer Love'
+            };
+            setTheme((prev) => ({
+              ...prev,
+              sharedJourney: {
+                ...prev.sharedJourney,
+                photos: [...(prev.sharedJourney?.photos || []), newPhoto]
+              }
+            }));
+          }
+        };
+        reader.readAsDataURL(file);
+        setIsAddingSjPhoto(false);
+        return;
+      }
+      setIsAddingSjPhoto(false);
+    }
+
+    const newPhoto: CommunityPhotoItem = {
+      id: newId,
+      imageUrl,
+      altText: `Community Photo ${(theme.sharedJourney?.photos?.length || 0) + 1}`,
+      hoverText: 'Authentic Customer Love'
+    };
+
+    setTheme((prev) => ({
+      ...prev,
+      sharedJourney: {
+        ...prev.sharedJourney,
+        photos: [...(prev.sharedJourney?.photos || []), newPhoto]
+      }
+    }));
+  };
+
+  const handleRemoveSjPhoto = (index: number) => {
+    const current = theme.sharedJourney?.photos || [];
+    if (current.length <= 1) {
+      if (!confirm('Are you sure you want to remove this photo? At least 1 photo is recommended for the community section.')) return;
+    }
+    const updated = current.filter((_, i) => i !== index);
+    setTheme({
+      ...theme,
+      sharedJourney: {
+        ...theme.sharedJourney,
+        photos: updated
+      }
+    });
+  };
+
+  const handleMoveSjPhoto = (index: number, direction: 'up' | 'down') => {
+    const photos = [...(theme.sharedJourney?.photos || [])];
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= photos.length) return;
+    const temp = photos[index];
+    photos[index] = photos[targetIdx];
+    photos[targetIdx] = temp;
+    setTheme({
+      ...theme,
+      sharedJourney: {
+        ...theme.sharedJourney,
+        photos
+      }
+    });
   };
 
   // Shop Save handler
@@ -809,11 +938,11 @@ export const AdminThemeEditor: React.FC = () => {
               {/* Live Font Specimen Card */}
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Live Font Specimen Preview:</span>
-                <h3 className="text-lg font-bold text-slate-900" style={{ fontFamily: `'${globalTheme.headingFont || 'Playfair Display'}', serif` }}>
-                  {globalTheme.siteTitle || 'Korean Skin Food BD'} — Radiance & Heritage
+                <h3 className="text-lg font-bold text-slate-900" style={{ fontFamily: `'${globalTheme.headingFont || 'Hind Siliguri'}', 'Hind Siliguri', serif` }}>
+                  {globalTheme.siteTitle || 'Korean Skin Food BD'} — প্রিমিয়াম কোরিয়ান স্কিন কেয়ার
                 </h3>
-                <p className="text-xs text-slate-600 leading-relaxed" style={{ fontFamily: `'${globalTheme.bodyFont || 'Plus Jakarta Sans'}', sans-serif` }}>
-                  100% Authentic Korean Cosmeceuticals directly imported from Seoul, South Korea. Pure botanical formulations verified for Bengali skin tones.
+                <p className="text-xs text-slate-600 leading-relaxed" style={{ fontFamily: `'${globalTheme.bodyFont || 'Open Sans'}', 'Hind Siliguri', sans-serif` }}>
+                  100% Authentic Korean Cosmeceuticals directly imported from Seoul, South Korea. Pure botanical formulations verified for Bengali skin tones. ঢাকাসহ সারাদেশে দ্রুততম ক্যাশ অন ডেলিভারি।
                 </p>
               </div>
             </div>
@@ -1527,6 +1656,239 @@ export const AdminThemeEditor: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/* Product Showcase Configuration */}
+                  <div className="pt-4 border-t border-pink-100/80 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                          <Package size={16} className="text-[#E91E8C]" />
+                          ক্যারোসেল পণ্য নির্বাচন (Carousel Products Setup)
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          {(theme.botanicalEssentials.selectedProductIds?.length || 0) > 0 
+                            ? `ম্যানুয়াল মোড: ${theme.botanicalEssentials.selectedProductIds.length}টি নির্দিষ্ট পণ্য ক্যারোসেলে প্রদর্শিত হচ্ছে` 
+                            : 'স্বয়ংক্রিয় মোড: ক্যাটালগের প্রথম ১২টি পণ্য স্বয়ংক্রিয়ভাবে ক্যারোসেলে স্লাইড হবে'}
+                        </p>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2">
+                        {(theme.botanicalEssentials.selectedProductIds?.length || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setTheme({
+                              ...theme,
+                              botanicalEssentials: {
+                                ...theme.botanicalEssentials,
+                                selectedProductIds: []
+                              }
+                            })}
+                            className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw size={12} />
+                            <span>রিসেট / অটো মোড</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Selected Products List (Reorderable) */}
+                    {(theme.botanicalEssentials.selectedProductIds?.length || 0) > 0 ? (
+                      <div className="bg-pink-50/40 p-4 rounded-2xl border border-pink-100/80 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                            <CheckCircle size={14} className="text-emerald-500" />
+                            বর্তমানে নির্বাচিত পণ্য ({theme.botanicalEssentials.selectedProductIds.length})
+                          </span>
+                          <span className="text-[10px] text-slate-500">তীর চিহ্ন দিয়ে ক্যারোসেলের ক্রম সাজান</span>
+                        </div>
+
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                          {theme.botanicalEssentials.selectedProductIds.map((prodId, idx) => {
+                            const prod = allProducts.find(p => p.id === prodId);
+                            if (!prod) return null;
+                            return (
+                              <div
+                                key={prodId}
+                                className="flex items-center justify-between gap-3 p-2.5 bg-white rounded-xl border border-pink-100 shadow-2xs text-xs"
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <span className="w-5 h-5 rounded-full bg-pink-100 text-[#E91E8C] font-mono font-black text-[10px] flex items-center justify-center shrink-0">
+                                    {idx + 1}
+                                  </span>
+                                  {prod.image && (
+                                    <img
+                                      src={prod.image}
+                                      alt={prod.name}
+                                      className="w-9 h-9 rounded-lg object-cover border border-slate-100 shrink-0"
+                                    />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-slate-900 truncate">{prod.name}</div>
+                                    <div className="text-[10px] text-slate-500">{prod.brand} • ৳{prod.price?.toLocaleString()}</div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {/* Move Up */}
+                                  <button
+                                    type="button"
+                                    disabled={idx === 0}
+                                    onClick={() => {
+                                      const ids = [...(theme.botanicalEssentials.selectedProductIds || [])];
+                                      [ids[idx - 1], ids[idx]] = [ids[idx], ids[idx - 1]];
+                                      setTheme({
+                                        ...theme,
+                                        botanicalEssentials: {
+                                          ...theme.botanicalEssentials,
+                                          selectedProductIds: ids
+                                        }
+                                      });
+                                    }}
+                                    className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 disabled:opacity-30 cursor-pointer"
+                                    title="Move earlier in carousel"
+                                  >
+                                    <ArrowUp size={14} />
+                                  </button>
+
+                                  {/* Move Down */}
+                                  <button
+                                    type="button"
+                                    disabled={idx === theme.botanicalEssentials.selectedProductIds.length - 1}
+                                    onClick={() => {
+                                      const ids = [...(theme.botanicalEssentials.selectedProductIds || [])];
+                                      [ids[idx + 1], ids[idx]] = [ids[idx], ids[idx + 1]];
+                                      setTheme({
+                                        ...theme,
+                                        botanicalEssentials: {
+                                          ...theme.botanicalEssentials,
+                                          selectedProductIds: ids
+                                        }
+                                      });
+                                    }}
+                                    className="p-1 rounded-lg hover:bg-slate-100 text-slate-600 disabled:opacity-30 cursor-pointer"
+                                    title="Move later in carousel"
+                                  >
+                                    <ArrowDown size={14} />
+                                  </button>
+
+                                  {/* Remove */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const ids = (theme.botanicalEssentials.selectedProductIds || []).filter(id => id !== prodId);
+                                      setTheme({
+                                        ...theme,
+                                        botanicalEssentials: {
+                                          ...theme.botanicalEssentials,
+                                          selectedProductIds: ids
+                                        }
+                                      });
+                                    }}
+                                    className="p-1 rounded-lg hover:bg-rose-50 text-rose-500 cursor-pointer ml-1"
+                                    title="Remove from carousel"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/80 text-amber-800 text-xs flex items-center gap-2">
+                        <Sparkles size={16} className="text-amber-600 shrink-0" />
+                        <span>বর্তমানে কোনো নির্দিষ্ট পণ্য সিলেক্ট করা নেই। স্বয়ংক্রিয়ভাবে শীর্ষ পণ্যগুলো ক্যারোসেলে প্রদর্শিত হচ্ছে। নির্দিষ্ট পণ্য যোগ করতে নিচে থেকে ক্লিক করুন:</span>
+                      </div>
+                    )}
+
+                    {/* Product Search & Catalog for adding */}
+                    <div className="space-y-3 pt-2">
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="relative flex-1">
+                          <Search size={14} className="absolute left-3 top-2.5 text-gray-400" />
+                          <input
+                            type="text"
+                            value={beProductSearch}
+                            onChange={(e) => setBeProductSearch(e.target.value)}
+                            placeholder="পণ্য বা ব্র্যান্ড দিয়ে সার্চ করুন..."
+                            className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-[#E91E8C]"
+                          />
+                        </div>
+                        <select
+                          value={beCategoryFilter}
+                          onChange={(e) => setBeCategoryFilter(e.target.value)}
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-[#E91E8C]"
+                        >
+                          <option value="All">All Categories</option>
+                          {Array.from(new Set(allProducts.map(p => p.category).filter(Boolean))).map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Filtered Product Selection Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-80 overflow-y-auto pr-1">
+                        {allProducts
+                          .filter(p => {
+                            const q = beProductSearch.trim().toLowerCase();
+                            const matchesQ = !q || p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q));
+                            const matchesCat = beCategoryFilter === 'All' || (p.category && p.category.toLowerCase() === beCategoryFilter.toLowerCase());
+                            return matchesQ && matchesCat;
+                          })
+                          .slice(0, 30)
+                          .map((prod) => {
+                            const isSelected = (theme.botanicalEssentials.selectedProductIds || []).includes(prod.id);
+                            return (
+                              <div
+                                key={prod.id}
+                                onClick={() => {
+                                  const currentIds = theme.botanicalEssentials.selectedProductIds || [];
+                                  const newIds = isSelected 
+                                    ? currentIds.filter(id => id !== prod.id)
+                                    : [...currentIds, prod.id];
+                                  setTheme({
+                                    ...theme,
+                                    botanicalEssentials: {
+                                      ...theme.botanicalEssentials,
+                                      selectedProductIds: newIds
+                                    }
+                                  });
+                                }}
+                                className={`p-2.5 rounded-xl border flex items-center gap-2.5 transition cursor-pointer ${
+                                  isSelected 
+                                    ? 'bg-pink-50 border-[#E91E8C] shadow-2xs' 
+                                    : 'bg-white border-slate-200 hover:border-pink-200 hover:bg-pink-50/20'
+                                }`}
+                              >
+                                {prod.image ? (
+                                  <img
+                                    src={prod.image}
+                                    alt={prod.name}
+                                    className="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-pink-100 text-[#E91E8C] flex items-center justify-center shrink-0 font-bold">
+                                    <Package size={16} />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-slate-800 text-[11px] truncate leading-tight">{prod.name}</div>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">{prod.brand} • ৳{prod.price?.toLocaleString()}</div>
+                                </div>
+                                <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${
+                                  isSelected ? 'bg-[#E91E8C] text-white' : 'border border-slate-200 text-slate-400'
+                                }`}>
+                                  {isSelected ? <Check size={14} /> : <Plus size={14} />}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -2077,7 +2439,9 @@ export const AdminThemeEditor: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-sm font-black text-gray-900">Shared Journey of Radiance (Community Gallery)</h3>
-                    <p className="text-[10px] text-gray-500 font-semibold">4 community photos with optional hover callout</p>
+                    <p className="text-[10px] text-gray-500 font-semibold">
+                      {theme.sharedJourney?.photos?.length || 0} community photos with auto-slide carousel & full-view popup
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -2089,18 +2453,24 @@ export const AdminThemeEditor: React.FC = () => {
               </div>
 
               {expandedSection === 'sharedJourney' && (
-                <div className="p-6 space-y-4 bg-white text-xs">
-                  <div className="flex items-center gap-2 pb-3 border-b border-pink-50">
-                    <input
-                      type="checkbox"
-                      id="sj-enabled"
-                      checked={theme.sharedJourney.enabled}
-                      onChange={(e) => setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, enabled: e.target.checked } })}
-                      className="w-4 h-4 text-[#E91E8C] rounded border-gray-300 focus:ring-[#E91E8C]"
-                    />
-                    <label htmlFor="sj-enabled" className="font-extrabold text-gray-800 cursor-pointer">
-                      Enable Community Gallery
-                    </label>
+                <div className="p-6 space-y-5 bg-white text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-pink-50">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="sj-enabled"
+                        checked={theme.sharedJourney.enabled}
+                        onChange={(e) => setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, enabled: e.target.checked } })}
+                        className="w-4 h-4 text-[#E91E8C] rounded border-gray-300 focus:ring-[#E91E8C]"
+                      />
+                      <label htmlFor="sj-enabled" className="font-extrabold text-gray-800 cursor-pointer">
+                        Enable Community Gallery Carousel
+                      </label>
+                    </div>
+
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-pink-50 text-[#E91E8C] border border-pink-100">
+                      Total Photos: {theme.sharedJourney?.photos?.length || 0}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2125,49 +2495,214 @@ export const AdminThemeEditor: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 4 Community Photos */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                    {theme.sharedJourney.photos.map((photo, idx) => (
-                      <div key={photo.id} className="p-3 bg-pink-50/15 rounded-2xl border border-pink-100 space-y-2">
-                        <span className="font-extrabold text-gray-800">Photo #{idx + 1}</span>
-                        <div>
-                          <label className="block text-[10px] text-gray-500 font-semibold">Image URL</label>
-                          <div className="flex gap-1.5">
-                            <input
-                              type="text"
-                              value={photo.imageUrl}
-                              onChange={(e) => {
-                                const newPhotos = [...theme.sharedJourney.photos];
-                                newPhotos[idx].imageUrl = e.target.value;
-                                setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
-                              }}
-                              className="flex-1 bg-white border border-pink-100 rounded-lg p-1.5 outline-none"
-                            />
+                  {/* Add New Image Action Toolbar */}
+                  <div className="p-3.5 bg-gradient-to-r from-pink-50/80 to-purple-50/50 rounded-2xl border border-pink-100 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                        <ImageIcon size={14} className="text-[#E91E8C]" />
+                        <span>কমিউনিটি ছবি ম্যানেজমেন্ট (Gallery Photos)</span>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        নতুন ছবি যোগ করুন, ফাইল আপলোড করুন, অথবা ছবি ডিলিট/সাজান।
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Hidden File Input for Device Upload */}
+                      <input
+                        ref={newSjPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleAddNewSjPhoto(file);
+                          if (e.target) e.target.value = '';
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => newSjPhotoInputRef.current?.click()}
+                        disabled={isAddingSjPhoto}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#E91E8C] hover:bg-[#d0177c] text-white text-xs font-bold transition shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                      >
+                        <Upload size={13} />
+                        <span>{isAddingSjPhoto ? 'আপলোড হচ্ছে...' : '+ ডিভাইস থেকে আপলোড (+ Upload)'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAddNewSjPhoto()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-pink-50 text-slate-800 border border-pink-200 text-xs font-bold transition shadow-2xs cursor-pointer active:scale-95"
+                      >
+                        <Plus size={13} className="text-[#E91E8C]" />
+                        <span>+ নতুন ছবি লিংক (+ Add URL)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Community Photos List with Preview, Upload, Reorder & Delete */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+                    {(theme.sharedJourney?.photos || []).map((photo, idx) => (
+                      <div key={photo.id || idx} className="p-3.5 bg-pink-50/15 rounded-2xl border border-pink-100 space-y-3 relative group">
+                        {/* Header of Item with Move & Delete Controls */}
+                        <div className="flex items-center justify-between border-b border-pink-100/70 pb-2">
+                          <span className="font-extrabold text-gray-800 flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-md bg-[#E91E8C] text-white flex items-center justify-center text-[10px]">
+                              {idx + 1}
+                            </span>
+                            <span>Photo #{idx + 1}</span>
+                          </span>
+
+                          <div className="flex items-center gap-1">
+                            {/* Move Up */}
                             <button
                               type="button"
-                              onClick={() => openMediaPicker(`sharedJourney.photos.${idx}.imageUrl`)}
-                              className="px-2.5 py-1.5 bg-[#E91E8C] text-white rounded-lg text-[10px] font-bold"
+                              onClick={() => handleMoveSjPhoto(idx, 'up')}
+                              disabled={idx === 0}
+                              className={`p-1 rounded-lg border border-pink-100 text-slate-600 hover:bg-white hover:text-[#E91E8C] transition ${
+                                idx === 0 ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                              title="Move Up"
                             >
-                              Media
+                              <ArrowUp size={12} />
+                            </button>
+
+                            {/* Move Down */}
+                            <button
+                              type="button"
+                              onClick={() => handleMoveSjPhoto(idx, 'down')}
+                              disabled={idx === (theme.sharedJourney?.photos?.length || 0) - 1}
+                              className={`p-1 rounded-lg border border-pink-100 text-slate-600 hover:bg-white hover:text-[#E91E8C] transition ${
+                                idx === (theme.sharedJourney?.photos?.length || 0) - 1 ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                              title="Move Down"
+                            >
+                              <ArrowDown size={12} />
+                            </button>
+
+                            {/* Delete */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSjPhoto(idx)}
+                              className="p-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 hover:bg-rose-600 hover:text-white transition cursor-pointer ml-1"
+                              title="Delete Photo"
+                            >
+                              <Trash2 size={12} />
                             </button>
                           </div>
                         </div>
-                        <div>
-                          <label className="block text-[10px] text-gray-500 font-semibold">Hover Text Overlay (Optional)</label>
-                          <input
-                            type="text"
-                            value={photo.hoverText || ''}
-                            onChange={(e) => {
-                              const newPhotos = [...theme.sharedJourney.photos];
-                              newPhotos[idx].hoverText = e.target.value;
-                              setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
-                            }}
-                            placeholder="e.g. Our Core Team"
-                            className="w-full bg-white border border-pink-100 rounded-lg p-1.5 outline-none"
-                          />
+
+                        {/* Thumbnail & URL Controls */}
+                        <div className="flex items-start gap-3">
+                          <div className="relative w-16 h-20 sm:w-20 sm:h-24 rounded-xl overflow-hidden bg-slate-900 border border-pink-200 shrink-0 shadow-2xs">
+                            <img
+                              src={photo.imageUrl || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=800&auto=format&fit=crop'}
+                              alt={photo.altText || `Photo ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=800&auto=format&fit=crop';
+                              }}
+                            />
+                            {uploadingSjPhotoIdx === idx && (
+                              <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-white text-[9px] font-bold">
+                                Uploading...
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex-1 space-y-2 min-w-0">
+                            <div>
+                              <label className="block text-[10px] text-gray-500 font-semibold mb-1">Image URL</label>
+                              <div className="flex gap-1.5">
+                                <input
+                                  type="text"
+                                  value={photo.imageUrl}
+                                  onChange={(e) => {
+                                    const newPhotos = [...(theme.sharedJourney?.photos || [])];
+                                    newPhotos[idx].imageUrl = e.target.value;
+                                    setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
+                                  }}
+                                  placeholder="https://..."
+                                  className="flex-1 bg-white border border-pink-100 rounded-lg p-1.5 text-[11px] outline-none focus:border-[#E91E8C]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => openMediaPicker(`sharedJourney.photos.${idx}.imageUrl`)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-black text-white rounded-lg text-[10px] font-bold cursor-pointer shrink-0"
+                                >
+                                  Media
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Direct Device File Upload for this photo */}
+                            <div>
+                              <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 text-[10px] font-bold cursor-pointer transition">
+                                <Upload size={11} />
+                                <span>{uploadingSjPhotoIdx === idx ? 'আপলোড হচ্ছে...' : 'ছবি পরিবর্তন করুন (Replace)'}</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleSjPhotoDeviceUpload(file, idx);
+                                    if (e.target) e.target.value = '';
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Alt & Caption */}
+                        <div className="space-y-1.5 pt-1 border-t border-pink-50">
+                          <div>
+                            <label className="block text-[10px] text-gray-500 font-semibold">Hover Caption / বিবরণ</label>
+                            <input
+                              type="text"
+                              value={photo.hoverText || ''}
+                              onChange={(e) => {
+                                const newPhotos = [...(theme.sharedJourney?.photos || [])];
+                                newPhotos[idx].hoverText = e.target.value;
+                                setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
+                              }}
+                              placeholder="e.g. 100% Genuine Care & Packaging"
+                              className="w-full bg-white border border-pink-100 rounded-lg p-1.5 text-[11px] outline-none focus:border-[#E91E8C]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] text-gray-500 font-semibold">Alt Description (SEO)</label>
+                            <input
+                              type="text"
+                              value={photo.altText || ''}
+                              onChange={(e) => {
+                                const newPhotos = [...(theme.sharedJourney?.photos || [])];
+                                newPhotos[idx].altText = e.target.value;
+                                setTheme({ ...theme, sharedJourney: { ...theme.sharedJourney, photos: newPhotos } });
+                              }}
+                              placeholder="e.g. Korean Skin Food Community Customer"
+                              className="w-full bg-white border border-pink-100 rounded-lg p-1.5 text-[11px] outline-none focus:border-[#E91E8C]"
+                            />
+                          </div>
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  {/* Bottom Add Photo Button */}
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleAddNewSjPhoto()}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 text-xs font-black transition cursor-pointer active:scale-95"
+                    >
+                      <Plus size={14} />
+                      <span>+ আরও একটি ছবি যুক্ত করুন (+ Add Another Photo)</span>
+                    </button>
                   </div>
                 </div>
               )}

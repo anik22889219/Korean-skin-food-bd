@@ -18,12 +18,21 @@ import {
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
   Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle,
-  Share2, Copy, Sparkles, Send, ExternalLink, Plus, Minus, Building2
+  Share2, Copy, Sparkles, Send, ExternalLink, Plus, Minus, Building2, Layers, Box
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductDetailSkeleton } from './Skeletons';
 import { ProductCard } from './ProductCard';
-import { getRetailPrice, getRetailOriginalPrice, hasRetailDiscount, getWholesalePrice } from '../utils/pricing';
+import { 
+  getRetailPrice, 
+  getRetailOriginalPrice, 
+  hasRetailDiscount, 
+  getWholesalePrice,
+  getComboEffectiveStock,
+  getComboSavings,
+  getComboEffectivePrice
+} from '../utils/pricing';
+import { ComboComponentDetail } from '../types';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -111,13 +120,40 @@ export const ProductDetail: React.FC = () => {
     }
   };
 
+  // Combo Package States & Calculation
+  const [selectedCustomSteps, setSelectedCustomSteps] = useState<Record<string, string>>({});
+  const [comboCustomError, setComboCustomError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (product?.isCombo && product.comboConfig?.type === 'customizable' && product.comboConfig.steps) {
+      const defaults: Record<string, string> = {};
+      product.comboConfig.steps.forEach(step => {
+        const inStockOption = step.allowedProductIds.find(pid => {
+          const p = allProducts.find(x => x.id === pid);
+          return p && (p.stock || 0) > 0;
+        });
+        defaults[step.id] = inStockOption || step.allowedProductIds[0] || '';
+      });
+      setSelectedCustomSteps(defaults);
+    }
+  }, [product?.id, product?.comboConfig, allProducts]);
+
+  const effectiveStock = useMemo(() => {
+    return product ? getComboEffectiveStock(product, allProducts) : 0;
+  }, [product, allProducts]);
+
+  const comboSavingsData = useMemo(() => {
+    if (!product?.isCombo) return null;
+    return getComboSavings(product, allProducts, selectedCustomSteps);
+  }, [product, allProducts, selectedCustomSteps]);
+
   const isWholesaleUser = profile?.wholesaleAccess === true;
   const currentWholesalePrice = selectedWholesaleTier === '50+' || quantity >= 50 
     ? wholesalePrice50Plus 
     : wholesalePrice1_49;
-  const activeUnitPrice = isWholesaleUser 
-    ? currentWholesalePrice 
-    : getRetailPrice(product);
+  const activeUnitPrice = product?.isCombo
+    ? (comboSavingsData ? comboSavingsData.finalPrice : getRetailPrice(product))
+    : (isWholesaleUser ? currentWholesalePrice : getRetailPrice(product));
 
   // Subscribe to Global Theme for store logo and branding
   useEffect(() => {
@@ -776,9 +812,17 @@ export const ProductDetail: React.FC = () => {
         {/* Right Column: Skincare Specs and Add to Cart */}
         <div className="space-y-6">
           <div className="space-y-3">
-            <span className="text-xs uppercase font-extrabold text-[#E91E8C] bg-pink-50/70 border border-pink-100 px-3 py-1 rounded-full tracking-wider">
-              {product.brand}
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs uppercase font-extrabold text-[#E91E8C] bg-pink-50/70 border border-pink-100 px-3 py-1 rounded-full tracking-wider">
+                {product.brand}
+              </span>
+              {product.isCombo && (
+                <span className="text-xs uppercase font-extrabold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1 rounded-full tracking-wider flex items-center gap-1.5 shadow-2xs">
+                  <Layers size={13} />
+                  {product.comboConfig?.type === 'customizable' ? 'Customizable Routine Set' : 'Curated Combo Package'}
+                </span>
+              )}
+            </div>
             <h2 className="text-2xl font-black text-gray-950 tracking-tight leading-tight">
               {language === 'en' ? product.name : product.nameBN}
             </h2>
@@ -798,7 +842,41 @@ export const ProductDetail: React.FC = () => {
           </div>
 
           {/* Pricing Box */}
-          {profile?.wholesaleAccess ? (
+          {product.isCombo ? (
+            <div className="p-4 sm:p-5 bg-gradient-to-br from-purple-50/80 via-white to-pink-50/40 rounded-2xl sm:rounded-3xl border-2 border-purple-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-purple-900 flex items-center gap-1.5">
+                  <Box size={14} className="text-purple-600" />
+                  <span>{product.comboConfig?.type === 'customizable' ? 'Complete Set Price' : 'Special Bundle Price'}</span>
+                </span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                  effectiveStock > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}>
+                  {effectiveStock > 0 ? `In Stock (${effectiveStock} sets available)` : 'Sold Out'}
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between flex-wrap gap-2">
+                <div className="flex items-baseline gap-2.5 font-mono">
+                  <span className="text-2xl sm:text-3xl font-black text-slate-900">
+                    ৳{activeUnitPrice.toLocaleString()}
+                  </span>
+                  {comboSavingsData && comboSavingsData.originalSum > activeUnitPrice && (
+                    <span className="text-sm sm:text-base text-gray-400 line-through">
+                      ৳{comboSavingsData.originalSum.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+
+                {comboSavingsData && comboSavingsData.savings > 0 && (
+                  <div className="px-3 py-1 bg-emerald-100/80 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-emerald-600" />
+                    <span>You Save ৳{comboSavingsData.savings.toLocaleString()} ({comboSavingsData.percentage}% OFF)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : profile?.wholesaleAccess ? (
             <div id="product-wholesale-pricing-box" className="p-4 sm:p-5 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/50 rounded-2xl sm:rounded-3xl border-2 border-amber-300 shadow-sm space-y-3.5">
               {/* Top Header Badge & Stock */}
               <div className="flex items-center justify-between gap-2">
@@ -930,12 +1008,163 @@ export const ProductDetail: React.FC = () => {
               <div className="text-right">
                 <span className="text-[10px] text-gray-400 font-bold block uppercase tracking-wider">Availability</span>
                 <span className={`inline-block mt-0.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                  product.stock > 0 
+                  effectiveStock > 0 
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
                     : 'bg-red-50 text-red-700 border-red-100'
                 }`}>
-                  {product.stock > 0 ? `In Stock (${product.stock} left)` : 'Out of Stock'}
+                  {effectiveStock > 0 ? `In Stock (${effectiveStock} left)` : 'Out of Stock'}
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* ===================== COMBO BUNDLE COMPONENT BREAKDOWN ===================== */}
+          {product.isCombo && product.comboConfig?.type === 'fixed' && product.comboConfig.items && (
+            <div className="space-y-3 p-4 bg-stone-50/70 rounded-2xl border border-stone-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+                  <Layers size={13} className="text-purple-600" />
+                  <span>Items Included in this Combo ({product.comboConfig.items.length})</span>
+                </h3>
+                <span className="text-[11px] text-stone-500 font-medium">All full-size authentic products</span>
+              </div>
+
+              <div className="space-y-2">
+                {product.comboConfig.items.map((it, idx) => {
+                  const childProd = allProducts.find(p => p.id === it.productId);
+                  if (!childProd) return null;
+                  return (
+                    <div key={it.productId} className="flex items-center justify-between gap-3 p-2.5 bg-white rounded-xl border border-stone-100 shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-xs font-bold text-stone-400 w-4">{idx + 1}.</span>
+                        <img
+                          src={childProd.image || 'https://placehold.co/40x40?text=K'}
+                          alt={childProd.name}
+                          className="w-10 h-10 rounded-lg object-cover border border-stone-200 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-stone-900 truncate">{childProd.name}</div>
+                          <div className="text-[11px] text-stone-500">
+                            {childProd.brand} {childProd.ml ? `· ${childProd.ml}` : ''}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md">
+                          Qty: {it.quantity}
+                        </span>
+                        <div className="text-[10px] text-stone-400 line-through mt-0.5 font-mono">
+                          ৳{(getRetailPrice(childProd) * it.quantity).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ===================== CUSTOMIZABLE ROUTINE BUILDER ===================== */}
+          {product.isCombo && product.comboConfig?.type === 'customizable' && product.comboConfig.steps && (
+            <div className="space-y-4 p-4 sm:p-5 bg-gradient-to-b from-purple-50/40 to-white rounded-2xl border-2 border-purple-200/80 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+                    <Sparkles size={16} className="text-purple-600" />
+                    <span>Build Your Routine Box</span>
+                  </h3>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Select 1 item for each step below to assemble your custom kit
+                  </p>
+                </div>
+                <div className="text-xs font-bold text-purple-700 bg-purple-100/70 px-2.5 py-1 rounded-xl">
+                  {Object.keys(selectedCustomSteps).filter(k => !!selectedCustomSteps[k]).length} of {product.comboConfig.steps.length} Chosen
+                </div>
+              </div>
+
+              {comboCustomError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2 font-medium">
+                  <AlertCircle size={15} />
+                  <span>{comboCustomError}</span>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {product.comboConfig.steps.map((step, sIdx) => {
+                  const selectedId = selectedCustomSteps[step.id];
+                  return (
+                    <div key={step.id} className="p-3.5 bg-white rounded-xl border border-stone-200 space-y-2.5 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[11px] font-bold flex items-center justify-center">
+                            {sIdx + 1}
+                          </span>
+                          <span className="text-xs font-bold text-stone-900">{step.title}</span>
+                        </div>
+                        {selectedId && (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1 border border-emerald-100">
+                            <Check size={11} /> Selected
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {step.allowedProductIds.map(pid => {
+                          const childProd = allProducts.find(p => p.id === pid);
+                          if (!childProd) return null;
+                          const isSelected = selectedId === pid;
+                          const isOutOfStock = (childProd.stock || 0) <= 0;
+
+                          return (
+                            <button
+                              key={pid}
+                              type="button"
+                              disabled={isOutOfStock}
+                              onClick={() => {
+                                setSelectedCustomSteps(prev => ({ ...prev, [step.id]: pid }));
+                                setComboCustomError(null);
+                              }}
+                              className={`p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'border-purple-600 bg-purple-50/50 ring-2 ring-purple-500/20'
+                                  : isOutOfStock
+                                  ? 'border-stone-200 bg-stone-50 opacity-40 cursor-not-allowed'
+                                  : 'border-stone-200 hover:border-purple-300 bg-white'
+                              }`}
+                            >
+                              <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                                isSelected ? 'border-purple-600 bg-purple-600 text-white' : 'border-stone-300 bg-white'
+                              }`}>
+                                {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                              </div>
+
+                              <img
+                                src={childProd.image || 'https://placehold.co/36x36?text=K'}
+                                alt={childProd.name}
+                                className="w-10 h-10 rounded-lg object-cover border border-stone-200 shrink-0"
+                              />
+
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-semibold text-stone-900 truncate leading-snug">
+                                  {childProd.name}
+                                </div>
+                                <div className="text-[11px] text-stone-500 flex items-center justify-between mt-0.5">
+                                  <span>{childProd.brand}</span>
+                                  {isOutOfStock ? (
+                                    <span className="text-rose-600 font-bold">Sold Out</span>
+                                  ) : (
+                                    <span className="font-mono font-medium">৳{getRetailPrice(childProd)}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1044,7 +1273,7 @@ export const ProductDetail: React.FC = () => {
 
           {/* Add to Basket CTA */}
           <div className="space-y-3 pt-1">
-            {profile?.wholesaleAccess && product && (
+            {profile?.wholesaleAccess && product && !product.isCombo && (
               <button
                 type="button"
                 id="btn_add_to_wholesale_cart"
@@ -1065,15 +1294,81 @@ export const ProductDetail: React.FC = () => {
             )}
 
             <button
-              onClick={() => addToCart(product, quantity)}
-              disabled={product.stock <= 0}
-              className="w-full py-4 bg-[#E91E8C] hover:bg-[#d0177c] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-pink-100 flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm active:scale-[0.99]"
+              onClick={() => {
+                if (product.isCombo) {
+                  // Validate customizable combo
+                  if (product.comboConfig?.type === 'customizable') {
+                    const steps = product.comboConfig.steps || [];
+                    const missingStep = steps.find(s => !selectedCustomSteps[s.id]);
+                    if (missingStep) {
+                      setComboCustomError(`Please select an item for "${missingStep.title}" before adding to basket.`);
+                      return;
+                    }
+                    setComboCustomError(null);
+
+                    const components: ComboComponentDetail[] = steps.map(step => {
+                      const chosenId = selectedCustomSteps[step.id];
+                      const childProd = allProducts.find(p => p.id === chosenId);
+                      return {
+                        productId: chosenId,
+                        name: childProd?.name || 'Selected Item',
+                        quantity: 1,
+                        price: childProd ? getRetailPrice(childProd) : 0,
+                        image: childProd?.image || '',
+                        barcode: childProd?.barcode || ''
+                      };
+                    });
+
+                    const finalPrice = comboSavingsData ? comboSavingsData.finalPrice : getRetailPrice(product);
+                    const customComboProduct: Product = {
+                      ...product,
+                      price: finalPrice,
+                      retailPrice: finalPrice,
+                      discountRetailPrice: undefined,
+                      discountPrice: undefined
+                    };
+
+                    addToCart(customComboProduct, quantity, components);
+                    return;
+                  }
+
+                  // Fixed bundle
+                  if (product.comboConfig?.type === 'fixed' && product.comboConfig.items) {
+                    const components: ComboComponentDetail[] = product.comboConfig.items.map(it => {
+                      const childProd = allProducts.find(p => p.id === it.productId);
+                      return {
+                        productId: it.productId,
+                        name: childProd?.name || 'Bundle Component',
+                        quantity: it.quantity,
+                        price: childProd ? getRetailPrice(childProd) : 0,
+                        image: childProd?.image || '',
+                        barcode: childProd?.barcode || ''
+                      };
+                    });
+
+                    addToCart(product, quantity, components);
+                    return;
+                  }
+
+                  addToCart(product, quantity);
+                } else {
+                  addToCart(product, quantity);
+                }
+              }}
+              disabled={effectiveStock <= 0}
+              className={`w-full py-4 text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm active:scale-[0.99] ${
+                product.isCombo
+                  ? 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 shadow-purple-200'
+                  : 'bg-[#E91E8C] hover:bg-[#d0177c] shadow-pink-100'
+              }`}
             >
-              <ShoppingBag size={18} />
+              {product.isCombo ? <Sparkles size={18} /> : <ShoppingBag size={18} />}
               <span>
-                {product.stock > 0 
-                  ? (quantity > 1 ? `Add ${quantity} to Skincare Basket` : "Add to Skincare Basket") 
-                  : "Restocking soon"}
+                {effectiveStock > 0 
+                  ? (product.isCombo 
+                      ? (product.comboConfig?.type === 'customizable' ? 'Add Complete Routine Set to Basket' : `Add Combo Package to Basket`)
+                      : (quantity > 1 ? `Add ${quantity} to Skincare Basket` : "Add to Skincare Basket")) 
+                  : "Sold Out"}
               </span>
             </button>
 

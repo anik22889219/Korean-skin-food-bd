@@ -27,15 +27,17 @@ import {
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
   Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info,
   LayoutGrid, List, Package, AlertTriangle, Layers, Copy, DollarSign, ArrowUpDown,
-  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet
+  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet, Box
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { KOREAN_BRANDS, getUniqueBrandList, isSameBrand, getCanonicalBrandName } from '../data/brands';
-import { normalizeProductPricing, getRetailPrice, getWholesalePrice } from '../utils/pricing';
+import { normalizeProductPricing, getRetailPrice, getWholesalePrice, getComboEffectiveStock } from '../utils/pricing';
+import { ComboPackageModal } from './ComboPackageModal';
 
 const CATEGORIES = [
   'All', 
+  'Combo & Sets',
   'Cleanser', 
   'Toner', 
   'Serum & Essence', 
@@ -57,13 +59,15 @@ export const ProductManagement: React.FC = () => {
   const { profile, user, isSuperAdmin } = useAuth();
   const hasSuperAdminAccess = isSuperAdmin || profile?.role === 'super_admin' || user?.email === 'koreanskinfood.bd@gmail.com';
 
-  const { data: products = [], isLoading: isProductsLoading } = useProducts();
+  const { data: products = [], isLoading: isProductsLoading, refetch: refetchProducts } = useProducts();
   const { data: categories = CATEGORIES } = useCategories();
   const { data: brandsData } = useBrands();
 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [selectedProductForPopup, setSelectedProductForPopup] = useState<Product | null>(null);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [isComboModalOpen, setIsComboModalOpen] = useState(false);
+  const [comboToEdit, setComboToEdit] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   
@@ -1291,6 +1295,29 @@ export const ProductManagement: React.FC = () => {
           </button>
 
           <button 
+            type="button"
+            onClick={() => navigate('/admin/combos')}
+            className="px-3.5 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-2xl text-xs font-extrabold cursor-pointer transition flex items-center gap-2 shadow-sm"
+            title="View dedicated Combos Management Hub"
+          >
+            <Layers size={14} className="text-purple-600" />
+            <span>Combo Packages</span>
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => {
+              setComboToEdit(null);
+              setIsComboModalOpen(true);
+            }}
+            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-2xl text-xs font-black cursor-pointer transition flex items-center gap-2 shadow-md hover:shadow-indigo-200"
+            title="Create a new combo bundle or customizable routine set"
+          >
+            <Plus size={15} />
+            <span>New Combo Package</span>
+          </button>
+
+          <button 
             onClick={() => {
               setNameSearchQuery('');
               setNameSuggestions([]);
@@ -1553,6 +1580,12 @@ export const ProductManagement: React.FC = () => {
                       
                       {/* Floating Stock & Promo Badges */}
                       <div className="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1 items-start pointer-events-none">
+                        {p.isCombo && (
+                          <span className="bg-purple-600 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-lg shadow-sm flex items-center gap-1 tracking-wider">
+                            <Layers size={10} />
+                            {p.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo Pack'}
+                          </span>
+                        )}
                         {hasDiscount && (
                           <span className="bg-[#E91E8C] text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-lg shadow-sm tracking-wider">
                             -{discountPercent}% OFF
@@ -1698,12 +1731,19 @@ export const ProductManagement: React.FC = () => {
                     {/* Edit Button */}
                     <button 
                       type="button"
-                      onClick={() => handleStartEditProduct(p)}
+                      onClick={() => {
+                        if (p.isCombo) {
+                          setComboToEdit(p);
+                          setIsComboModalOpen(true);
+                        } else {
+                          handleStartEditProduct(p);
+                        }
+                      }}
                       className="flex-1 bg-pink-50 hover:bg-[#E91E8C] text-slate-800 hover:text-white border border-pink-200 py-1.5 px-3 rounded-xl text-xs font-extrabold cursor-pointer transition flex items-center justify-center gap-1.5 shadow-xs"
-                      title="Edit product formulation & inventory specs"
+                      title={p.isCombo ? "Edit combo package composition & pricing" : "Edit product formulation & inventory specs"}
                     >
                       <Edit size={13} />
-                      <span>Edit</span>
+                      <span>{p.isCombo ? 'Edit Combo' : 'Edit'}</span>
                     </button>
 
                     {/* Delete Button */}
@@ -1772,6 +1812,11 @@ export const ProductManagement: React.FC = () => {
                           <div className="min-w-0 max-w-xs sm:max-w-sm">
                             <div className="flex items-center gap-1.5">
                               <span className="text-[9px] font-black text-[#E91E8C] uppercase">{p.brand}</span>
+                              {p.isCombo && (
+                                <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200">
+                                  {p.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo'}
+                                </span>
+                              )}
                               {p.ml && (
                                 <span className="text-[8px] font-bold font-mono text-slate-500 bg-pink-50 px-1 rounded">
                                   {p.ml}
@@ -1870,9 +1915,16 @@ export const ProductManagement: React.FC = () => {
                           </button>
                           <button 
                             type="button"
-                            onClick={() => handleStartEditProduct(p)}
+                            onClick={() => {
+                              if (p.isCombo) {
+                                setComboToEdit(p);
+                                setIsComboModalOpen(true);
+                              } else {
+                                handleStartEditProduct(p);
+                              }
+                            }}
                             className="p-1.5 bg-slate-50 hover:bg-pink-50 text-slate-700 hover:text-[#E91E8C] rounded-xl text-xs transition"
-                            title="Edit"
+                            title={p.isCombo ? "Edit Combo Package" : "Edit"}
                           >
                             <Edit size={13} />
                           </button>
@@ -3625,6 +3677,27 @@ export const ProductManagement: React.FC = () => {
         onSelectImage={handleSelectMediaImage}
         title={mediaPurpose === 'main' ? "Select Product Cover Image" : "Add Gallery Image Asset"}
       />
+
+      {/* Combo Package Creator & Editor Modal */}
+      {isComboModalOpen && (
+        <ComboPackageModal
+          isOpen={isComboModalOpen}
+          onClose={() => {
+            setIsComboModalOpen(false);
+            setComboToEdit(null);
+          }}
+          comboToEdit={comboToEdit}
+          allProducts={products}
+          onSaved={(savedCombo) => {
+            refetchProducts?.();
+            setAlertMsg({
+              type: 'success',
+              text: `🎉 Combo package "${savedCombo.name}" saved successfully!`
+            });
+            setTimeout(() => setAlertMsg(null), 5000);
+          }}
+        />
+      )}
 
     </div>
   );
