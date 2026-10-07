@@ -199,6 +199,27 @@ export const UserManagement: React.FC = () => {
       };
 
       await setDoc(newUserRef, newUserData);
+
+      if (formWholesaleAccess) {
+        try {
+          await wholesaleService.adminUpdateWholesaleCustomer(customUid, {
+            id: customUid,
+            userId: customUid,
+            name: formName.trim(),
+            email: formEmail.trim(),
+            phone: formPhone.trim(),
+            wholesaleAccess: true,
+            status: formStatus === 'suspended' ? 'suspended' : 'active',
+            creditLimit: 50000,
+            currentDue: 0,
+            totalPaid: 0,
+            totalPurchasedBDT: 0
+          });
+        } catch (wsErr) {
+          console.warn('Could not create initial wholesale_customers record:', wsErr);
+        }
+      }
+
       showToast('success', `New user "${formName}" added successfully.`);
       setIsAddUserOpen(false);
       resetForm();

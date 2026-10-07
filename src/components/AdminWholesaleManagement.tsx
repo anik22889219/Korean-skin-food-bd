@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { WholesaleCustomer } from '../types';
 import { wholesaleService } from '../services/wholesaleService';
 import { WholesaleLedgerModal } from './WholesaleLedgerModal';
+import { WholesaleCustomerEditModal } from './WholesaleCustomerEditModal';
+import { AdminWholesaleOrderModal } from './AdminWholesaleOrderModal';
 import { useAuth } from '../context/AuthContext';
 import { 
   Building2,
@@ -19,7 +21,10 @@ import {
   Users,
   Wallet,
   Loader2,
-  Calendar
+  Calendar,
+  Edit,
+  Plus,
+  ShoppingCart
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -35,6 +40,9 @@ export function AdminWholesaleManagement() {
   
   // Modals
   const [ledgerCustomerId, setLedgerCustomerId] = useState<string | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState<WholesaleCustomer | null>(null);
+  const [orderModalCustomer, setOrderModalCustomer] = useState<WholesaleCustomer | null>(null);
+  const [isCreateOrderModalOpen, setIsCreateOrderModalOpen] = useState(false);
 
   const fetchCustomers = async () => {
     setIsLoading(true);
@@ -49,7 +57,15 @@ export function AdminWholesaleManagement() {
   };
 
   useEffect(() => {
-    fetchCustomers();
+    setIsLoading(true);
+    const unsubscribe = wholesaleService.subscribeAllWholesaleCustomers((data) => {
+      setCustomers(data);
+      setIsLoading(false);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Compute stats
@@ -131,6 +147,18 @@ export function AdminWholesaleManagement() {
           <p className="text-slate-500 mt-1 font-medium">
             Manage wholesale customers, ledger, and financials
           </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setOrderModalCustomer(null);
+              setIsCreateOrderModalOpen(true);
+            }}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-2 transition-all"
+          >
+            <Plus size={18} />
+            + Create Wholesale Order
+          </button>
         </div>
       </div>
 
@@ -318,19 +346,38 @@ export function AdminWholesaleManagement() {
                       </button>
                     </td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            setOrderModalCustomer(customer);
+                            setIsCreateOrderModalOpen(true);
+                          }}
+                          className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200 transition flex items-center gap-1"
+                          title="Create Wholesale Order for this customer"
+                        >
+                          <ShoppingCart size={13} />
+                          + Order
+                        </button>
+                        <button
+                          onClick={() => setEditingCustomer(customer)}
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 transition flex items-center gap-1"
+                          title="Edit Customer Profile & Settings"
+                        >
+                          <Edit size={13} />
+                          Edit
+                        </button>
                         <Link
                           to={`/admin/wholesale/${customer.id}`}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 transition whitespace-nowrap"
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 transition whitespace-nowrap"
                           title="View Details & Orders"
                         >
                           Details
                         </Link>
                         <button
                           onClick={() => setLedgerCustomerId(customer.id)}
-                          className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition whitespace-nowrap"
+                          className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition whitespace-nowrap"
                         >
-                          Ledger / Pay
+                          Ledger
                         </button>
                       </div>
                     </td>
@@ -342,6 +389,34 @@ export function AdminWholesaleManagement() {
         </div>
       </div>
 
+      {/* Edit Customer Profile Modal */}
+      {editingCustomer && (
+        <WholesaleCustomerEditModal
+          isOpen={Boolean(editingCustomer)}
+          customer={editingCustomer}
+          onClose={() => setEditingCustomer(null)}
+          onCustomerUpdated={(updated) => {
+            setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
+          }}
+        />
+      )}
+
+      {/* Create Wholesale Order Modal */}
+      {isCreateOrderModalOpen && (
+        <AdminWholesaleOrderModal
+          isOpen={isCreateOrderModalOpen}
+          initialCustomer={orderModalCustomer}
+          onClose={() => {
+            setIsCreateOrderModalOpen(false);
+            setOrderModalCustomer(null);
+          }}
+          onOrderCreated={() => {
+            fetchCustomers(); // Refresh financial totals and counts
+          }}
+        />
+      )}
+
+      {/* Ledger Modal */}
       {ledgerCustomerId && (
         <WholesaleLedgerModal 
           wholesaleCustomerId={ledgerCustomerId}

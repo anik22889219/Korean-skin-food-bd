@@ -1,36 +1,23 @@
-# Product Assignment to Filters & Taxonomies
+# Wholesaler Management & Admin Quick Order System
 
-A dedicated interactive product assignment system directly within the **Taxonomies & Filters Management** portal (`/admin/taxonomies`), empowering administrators to quickly view all currently linked products, search the full product catalog, bulk-assign multiple products via checkboxes, and instantly unassign products with a single click.
-
----
+Comprehensive Super Admin Wholesaler Management hub providing full profile and business editing capabilities, plus an integrated Quick Order creation suite with live catalog search, custom wholesale pricing overrides, stock validation, and automated financial ledger sync.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following product requirements and architectural decisions were confirmed based on your preferences:
+> The following core design and architectural choices have been aligned based on user clarification:
 
-- **Centralized in Filter & Taxonomy Manager**: Assignment workflow is launched directly from each Taxonomy card or table row via a prominent **"🔗 Assign Products"** button, without needing to open each product individually.
-- **Dual-Pane Assignment Modal**:
-  1. **Currently Assigned Tab / Pane**: Displays all products currently linked to this filter with product thumbnail, barcode, price, stock, and an instant **"❌ Remove / Unassign"** button.
-  2. **Available Catalog & Bulk Assign Tab / Pane**: Real-time searchable list of all store products with live category/stock filters, select-all controls, and a **"✓ Assign (N) Selected Products"** batch action.
-- **Smart Dimension Field Mutator**:
-  - **Array Dimensions** (*Skin Types, Skin Concerns, Target Benefits, Key Ingredients*): Safely appends or removes the taxonomy tag in the product's array (`skinTypes`, `concerns`, `benefits`, `keyIngredients`) without overwriting existing tags.
-  - **Single Value Dimensions** (*Brand, Category, Routine Step*): Updates the primary property (`brand`, `category`, `routineStep`) on the selected products with batch persistence.
-- **Instant Product Count Sync**: When products are assigned or unassigned, the live product count badge on the taxonomy card updates immediately with optimistic state and automatic query invalidation.
+- **Wholesaler Profile Editing**: Full-featured Edit Modal/Drawer directly accessible from the Wholesale Management table and detail pages. Enables Super Admins to update owner information, business name, phone/email, physical address, social links, credit limit, minimum order quantities, status (`active`, `pending`, `suspended`), and custom tier discounts.
+- **Admin Quick Order Creation**: Dedicated Quick Order Modal that allows Super Admin to select a wholesaler, search the live product catalog by SKU/name/category, adjust order quantities with real-time stock guards, customize per-item wholesale pricing if necessary, and apply custom notes or delivery tracking numbers.
+- **Automated Ledger & Financial Sync**: Upon order submission, the system automatically creates the `wholesale_orders` record, decrements live product inventory, generates a ledger transaction debit, records any upfront/advance payment credit, recalculates `totalWholesalePurchase`, `totalPaid`, and `totalDue`, and offers one-click printable invoices.
 
 ---
 
 ## 1. Overview & Core Concept
 
-### What It Does
-Provides store administrators with a fast, bulk-capable way to tag products into specific skincare taxonomies. For example, an admin can click "Assign Products" on the **Centella Asiatica (Cica)** ingredient card, search for all calming serums or toners containing Cica, select 15 products with checkboxes, and assign them in one click.
-
-### Target Audience & Persona
-- **Store Inventory Managers & Catalog Admins**: Easily build curated collections and enrich product filtering attributes across thousands of items in seconds.
-- **Shoppers & Store Visitors**: Find products accurately when filtering by specific concerns (e.g., "Hyperpigmentation") or key active ingredients (e.g., "Snail Mucin").
-
-### Key Value
-Saves hours of manual product-by-product editing by providing a streamlined, bulk-selection interface right where filters are managed.
+- **What It Does**: Empowers Korean Skin Food administrators and Super Admins to manage B2B wholesale partners from a single control plane. Admins can update partner profiles, verify documentation, alter credit parameters, and place manual wholesale orders on behalf of partners directly from the dashboard.
+- **Target Audience / Persona**: Super Admins and B2B Operations Managers overseeing wholesale accounts, inventory allocation, bulk shipments, and credit accounts.
+- **Key Value**: Eliminates manual friction between sales and warehouse dispatch by uniting wholesale profile maintenance, fast itemized ordering, inventory deduction, and credit ledger accounting in real time.
 
 ---
 
@@ -38,127 +25,105 @@ Saves hours of manual product-by-product editing by providing a streamlined, bul
 
 ### Key User Flows
 
-```
-Admin Taxonomies Page (/admin/taxonomies)
-  │
-  ├──► 1. Click "🔗 Assign Products" on any Taxonomy Card (e.g., "Snail Mucin" or "Toner")
-  │
-  └──► 2. Opens "TaxonomyProductAssignmentModal"
-         │
-         ├── Header: Taxonomy Title, Bangla Name, and Active Linked Count ("14 Products Linked")
-         │
-         ├── View Switcher Tabs:
-         │    ├── Tab 1: [Currently Assigned (14)] ──► Shows cards/rows of linked products with 1-click "Unassign"
-         │    └── Tab 2: [Add / Assign Products] ────► Full searchable catalog with checkboxes & bulk "Assign Selected"
-         │
-         ├── Search & Fast Filter Bar:
-         │    ├── Search by Name, SKU, Barcode, or Brand
-         │    ├── Category & Stock status filters
-         │    └── "Select All (N)" checkbox toggle
-         │
-         └── Bulk Action Footer:
-              ├── "Assign (X) Selected Products" (with batch progress indicator)
-              └── "Close / Done"
-```
+1. **Wholesaler Profile & Setting Edit**:
+   - Super Admin navigates to `/admin/wholesale`.
+   - Clicks **Edit Profile** on any wholesaler row or from the `/admin/wholesale/:customerId` detail view.
+   - A structured Edit Drawer/Modal opens with organized sections:
+     - *Basic & Contact Info*: Name, Business/Shop Name, Facebook Page, Phone, Email, Trade License / TIN info.
+     - *Shipping & Logistics*: Delivery Address, City/Zone, Preferred Courier (e.g. Steadfast / Pathao / Hub).
+     - *Financial & Tier Rules*: Credit Limit (৳), Custom Wholesale Tier Discount (%), Account Status (`active` / `pending` / `suspended`), and Wholesale Catalog Access toggle.
+   - Admin saves changes; Firestore updates immediately with defensive payload validation and toast confirmation.
+
+2. **Admin Quick Wholesale Order Creation**:
+   - Admin clicks the **+ Create Wholesale Order** button (available in the main table toolbar or within a specific customer's profile).
+   - In the modal, if not preselected, the Admin chooses the target Wholesaler from an auto-completing selector.
+   - **Product Search & Add**:
+     - Live search bar with keyboard navigation across all products with real-time in-stock counts.
+     - Adding a product inserts a line item showing: Thumbnail, Title, SKU, Current Stock, Unit Wholesale Price (editable by Admin for custom deal pricing), Quantity counter, and Subtotal.
+     - Out-of-stock items or quantities exceeding inventory show instant warnings.
+   - **Order Summary & Financial Breakdown**:
+     - Subtotal calculation, custom shipping fee input, additional discount/adjustment field, and Grand Total.
+     - **Payment Breakdown**: Admin specifies Paid Amount (Advance) and Payment Method (Bank Transfer, bKash/Nagad, Cash, or Credit/Due).
+     - Balance Due is calculated live (`Grand Total - Paid Amount`).
+   - **Submission & Execution**:
+     - Admin clicks **Confirm & Create Order**.
+     - Atomic/batch transaction writes the order to `wholesale_orders`, creates ledger entry in `wholesale_ledger`, updates customer totals (`totalDue`, `totalPaid`, `totalWholesalePurchase`), and decrements product stock.
+     - A success modal displays the order ID with options to **Print Invoice**, **View Ledger**, or **Create Another**.
 
 ### Visual Identity & Theme
-- **Aesthetic Direction**: High-density, utilitarian SaaS administrative modal with clean spatial margins and crisp typography.
-- **Color Scheme**:
-  - Primary Action: Rose-600 `#E11D48` & Indigo-600 `#4F46E5`
-  - Unassign Destructive Action: Subdued Rose/Amber outline `#F43F5E`
-  - Selected Row Highlight: Rose-50/60 with subtle border accent
-- **Zero-Pill Discipline**: Product details (price, stock, barcode) use unboxed monospace text separated by quiet dot separators (`৳1,450 · Stock: 34 · BC: 880945...`).
-- **Feedback & Motion**:
-  - Optimistic item count updates in real-time.
-  - Success toasts on batch assignment with number of products modified.
+
+- **Palette**: Professional B2B palette rooted in clean slate neutral backgrounds (`bg-slate-50`), crisp white card surfaces (`bg-white`), indigo/blue accents (`text-indigo-600`, `bg-indigo-600`), emerald metrics for revenue/paid (`text-emerald-600`), and amber/rose alerts for credit due (`text-rose-600`).
+- **Typography**: Crisp display headers with `Plus Jakarta Sans` / `Inter`, accompanied by strict monospace tabular figures (`font-mono tabular-nums`) for currency amounts, SKUs, inventory counts, and order timestamps.
+- **Anti-Slop Discipline**: Zero decorative pill badge clusters; unboxed metadata separated by typographic dots (`·`); clean single-elevation card surfaces with hairline borders (`border-slate-200`).
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-### Decision 1: Batch Mutation via `productService.updateProduct` / Firestore Batch
-- **Chosen Approach**: Perform batch updates on product documents in Firestore while concurrently updating the React Query client cache.
-- **Why**: Ensures atomic writes and fast updates even when assigning 50+ products simultaneously.
+- **Decision 1: Modular Edit Modal vs. Separate Route**
+  - *Chosen Approach*: Comprehensive Modal/Drawer reusable in both `/admin/wholesale` and `/admin/wholesale/:customerId`.
+  - *Why*: Allows rapid edits without losing context or pagination state on the main management table, while maintaining deep detail inspection on the single customer view.
+  - *Alternatives Considered*: Navigating to a separate `/admin/wholesale/:id/edit` full page (slower for multi-partner management).
 
-### Decision 2: Preservation of Existing Product Arrays
-- **Chosen Approach**: When assigning a product to an ingredient or concern, the mutation uses `Array.from(new Set([...existing, newTag]))` so existing attributes are never lost.
-- **Why**: A product can have multiple ingredients (e.g., Cica AND Niacinamide) and multiple concerns (e.g., Acne AND Barrier Repair).
+- **Decision 2: Admin Direct Order vs. Proxy Cart Simulation**
+  - *Chosen Approach*: Streamlined Quick Order Modal with direct product search and custom pricing inputs.
+  - *Why*: Wholesalers often negotiate custom bulk unit rates or shipping adjustments over phone/WhatsApp. A direct admin order builder allows pricing overrides and custom advance payments without tampering with the standard customer cart session.
+  - *Alternatives Considered*: Switching user session to impersonate the customer in the storefront cart (cumbersome and risk of cart collision).
 
-### Decision 3: Quick 1-Click Unassign from Assigned Tab
-- **Chosen Approach**: The "Currently Assigned" tab features an instant unassign button per product with an undo toast, allowing admins to prune incorrect tags effortlessly.
-- **Why**: Minimizes friction when cleaning up catalog taxonomies.
+- **Decision 3: Financial Ledger Synchronization**
+  - *Chosen Approach*: Single transactional workflow creating the order record, recording any immediate payment in the ledger, and updating aggregated customer financial fields.
+  - *Why*: Prevents discrepancy between order totals and ledger due statements, guaranteeing auditability for both admin and customer.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy
 
-### System Layout & Component Hierarchy
+### Architecture & Component Diagram
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      AdminTaxonomyManagement.tsx                       │
-├────────────────────────────────────────────────────────────────────────┤
-│  Taxonomy Card / Table Row                                             │
-│  └── [🔗 Assign Products (14)] Button ◄── User clicks here             │
+│                        Admin Wholesale Hub                             │
+│       (/admin/wholesale  &  /admin/wholesale/:customerId)              │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    │
-                                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                 TaxonomyProductAssignmentModal.tsx                     │
-├────────────────────────────────────────────────────────────────────────┤
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Modal Header: [🌿 Centella Asiatica] (14 Products Linked)        │  │
-│  │ Tabs: [Currently Linked (14)]  │  [+ Assign From Catalog]        │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Search Bar: "Search by title, brand, or barcode..."              │  │
-│  │ Category Filter: [All Categories ▼]   [In Stock Only ✓]          │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Product Selection List (Scrollable High-Density List)            │  │
-│  │  ☑ [Img] COSRX Cica Toner (8809...)  ৳1,350 · In Stock (24)      │  │
-│  │  ☑ [Img] SKIN1004 Madagascar Ampoule ৳1,650 · In Stock (18)      │  │
-│  │  ☐ [Img] Anua Heartleaf Soothing Ampoule                          │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ Footer Actions:                                                  │  │
-│  │  [Cancel]                    [✓ Assign 2 Selected Products]      │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────┬─────────────────────────────────────┘
+         ┌─────────────────────────┴─────────────────────────┐
+         ▼                                                   ▼
+┌─────────────────────────────────┐       ┌──────────────────────────────────┐
+│  WholesaleEditCustomerModal     │       │     AdminWholesaleOrderModal     │
+│  - Business & Owner Info        │       │  - Wholesaler Selector           │
+│  - Address & Courier Logistics  │       │  - Live Catalog Search & SKU     │
+│  - Credit Limits & Tier Rates   │       │  - Quantity & Stock Validation   │
+│  - Status & Access Control      │       │  - Custom Wholesale Price Adjust │
+└────────────────┬────────────────┘       │  - Advance Payment & Balance Due │
+                 │                        └──────────────────┬───────────────┘
+                 │                                           │
+                 ▼                                           ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    Wholesale & Order Service Layer                         │
+│  - wholesaleService.adminUpdateWholesaleCustomer()                        │
+│  - wholesaleOrderService.createAdminWholesaleOrder()                       │
+│  - wholesaleLedgerService.recordOrderDebitAndPayment()                     │
+│  - productService.decrementInventory()                                    │
+└──────────────────────────────────┬─────────────────────────────────────────┘
                                    │
                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                     productService & Firestore                         │
-│  • batchAssignTaxonomy(dimensionType, taxonomyName, productIds)        │
-│  • batchUnassignTaxonomy(dimensionType, taxonomyName, productIds)      │
-│  • Optimistic Query Invalidation (`products.all`, `taxonomies.all`)    │
-└────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            Firestore Database                              │
+│  - /wholesale_customers/{id}                                               │
+│  - /wholesale_orders/{orderId}                                             │
+│  - /wholesale_ledger/{ledgerId}                                            │
+│  - /products/{productId}                                                   │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Mutator Logic Mapping
+### Data Entities & State Updates
 
-| Taxonomy Dimension | Target Product Field | Assignment Operation | Unassign Operation |
-| :--- | :--- | :--- | :--- |
-| **brand** | `product.brand` | Set to `taxonomy.name` | Set to `''` (or unassigned) |
-| **category** | `product.category` | Set to `taxonomy.name` | Set to `'Uncategorized'` |
-| **routine_step** | `product.routineStep` | Set to `taxonomy.name` | Remove `routineStep` |
-| **skin_type** | `product.skinTypes` (array) | Add to `skinTypes[]` (deduped) | Filter out from `skinTypes[]` |
-| **skin_concern** | `product.concerns` (array) | Add to `concerns[]` (deduped) | Filter out from `concerns[]` |
-| **target_benefit** | `product.benefits` (array) | Add to `benefits[]` (deduped) | Filter out from `benefits[]` |
-| **ingredient** | `product.keyIngredients` (array) | Add to `keyIngredients[]` (deduped) | Filter out from `keyIngredients[]` |
-
----
-
-## 5. Implementation Steps
-
-1. **Service Layer Enhancement (`src/services/productService.ts` / `src/services/taxonomyService.ts`)**:
-   - Implement `batchAssignTaxonomyToProducts(type, taxonomyName, productIds)`
-   - Implement `batchUnassignTaxonomyFromProducts(type, taxonomyName, productIds)`
-2. **Assignment Modal Component (`src/components/TaxonomyProductAssignmentModal.tsx`)**:
-   - Build high-density dual-tab UI with live product search, multi-selection checkboxes, select-all control, and instant unassign.
-3. **Integration with `AdminTaxonomyManagement.tsx`**:
-   - Wire the "🔗 Assign Products" trigger into each grid card and table row.
-   - Display dynamic product count badges and open the assignment modal with the target taxonomy item.
-4. **Verification & Build Check**:
-   - Validate with `lint_applet` and `compile_applet`.
-   - Test bulk assignments and unassignments across multiple dimensions.
+1. **`WholesaleCustomer`**:
+   - Fields editable by Super Admin: `name`, `businessName`, `pageName`, `phone`, `email`, `location`, `businessAddress`, `creditLimit`, `customDiscountPercent`, `status` (`'active' | 'pending' | 'suspended'`), `wholesaleAccess` (`boolean`), `notes`.
+2. **`WholesaleOrder`**:
+   - Created with: `customerId`, `customerName`, `businessName`, `phone`, `shippingAddress`, `items` (array of `{ productId, name, sku, price, wholesalePrice, quantity, total }`), `subtotal`, `shippingFee`, `discount`, `totalAmount`, `paidAmount`, `dueAmount`, `paymentStatus` (`'PAID' | 'PARTIAL' | 'DUE'`), `orderStatus` (`'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED'`), `createdBy: 'ADMIN'`, `createdAt: serverTimestamp()`.
+3. **`WholesaleLedger`**:
+   - Debit record for order amount (`type: 'DEBIT'`, `amount: totalAmount`).
+   - Credit record for advance payment if `paidAmount > 0` (`type: 'CREDIT'`, `amount: paidAmount`, `paymentMethod`).
+4. **`Product` Inventory**:
+   - Atomic decrement of `stock` for all ordered items.

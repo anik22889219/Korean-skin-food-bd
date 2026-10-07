@@ -3,6 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { WholesaleCustomer, WholesaleOrder, WholesalePayment } from '../types';
 import { wholesaleService, wholesaleLedgerService } from '../services/wholesaleService';
 import { wholesaleOrderService } from '../services/wholesaleOrderService';
+import { WholesaleCustomerEditModal } from './WholesaleCustomerEditModal';
+import { AdminWholesaleOrderModal } from './AdminWholesaleOrderModal';
+import { WholesaleLedgerModal } from './WholesaleLedgerModal';
 import { useAuth } from '../context/AuthContext';
 import { 
   Building2, 
@@ -26,7 +29,10 @@ import {
   FileText, 
   Truck, 
   CreditCard,
-  ShieldAlert
+  ShieldAlert,
+  Edit,
+  Plus,
+  ShoppingCart
 } from 'lucide-react';
 
 export function WholesaleCustomerDetailsPage() {
@@ -40,6 +46,11 @@ export function WholesaleCustomerDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Modals
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+  const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
+
   // Selected Order for Details Modal
   const [selectedOrder, setSelectedOrder] = useState<WholesaleOrder | null>(null);
 
@@ -47,6 +58,22 @@ export function WholesaleCustomerDetailsPage() {
   const [orderPage, setOrderPage] = useState(1);
   const [paymentPage, setPaymentPage] = useState(1);
   const itemsPerPage = 5;
+
+  const reloadData = async () => {
+    if (!customerId) return;
+    try {
+      const [custData, ordersData, paymentsData] = await Promise.all([
+        wholesaleService.getWholesaleCustomer(customerId),
+        wholesaleOrderService.getWholesaleOrders(customerId),
+        wholesaleLedgerService.getPayments(customerId).catch(() => [])
+      ]);
+      if (custData) setCustomer(custData);
+      setOrders(ordersData || []);
+      setPayments(paymentsData || []);
+    } catch (err: any) {
+      console.warn('Reload customer error:', err);
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -173,9 +200,32 @@ export function WholesaleCustomerDetailsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Customer ID:</span>
-          <code className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-mono">{customer.id}</code>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">ID:</span>
+            <code className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-mono">{customer.id}</code>
+          </div>
+          <button
+            onClick={() => setIsOrderModalOpen(true)}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
+          >
+            <Plus size={15} />
+            + Create Order
+          </button>
+          <button
+            onClick={() => setIsEditModalOpen(true)}
+            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
+          >
+            <Edit size={15} />
+            Edit Profile
+          </button>
+          <button
+            onClick={() => setIsLedgerModalOpen(true)}
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
+          >
+            <Wallet size={15} />
+            Ledger & Payments
+          </button>
         </div>
       </div>
 
@@ -649,6 +699,42 @@ export function WholesaleCustomerDetailsPage() {
 
           </div>
         </div>
+      )}
+
+      {/* Edit Customer Profile Modal */}
+      {isEditModalOpen && customer && (
+        <WholesaleCustomerEditModal
+          isOpen={isEditModalOpen}
+          customer={customer}
+          onClose={() => setIsEditModalOpen(false)}
+          onCustomerUpdated={(updated) => {
+            setCustomer(updated);
+            reloadData();
+          }}
+        />
+      )}
+
+      {/* Create Wholesale Order Modal */}
+      {isOrderModalOpen && customer && (
+        <AdminWholesaleOrderModal
+          isOpen={isOrderModalOpen}
+          initialCustomer={customer}
+          onClose={() => setIsOrderModalOpen(false)}
+          onOrderCreated={() => {
+            reloadData();
+          }}
+        />
+      )}
+
+      {/* Wholesale Ledger Modal */}
+      {isLedgerModalOpen && customer && (
+        <WholesaleLedgerModal
+          wholesaleCustomerId={customer.id}
+          onClose={() => {
+            setIsLedgerModalOpen(false);
+            reloadData();
+          }}
+        />
       )}
     </div>
   );

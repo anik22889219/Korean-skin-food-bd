@@ -16,6 +16,7 @@ import {
   formatUrl
 } from '../services/wholesaleService';
 import { wholesaleOrderService } from '../services/wholesaleOrderService';
+import { AdminWholesaleOrderModal } from './AdminWholesaleOrderModal';
 import { 
   Building2, User, Phone, Mail, MapPin, Globe, 
   CheckCircle2, AlertCircle, Save, ArrowLeft, ShieldCheck, 
@@ -24,7 +25,7 @@ import {
   AlertTriangle, Truck, Receipt, DollarSign, TrendingUp, Wallet, 
   Eye, X, Search, Filter, Printer, Download, RefreshCw, Layers, 
   Calendar, ShoppingBag, Facebook, Instagram, Hash, Info, Check,
-  Upload, Image as ImageIcon, Camera, Trash2, Link as LinkIcon
+  Upload, Image as ImageIcon, Camera, Trash2, Link as LinkIcon, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary, cloudinaryService } from '../services/cloudinaryService';
@@ -52,6 +53,7 @@ export const WholesaleProfilePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
   const [wholesaleData, setWholesaleData] = useState<WholesaleCustomer | null>(null);
   const [orders, setOrders] = useState<WholesaleOrder[]>([]);
   const [payments, setPayments] = useState<WholesalePayment[]>([]);
@@ -655,12 +657,20 @@ export const WholesaleProfilePage: React.FC = () => {
             <span className="hidden sm:inline">Refresh</span>
           </button>
 
+          <button
+            onClick={() => setIsQuickOrderOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#E91E8C] to-pink-600 hover:from-pink-600 hover:to-pink-700 text-white text-xs font-black shadow-md shadow-pink-500/20 transition cursor-pointer"
+          >
+            <Plus size={14} />
+            <span>+ Place Wholesale Order</span>
+          </button>
+
           <Link
             to="/wholesale/checkout"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#E91E8C] hover:bg-[#d0177c] text-white text-xs font-black shadow-xs transition"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 text-xs font-black shadow-2xs transition"
           >
             <Truck size={14} />
-            <span>Wholesale Checkout</span>
+            <span>Cart Checkout</span>
           </Link>
 
           {isWholesaleVerified ? (
@@ -924,13 +934,24 @@ export const WholesaleProfilePage: React.FC = () => {
               </div>
 
               {/* Action Button */}
-              <Link
-                to="/wholesale/checkout"
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gray-900 hover:bg-black text-white text-xs font-bold transition shadow-2xs"
-              >
-                <ShoppingBag size={14} />
-                <span>New Wholesale Order</span>
-              </Link>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsQuickOrderOpen(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold transition shadow-2xs cursor-pointer"
+                >
+                  <Plus size={14} />
+                  <span>+ Create Wholesale Order</span>
+                </button>
+                <Link
+                  to="/wholesale/checkout"
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
+                  title="Open Wholesale Cart Checkout"
+                >
+                  <ShoppingBag size={14} />
+                  <span className="hidden sm:inline">Cart</span>
+                </Link>
+              </div>
             </div>
 
             {/* Status Filter Chips */}
@@ -1009,7 +1030,7 @@ export const WholesaleProfilePage: React.FC = () => {
                   {paginatedOrders.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="p-10 text-center text-gray-500">
-                        <div className="flex flex-col items-center justify-center gap-2">
+                        <div className="flex flex-col items-center justify-center gap-3">
                           <Receipt size={36} className="text-gray-300" />
                           <p className="font-bold text-gray-700 text-sm">No wholesale orders found.</p>
                           <p className="text-xs text-gray-400 max-w-sm">
@@ -1017,13 +1038,23 @@ export const WholesaleProfilePage: React.FC = () => {
                               ? 'Try clearing your search query or changing your status filter.'
                               : 'You have not submitted any wholesale orders yet.'}
                           </p>
-                          <Link
-                            to="/wholesale/checkout"
-                            className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#E91E8C] text-white text-xs font-bold shadow-xs hover:bg-pink-600 transition"
-                          >
-                            <ShoppingBag size={14} />
-                            <span>Create First Wholesale Order</span>
-                          </Link>
+                          <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setIsQuickOrderOpen(true)}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#E91E8C] text-white text-xs font-bold shadow-xs hover:bg-pink-600 transition cursor-pointer"
+                            >
+                              <Plus size={14} />
+                              <span>Create First Wholesale Order</span>
+                            </button>
+                            <Link
+                              to="/wholesale"
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition"
+                            >
+                              <ShoppingBag size={14} />
+                              <span>Browse Wholesale Catalog</span>
+                            </Link>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -2173,6 +2204,35 @@ export const WholesaleProfilePage: React.FC = () => {
 
           </div>
         </div>
+      )}
+
+      {/* Direct Wholesale Quick Order Creation Modal */}
+      {isQuickOrderOpen && user && (
+        <AdminWholesaleOrderModal
+          isOpen={isQuickOrderOpen}
+          initialCustomer={wholesaleData || {
+            id: user.uid,
+            userId: user.uid,
+            name: name || profile?.name || user.displayName || 'Wholesale Partner',
+            phone: phone || profile?.phone || '',
+            email: email || user.email || '',
+            businessName: businessName || (profile as any)?.businessName || '',
+            pageName: pageName || (profile as any)?.pageName || '',
+            location: location || (profile as any)?.location || '',
+            businessAddress: businessAddress || (profile as any)?.businessAddress || '',
+            creditLimit: creditLimit || 50000,
+            currentDue: totalDue || 0,
+            status: 'active',
+            wholesaleAccess: true,
+            totalPurchasedBDT: totalWholesaleCost || 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }}
+          onClose={() => setIsQuickOrderOpen(false)}
+          onOrderCreated={() => {
+            handleManualRefresh();
+          }}
+        />
       )}
 
     </div>

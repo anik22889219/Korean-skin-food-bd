@@ -314,29 +314,56 @@ export const wholesaleService = {
   /**
    * Admin / Staff privileged update
    */
+  /**
+   * Admin / Staff privileged update.
+   * Uses setDoc with merge to ensure document creation if customer does not exist yet.
+   */
   async adminUpdateWholesaleCustomer(customerId: string, data: Partial<WholesaleCustomer>): Promise<void> {
     if (!customerId) throw new Error('Customer ID is required.');
     try {
       const wholesaleDocRef = doc(db, 'wholesale_customers', customerId);
+      const userDocRef = doc(db, 'users', customerId);
+      
+      let existingUserData: any = {};
+      try {
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists()) {
+          existingUserData = userSnap.data();
+        }
+      } catch (e) {
+        console.warn('[WholesaleService] Note: user doc read exception in adminUpdate:', e);
+      }
+
       const updatePayload: Partial<WholesaleCustomer> = {
+        id: customerId,
+        userId: customerId,
+        name: data.name || existingUserData.name || 'Wholesale Partner',
+        email: data.email || existingUserData.email || '',
+        phone: data.phone || existingUserData.phone || '',
+        businessName: data.businessName || existingUserData.businessName || '',
+        wholesaleAccess: data.wholesaleAccess !== undefined ? data.wholesaleAccess : (existingUserData.wholesaleAccess ?? true),
+        status: data.status || existingUserData.wholesaleStatus || 'active',
+        creditLimit: data.creditLimit !== undefined ? Number(data.creditLimit) : (existingUserData.creditLimit || 50000),
+        currentDue: data.currentDue !== undefined ? Number(data.currentDue) : (existingUserData.currentDue || 0),
         ...data,
         updatedAt: new Date().toISOString()
       };
-      await updateDoc(wholesaleDocRef, sanitizeForFirestore(updatePayload));
 
-      // Synchronize wholesaleAccess & status to users/{customerId} doc if provided
+      await setDoc(wholesaleDocRef, sanitizeForFirestore(updatePayload), { merge: true });
+
+      // Synchronize wholesaleAccess & status to users/{customerId} doc
       if (data.wholesaleAccess !== undefined || data.status !== undefined) {
-        const userDocRef = doc(db, 'users', customerId);
-        const userSnap = await getDoc(userDocRef);
-        if (userSnap.exists()) {
-          const userUpdates: any = { updatedAt: serverTimestamp() };
-          if (data.wholesaleAccess !== undefined) {
-            userUpdates.wholesaleAccess = data.wholesaleAccess;
-          }
-          if (data.status !== undefined) {
-            userUpdates.wholesaleStatus = data.status;
-          }
-          await updateDoc(userDocRef, userUpdates);
+        const userUpdates: any = { updatedAt: serverTimestamp() };
+        if (data.wholesaleAccess !== undefined) {
+          userUpdates.wholesaleAccess = data.wholesaleAccess;
+        }
+        if (data.status !== undefined) {
+          userUpdates.wholesaleStatus = data.status;
+        }
+        try {
+          await setDoc(userDocRef, userUpdates, { merge: true });
+        } catch (uErr) {
+          console.warn('[WholesaleService] Note: could not sync user document:', uErr);
         }
       }
     } catch (err) {
@@ -347,17 +374,78 @@ export const wholesaleService = {
   },
 
   /**
-   * Get all wholesale customer records for admin dashboard
+   * Get all wholesale customer records for admin dashboard.
+   * Merges wholesale_customers collection and users collection (with wholesaleAccess === true).
    */
   async getAllWholesaleCustomers(): Promise<WholesaleCustomer[]> {
     try {
-      const q = query(collection(db, 'wholesale_customers'), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
-      const customers: WholesaleCustomer[] = [];
-      snap.forEach(docSnap => {
-        customers.push({ id: docSnap.id, ...docSnap.data() } as WholesaleCustomer);
-      });
-      return customers;
+      const customersMap = new Map<string, WholesaleCustomer>();
+
+      // 1. Fetch from wholesale_customers
+      try {
+        const snap = await getDocs(collection(db, 'wholesale_customers'));
+        snap.forEach(docSnap => {
+          const cData = { id: docSnap.id, ...docSnap.data() } as WholesaleCustomer;
+          customersMap.set(docSnap.id, cData);
+        });
+      } catch (wsErr) {
+        console.warn('[WholesaleService] Error reading wholesale_customers:', wsErr);
+      }
+
+      // 2. Fetch users who have wholesaleAccess === true
+      try {
+        const qUsers = query(collection(db, 'users'), where('wholesaleAccess', '==', true));
+        const userSnap = await getDocs(qUsers);
+        userSnap.forEach(uDoc => {
+          const u = uDoc.data();
+          const uId = uDoc.id || u.uid;
+          if (!uId) return;
+
+          const existing = customersMap.get(uId);
+          if (existing) {
+            // Ensure wholesaleAccess is synced
+            customersMap.set(uId, {
+              ...existing,
+              wholesaleAccess: true,
+              status: existing.status || 'active',
+              name: existing.name || u.name || 'Wholesale Partner',
+              email: existing.email || u.email || '',
+              phone: existing.phone || u.phone || '',
+              businessName: existing.businessName || u.businessName || ''
+            });
+          } else {
+            // Add user directly as wholesale customer
+            customersMap.set(uId, {
+              id: uId,
+              userId: uId,
+              name: u.name || 'Wholesale Partner',
+              email: u.email || '',
+              phone: u.phone || '',
+              businessName: u.businessName || '',
+              pageName: u.pageName || '',
+              location: u.location || '',
+              businessAddress: u.businessAddress || u.address || '',
+              address: u.address || u.businessAddress || '',
+              wholesaleAccess: true,
+              status: (u.wholesaleStatus as any) || (u.status === 'suspended' ? 'suspended' : 'active'),
+              creditLimit: u.creditLimit || 50000,
+              currentDue: u.currentDue || 0,
+              totalPaid: u.totalPaid || 0,
+              totalPurchasedBDT: u.totalPurchasedBDT || 0,
+              totalOrders: u.totalOrders || 0,
+              totalWholesalePurchase: u.totalPurchasedBDT || 0,
+              createdAt: u.createdAt || new Date().toISOString(),
+              updatedAt: u.updatedAt || new Date().toISOString()
+            });
+          }
+        });
+      } catch (uErr) {
+        console.warn('[WholesaleService] Note: reading users with wholesaleAccess:', uErr);
+      }
+
+      const list = Array.from(customersMap.values());
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      return list;
     } catch (err) {
       console.warn('[WholesaleService] Error getting all wholesale customers:', err);
       return [];
@@ -365,19 +453,92 @@ export const wholesaleService = {
   },
 
   /**
-   * Live subscribe to all wholesale customers for admin
+   * Live subscribe to all wholesale customers for admin.
+   * Real-time sync of both wholesale_customers and users with wholesaleAccess.
    */
   subscribeAllWholesaleCustomers(callback: (customers: WholesaleCustomer[]) => void): () => void {
-    const q = query(collection(db, 'wholesale_customers'), orderBy('createdAt', 'desc'));
-    return onSnapshot(q, (snap) => {
-      const customers: WholesaleCustomer[] = [];
-      snap.forEach(docSnap => {
-        customers.push({ id: docSnap.id, ...docSnap.data() } as WholesaleCustomer);
+    let wsCustomers: WholesaleCustomer[] = [];
+    let wsUsers: WholesaleCustomer[] = [];
+
+    const emitMerged = () => {
+      const mergedMap = new Map<string, WholesaleCustomer>();
+      wsCustomers.forEach(c => mergedMap.set(c.id, c));
+      wsUsers.forEach(u => {
+        const existing = mergedMap.get(u.id);
+        if (existing) {
+          mergedMap.set(u.id, {
+            ...existing,
+            wholesaleAccess: true,
+            status: existing.status || u.status || 'active',
+            name: existing.name || u.name,
+            email: existing.email || u.email,
+            phone: existing.phone || u.phone,
+            businessName: existing.businessName || u.businessName
+          });
+        } else {
+          mergedMap.set(u.id, u);
+        }
       });
-      callback(customers);
+
+      const list = Array.from(mergedMap.values());
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      callback(list);
+    };
+
+    const unsubWs = onSnapshot(collection(db, 'wholesale_customers'), (snap) => {
+      const list: WholesaleCustomer[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as WholesaleCustomer);
+      });
+      wsCustomers = list;
+      emitMerged();
     }, (err) => {
-      console.warn('[WholesaleService] onSnapshot subscription warning:', err);
+      console.warn('[WholesaleService] wholesale_customers subscription warning:', err);
     });
+
+    const unsubUsers = onSnapshot(
+      query(collection(db, 'users'), where('wholesaleAccess', '==', true)), 
+      (snap) => {
+        const list: WholesaleCustomer[] = [];
+        snap.forEach(docSnap => {
+          const u = docSnap.data();
+          const uId = docSnap.id || u.uid;
+          if (!uId) return;
+          list.push({
+            id: uId,
+            userId: uId,
+            name: u.name || 'Wholesale Partner',
+            email: u.email || '',
+            phone: u.phone || '',
+            businessName: u.businessName || '',
+            pageName: u.pageName || '',
+            location: u.location || '',
+            businessAddress: u.businessAddress || u.address || '',
+            address: u.address || u.businessAddress || '',
+            wholesaleAccess: true,
+            status: (u.wholesaleStatus as any) || (u.status === 'suspended' ? 'suspended' : 'active'),
+            creditLimit: u.creditLimit || 50000,
+            currentDue: u.currentDue || 0,
+            totalPaid: u.totalPaid || 0,
+            totalPurchasedBDT: u.totalPurchasedBDT || 0,
+            totalOrders: u.totalOrders || 0,
+            totalWholesalePurchase: u.totalPurchasedBDT || 0,
+            createdAt: u.createdAt || new Date().toISOString(),
+            updatedAt: u.updatedAt || new Date().toISOString()
+          });
+        });
+        wsUsers = list;
+        emitMerged();
+      }, 
+      (err) => {
+        console.warn('[WholesaleService] users wholesaleAccess subscription warning:', err);
+      }
+    );
+
+    return () => {
+      unsubWs();
+      unsubUsers();
+    };
   }
 };
 

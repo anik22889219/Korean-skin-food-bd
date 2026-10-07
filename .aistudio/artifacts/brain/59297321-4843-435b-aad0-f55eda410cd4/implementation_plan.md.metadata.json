@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for the Product Assignment System within the Admin Taxonomy & Filter Manager. Enables administrators to directly assign and unassign products to any filter dimension (Brands, Categories, Skin Types, Concerns, Benefits, Routine Steps, Ingredients) using a high-efficiency dual-pane modal with bulk search, multi-selection checkboxes, and instant unassign list.",
-  "updatedAt": "2026-10-06T19:00:32.984772665Z",
+  "summary": "Implementation plan for Super Admin Wholesaler Management page with full profile editing, quick order creation modal, live product search, custom wholesale pricing, and automatic ledger & balance synchronization.",
+  "updatedAt": "2026-10-07T12:49:00.336460168Z",
   "requestFeedback": true,
   "userFacing": true
 }

@@ -22,11 +22,37 @@ import {
 export interface CreateWholesaleOrderItemInput {
   productId: string;
   quantity: number;
+  unitPrice?: number;
   customCodPrice?: number;
   CODUnitPrice?: number;
   codPrice?: number;
   barcode?: string;
   name?: string;
+  sku?: string;
+  image?: string;
+}
+
+export interface CreateAdminWholesaleOrderParams {
+  customerId: string;
+  customerName?: string;
+  businessName?: string;
+  phone?: string;
+  items: CreateWholesaleOrderItemInput[];
+  shippingAddress: {
+    deliveryName: string;
+    deliveryPhone: string;
+    deliveryAddress: string;
+    courier?: string;
+    orderNote?: string;
+  };
+  deliveryCharge?: number;
+  discount?: number;
+  paidAmount?: number;
+  paymentMethod?: string;
+  paymentReference?: string;
+  status?: WholesaleOrderStatus;
+  notes?: string;
+  createdBy?: string;
 }
 
 export interface CreateWholesaleOrderParams {
@@ -59,6 +85,37 @@ export interface CreateWholesaleOrderResult {
 }
 
 export const wholesaleOrderService = {
+  /**
+   * Super Admin / Staff manual wholesale order creation.
+   * Supports custom wholesale unit prices, immediate advance payments, automatic ledger sync, and stock decrement.
+   */
+  async createAdminWholesaleOrder(params: CreateAdminWholesaleOrderParams): Promise<WholesaleOrder> {
+    if (!params.customerId) {
+      throw new Error('Customer ID is required to create a wholesale order.');
+    }
+
+    if (!params.items || params.items.length === 0) {
+      throw new Error('Please select at least one product for the order.');
+    }
+
+    // Call server API for authoritative calculation and persistence
+    const response = await fetch('/api/wholesale/orders/admin-create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params)
+    });
+
+    const data: CreateWholesaleOrderResult = await response.json();
+
+    if (!response.ok || !data.success || !data.order) {
+      const errorMsg = data.error || data.message || `Server responded with status ${response.status}`;
+      throw new Error(errorMsg);
+    }
+
+    return data.order;
+  },
   /**
    * Authoritative server-side creation of wholesale orders.
    * Invokes /api/wholesale/orders/create with full stock validation and server pricing.

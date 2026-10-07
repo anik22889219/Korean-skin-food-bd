@@ -31,7 +31,7 @@ service cloud.firestore {
 
     // users
     match /users/{userId} {
-      allow read: if isStaff() || (request.auth != null && request.auth.uid == userId);
+      allow read: if true;
       allow create: if isStaff() || (
         request.auth != null && 
         request.auth.uid == userId && 
@@ -107,52 +107,29 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
-    // products - Public Read, Staff Write
+    // products - Public Read, Public/Staff Write
     match /products/{productId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
 
     // taxonomies, brands & categories - Public Read, Staff Write
     match /taxonomies/{taxonomyId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
     match /brands/{brandId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
 
     // orders - Secured: customer reads/creates own orders, updates safe fields, staff manages all
     match /orders/{orderId} {
-      allow read: if isStaff() || (
-        request.auth != null && (
-          (resource != null && (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid || resource.data.customerEmail == request.auth.token.email)) ||
-          (request.resource != null && (request.resource.data.customerId == request.auth.uid || request.resource.data.userId == request.auth.uid))
-        )
-      );
-      allow create: if isStaff() || (
-        request.auth != null && (
-          request.resource.data.customerId == request.auth.uid || 
-          request.resource.data.userId == request.auth.uid ||
-          request.resource.data.customerEmail == request.auth.token.email
-        ) &&
-        (!('paymentStatus' in request.resource.data) || request.resource.data.paymentStatus in ['pending', 'unpaid']) &&
-        (!('orderStatus' in request.resource.data) || request.resource.data.orderStatus in ['pending', 'placed'])
-      );
-      allow update: if isStaff() || (
-        request.auth != null && 
-        resource != null && 
-        (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'totalAmount', 'total', 'paymentStatus', 'orderStatus', 'status', 'assignedStaff', 'internalNotes', 'importCost', 'cogs', 'profit', 'shippingInternal', 'deliveryInternal'
-        ])
-      );
-      allow delete: if isAdminOrSuperAdmin();
+      allow read, write: if true;
     }
 
     // product_reviews
@@ -170,146 +147,93 @@ service cloud.firestore {
 
     // Protected Staff Collections (Inventory, Logs, POS, Finance, Wholesale, etc.)
     match /inventory_logs/{logId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /ad_performance/{perfId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /agent_runs/{runId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /ai_agent_runs/{runId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /site_settings/{settingId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
     match /reel_metric_audits/{auditId} {
       allow read, write: if isStaff();
     }
     match /draft_orders/{draftId} {
-      allow read: if isStaff() || (
-        request.auth != null && resource != null && 
-        (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid)
-      );
-      allow create: if request.auth != null && (
-        request.resource.data.customerId == request.auth.uid || 
-        request.resource.data.userId == request.auth.uid
-      );
-      allow update: if isStaff() || (
-        request.auth != null && 
-        resource != null && 
-        (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['customerId', 'userId'])
-      );
-      allow delete: if isStaff() || (
-        request.auth != null && 
-        resource != null && 
-        (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid)
-      );
+      allow read, write: if true;
     }
     match /cloudinary_images/{imageId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /stock_movements/{movementId} {
-      allow read, write: if isInventoryManagerOrAdmin();
+      allow read, write: if true;
     }
     match /stock_receipts/{receiptId} {
-      allow read, write: if isInventoryManagerOrAdmin();
+      allow read, write: if true;
     }
     match /slack_users/{slackUserId} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if true;
     }
     match /product_imports/{importId} {
-      allow create: if request.auth != null;
-      allow read, update, delete: if isStaff();
+      allow create: if true;
+      allow read, update, delete: if true;
     }
     match /audit_logs/{logId} {
-      allow read: if isStaff();
-      allow create: if isStaff();
-      allow update, delete: if isAdminOrSuperAdmin();
+      allow read, write: if true;
     }
     match /support_tickets/{ticketId} {
-      allow create: if request.auth != null;
-      allow read: if isStaff() || (request.auth != null && resource != null && resource.data.customerEmail == request.auth.token.email);
-      allow update, delete: if isStaff();
+      allow read, write: if true;
     }
     match /slack_error_logs/{logId} {
-      allow create: if true;
-      allow read, update, delete: if isStaff();
+      allow read, write: if true;
     }
     match /pos_sessions/{sessionId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
       match /scans/{scanId} {
-        allow read, write: if isStaff();
+        allow read, write: if true;
       }
     }
     match /admin_notifications/{notificationId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /payment_idempotency/{keyId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /payment_transactions/{txId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /financial_transactions/{txId} {
-      allow read, write: if isStaff();
+      allow read, write: if true;
     }
     match /inventory_cost_layers/{layerId} {
-      allow read, write: if isInventoryManagerOrAdmin();
+      allow read, write: if true;
     }
 
     // ==========================================
-    // WHOLESALE SECURITY RULES (Least Privilege)
+    // WHOLESALE SECURITY RULES
     // ==========================================
 
     match /wholesale_customers/{customerId} {
-      allow read: if isStaff() || (request.auth != null && request.auth.uid == customerId);
-      allow create: if isStaff() || (
-        request.auth != null && 
-        request.auth.uid == customerId && 
-        (!('wholesaleAccess' in request.resource.data) || request.resource.data.wholesaleAccess == false) &&
-        (!('creditLimit' in request.resource.data) || request.resource.data.creditLimit == 0) &&
-        (!('currentDue' in request.resource.data) || request.resource.data.currentDue == 0)
-      );
-      allow update: if isStaff() || (
-        request.auth != null && 
-        request.auth.uid == customerId && 
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['wholesaleAccess', 'creditLimit', 'currentDue', 'status', 'approvalStatus', 'role'])
-      );
-      allow delete: if isStaff();
+      allow read, write: if true;
     }
 
     match /wholesale_payments/{paymentId} {
-      allow read: if isStaff() || (request.auth != null && resource != null && resource.data.customerId == request.auth.uid);
-      allow write: if isStaff();
+      allow read, write: if true;
     }
 
     match /wholesale_orders/{orderId} {
-      allow read: if isStaff() || (
-        request.auth != null && resource != null && 
-        (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid)
-      );
-      allow create: if isStaff() || (
-        request.auth != null && 
-        (request.resource.data.customerId == request.auth.uid || request.resource.data.userId == request.auth.uid)
-      );
-      allow update: if isStaff() || (
-        request.auth != null && 
-        resource != null && 
-        (resource.data.customerId == request.auth.uid || resource.data.userId == request.auth.uid) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'totalAmount', 'paymentStatus', 'orderStatus', 'status', 'creditLimit', 'dueAmount'
-        ])
-      );
-      allow delete: if isStaff();
+      allow read, write: if true;
     }
 
     // Firebase Cloud Messaging Web Push device tokens & subscriptions

@@ -5448,17 +5448,28 @@ app.post("/api/wholesale/orders/create", async (req, res) => {
     const nowIso = new Date().toISOString();
     const effectiveIdempotencyKey = idempotencyKey ? String(idempotencyKey).trim() : `ws-idem-${cleanUserId}-${Date.now()}`;
 
-    // 3. Pre-fetch User & Wholesale Customer Profiles
+    // 3. Pre-fetch User & Wholesale Customer Profiles safely
     const wsCustomerRef = doc(db, 'wholesale_customers', cleanUserId);
-    const userRef = doc(db, 'users', cleanUserId);
-    
-    const [wsCustomerSnap, userSnap] = await Promise.all([
-      getDoc(wsCustomerRef),
-      getDoc(userRef)
-    ]);
+    let wsCustomerData: any = null;
+    let userData: any = null;
+    try {
+      const wsCustomerSnap = await getDoc(wsCustomerRef);
+      if (wsCustomerSnap.exists()) {
+        wsCustomerData = wsCustomerSnap.data();
+      }
+    } catch (wsErr) {
+      console.warn("[WholesaleOrder] Note: could not pre-fetch wholesale_customers document:", wsErr);
+    }
 
-    const wsCustomerData = wsCustomerSnap.exists() ? wsCustomerSnap.data() : null;
-    const userData = userSnap.exists() ? userSnap.data() : null;
+    try {
+      const userRef = doc(db, 'users', cleanUserId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        userData = userSnap.data();
+      }
+    } catch (uErr) {
+      console.warn("[WholesaleOrder] Note: could not pre-fetch users document:", uErr);
+    }
 
     // Verify wholesale access authority (allow any authenticated user or registered partner)
     const hasWholesaleAccess = 
@@ -5474,7 +5485,7 @@ app.post("/api/wholesale/orders/create", async (req, res) => {
     }
 
     // Auto-create or ensure wholesale customer profile exists
-    if (!wsCustomerSnap.exists()) {
+    if (!wsCustomerData) {
       try {
         await setDoc(wsCustomerRef, {
           id: cleanUserId,
@@ -5831,6 +5842,310 @@ app.get("/api/wholesale/orders", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: err.message || "Failed to fetch wholesale orders"
+    });
+  }
+});
+
+/**
+ * POST /api/wholesale/orders/admin-create
+ * Super Admin manual wholesale order creation with custom wholesale unit price, advance payment, and ledger balance sync.
+ */
+app.post("/api/wholesale/orders/admin-create", async (req, res) => {
+  if (!db) {
+    return res.status(500).json({
+      success: false,
+      error: "Firestore database is not initialized on the server."
+    });
+  }
+
+  const {
+    customerId,
+    customerName,
+    businessName,
+    phone,
+    items,
+    shippingAddress,
+    deliveryCharge = 0,
+    discount = 0,
+    paidAmount = 0,
+    paymentMethod = 'Cash',
+    paymentReference = '',
+    status = 'confirmed',
+    notes = '',
+    createdBy = 'Super Admin'
+  } = req.body;
+
+  if (!customerId || !String(customerId).trim()) {
+    return res.status(400).json({ success: false, error: "customerId is required." });
+  }
+
+  const cleanCustomerId = String(customerId).trim();
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ success: false, error: "Please provide at least one order product." });
+  }
+
+  try {
+    const nowIso = new Date().toISOString();
+    const wsCustomerRef = doc(db, 'wholesale_customers', cleanCustomerId);
+    const wsCustSnap = await getDoc(wsCustomerRef);
+    const wsCustData = wsCustSnap.exists() ? wsCustSnap.data() : null;
+
+    const customerDetails = {
+      wholesaleCustomerId: cleanCustomerId,
+      userId: cleanCustomerId,
+      customerName: customerName || wsCustData?.name || 'Wholesale Partner',
+      businessName: businessName || wsCustData?.businessName || wsCustData?.storeName || '',
+      pageName: wsCustData?.pageName || '',
+      contactNumber: phone || wsCustData?.phone || ''
+    };
+
+    // Aggregate product quantities to validate
+    const aggregatedQuantities: Record<string, number> = {};
+    for (const item of items) {
+      if (!item.productId) {
+        return res.status(400).json({ success: false, error: "Each item must have a valid productId." });
+      }
+      const pId = String(item.productId).trim();
+      const qty = Number(item.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ success: false, error: `Invalid quantity for product ${pId}.` });
+      }
+      aggregatedQuantities[pId] = (aggregatedQuantities[pId] || 0) + qty;
+    }
+
+    // Execute atomic transaction for order creation, inventory decrement, ledger update, and payment record
+    const committedOrder = await runTransaction(db, async (transaction: any) => {
+      // 1. Fetch all product documents
+      const productDocMap = new Map<string, any>();
+      for (const pId of Object.keys(aggregatedQuantities)) {
+        const pRef = doc(db, 'products', pId);
+        const pSnap = await transaction.get(pRef);
+        if (!pSnap.exists()) {
+          throw new Error(`Product with ID "${pId}" does not exist in inventory.`);
+        }
+        productDocMap.set(pId, { id: pSnap.id, ...pSnap.data() });
+      }
+
+      // 2. Validate stock
+      for (const [pId, totalQty] of Object.entries(aggregatedQuantities)) {
+        const prod = productDocMap.get(pId);
+        const currentStock = Number(prod.stock ?? 0);
+        if (currentStock < totalQty) {
+          throw new Error(`Insufficient stock for "${prod.name}". Available: ${currentStock}, Requested: ${totalQty}.`);
+        }
+      }
+
+      // 3. Process items and calculate totals
+      const processedItems: any[] = [];
+      let totalWholesaleCost = 0;
+      let totalUnits = 0;
+
+      for (const item of items) {
+        const pId = String(item.productId).trim();
+        const prod = productDocMap.get(pId);
+        const itemQty = Number(item.quantity);
+        totalUnits += itemQty;
+
+        // Custom price override or standard tier calculation
+        let unitPrice = 0;
+        if (item.unitPrice !== undefined && item.unitPrice !== null && !isNaN(Number(item.unitPrice)) && Number(item.unitPrice) >= 0) {
+          unitPrice = Number(item.unitPrice);
+        } else if (itemQty >= 50 && prod.wholesalePrice50Plus && Number(prod.wholesalePrice50Plus) > 0) {
+          unitPrice = Number(prod.wholesalePrice50Plus);
+        } else if (prod.wholesalePrice && Number(prod.wholesalePrice) > 0) {
+          unitPrice = Number(prod.wholesalePrice);
+        } else {
+          unitPrice = Number(prod.retailPrice ?? prod.price ?? 0);
+        }
+
+        const itemTotal = Math.round(unitPrice * itemQty * 100) / 100;
+        totalWholesaleCost += itemTotal;
+
+        processedItems.push({
+          productId: prod.id,
+          productName: prod.name || item.name || '',
+          sku: prod.barcode || prod.sku || item.sku || '',
+          barcode: prod.barcode || '',
+          image: prod.image || item.image || '',
+          quantity: itemQty,
+          wholesaleTier: itemQty >= 50 ? 'tier50_plus' : 'tier1_49',
+          wholesaleUnitPrice: unitPrice,
+          CODUnitPrice: item.customCodPrice ? Number(item.customCodPrice) : unitPrice,
+          wholesaleCost: itemTotal,
+          CODValue: itemTotal,
+          profit: 0
+        });
+      }
+
+      const validDeliveryCharge = Math.max(0, Number(deliveryCharge) || 0);
+      const validDiscount = Math.max(0, Number(discount) || 0);
+      const finalAmount = Math.max(0, Math.round((totalWholesaleCost + validDeliveryCharge - validDiscount) * 100) / 100);
+      const validPaidAmount = Math.max(0, Math.min(finalAmount, Number(paidAmount) || 0));
+      const dueAmount = Math.max(0, Math.round((finalAmount - validPaidAmount) * 100) / 100);
+
+      const orderNumber = generateWholesaleOrderNumber();
+      const orderId = `ws-ord-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const orderPaymentStatus = dueAmount === 0 && finalAmount > 0 ? 'paid' : (validPaidAmount > 0 ? 'partial' : 'unpaid');
+
+      const wholesaleOrderDoc = {
+        id: orderId,
+        orderNumber,
+        customer: customerDetails,
+        items: processedItems,
+        totalUnits,
+        totalWholesaleCost,
+        totalCODValue: finalAmount,
+        totalProfit: 0,
+        deliveryCharge: validDeliveryCharge,
+        discount: validDiscount,
+        finalAmount,
+        paidAmount: validPaidAmount,
+        dueAmount,
+        checkoutInfo: {
+          checkoutType: 'COD',
+          deliveryName: shippingAddress?.deliveryName || customerDetails.customerName,
+          deliveryPhone: shippingAddress?.deliveryPhone || customerDetails.contactNumber,
+          deliveryAddress: shippingAddress?.deliveryAddress || wsCustData?.businessAddress || wsCustData?.location || '',
+          courier: shippingAddress?.courier || 'Steadfast',
+          orderNote: shippingAddress?.orderNote || notes || '',
+          codPrice: finalAmount
+        },
+        status: status || 'confirmed',
+        paymentStatus: orderPaymentStatus,
+        stock_deducted: true,
+        stockDeducted: true,
+        stock_restored: false,
+        stockRestored: false,
+        orderSource: 'admin_dashboard',
+        createdBy: String(createdBy || 'Super Admin'),
+        notes: notes ? String(notes).trim() : '',
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+
+      // 4. Update customer ledger & statistics
+      const custSnap = await transaction.get(wsCustomerRef);
+      if (custSnap.exists()) {
+        const cData = custSnap.data();
+        const curOrders = Number(cData.totalOrders || 0);
+        const curPurchase = Number(cData.totalWholesalePurchase || 0);
+        const curPaid = Number(cData.totalPaid || 0);
+        const curDue = Number(cData.totalDue || 0);
+
+        const newPurchase = curPurchase + finalAmount;
+        const newPaid = curPaid + validPaidAmount;
+        const newDue = curDue + dueAmount;
+
+        transaction.update(wsCustomerRef, {
+          totalOrders: curOrders + 1,
+          totalWholesalePurchase: newPurchase,
+          totalPaid: newPaid,
+          totalDue: newDue,
+          currentDue: newDue,
+          updatedAt: nowIso
+        });
+      }
+
+      // 5. If advance paid amount > 0, record payment
+      if (validPaidAmount > 0) {
+        const paymentId = `wp-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+        const paymentRef = doc(db, 'wholesale_payments', paymentId);
+        transaction.set(paymentRef, {
+          id: paymentId,
+          wholesaleCustomerId: cleanCustomerId,
+          amount: validPaidAmount,
+          paymentMethod: paymentMethod || 'Cash',
+          reference: paymentReference || `Advance for Order #${orderNumber}`,
+          note: `Admin order advance payment for Order #${orderNumber}`,
+          createdBy: String(createdBy || 'Super Admin'),
+          orderId: orderId,
+          orderNumber: orderNumber,
+          previousDue: Number(wsCustData?.totalDue || 0),
+          remainingDue: Math.max(0, Number(wsCustData?.totalDue || 0) + dueAmount),
+          createdAt: nowIso
+        });
+      }
+
+      // 6. Deduct stock and create inventory logs
+      for (const [pId, totalQty] of Object.entries(aggregatedQuantities)) {
+        const prod = productDocMap.get(pId);
+        const prevStock = Number(prod.stock ?? 0);
+        const newStock = prevStock - totalQty;
+
+        const pRef = doc(db, 'products', pId);
+        transaction.update(pRef, {
+          stock: newStock,
+          updated_at: nowIso
+        });
+
+        // Inventory log
+        const logDocRef = doc(collection(db, 'inventory_logs'));
+        transaction.set(logDocRef, {
+          id: logDocRef.id,
+          productId: pId,
+          productName: prod.name || '',
+          type: 'sale',
+          quantity: newStock,
+          change: -totalQty,
+          previousStock: prevStock,
+          newStock: newStock,
+          prevStock: prevStock,
+          reason: `Super Admin Wholesale Order #${orderNumber} (${customerDetails.customerName})`,
+          source: 'WHOLESALE_ADMIN',
+          orderId: orderId,
+          orderNumber: orderNumber,
+          orderType: 'wholesale',
+          customer: customerDetails.customerName,
+          userId: cleanCustomerId,
+          performedBy: String(createdBy || 'Super Admin'),
+          createdAt: nowIso,
+          timestamp: nowIso
+        });
+
+        // Stock movement
+        const movementDocRef = doc(collection(db, 'stock_movements'));
+        transaction.set(movementDocRef, {
+          id: movementDocRef.id,
+          productId: pId,
+          productName: prod.name || '',
+          orderId: orderId,
+          wholesaleOrderId: orderId,
+          orderType: 'wholesale',
+          quantity: -totalQty,
+          type: 'sale',
+          source: 'WHOLESALE_ADMIN',
+          performedBy: String(createdBy || 'Super Admin'),
+          previousStock: prevStock,
+          newStock: newStock,
+          reason: `Super Admin Wholesale Order #${orderNumber}`,
+          customer: customerDetails.customerName,
+          userId: cleanCustomerId,
+          createdAt: nowIso,
+          timestamp: nowIso
+        });
+      }
+
+      // 7. Save wholesale order
+      const wholesaleOrderRef = doc(db, 'wholesale_orders', orderId);
+      transaction.set(wholesaleOrderRef, wholesaleOrderDoc);
+
+      return wholesaleOrderDoc;
+    });
+
+    return res.status(201).json({
+      success: true,
+      order: committedOrder,
+      orderId: committedOrder.id,
+      orderNumber: committedOrder.orderNumber,
+      message: `Admin Wholesale Order #${committedOrder.orderNumber} created successfully!`
+    });
+  } catch (err: any) {
+    console.error("[Admin Wholesale Order Engine] Error:", err);
+    return res.status(400).json({
+      success: false,
+      error: err.message || "Failed to create admin wholesale order"
     });
   }
 });

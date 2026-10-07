@@ -124,6 +124,23 @@ const CACHE_KEY = 'ksf_google_business_profile_cache';
 
 export const googleBusinessService = {
   /**
+   * Synchronous getter for immediate state initialization
+   */
+  getProfileData(): GoogleBusinessProfileData {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          return JSON.parse(cached);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return VERIFIED_GOOGLE_BUSINESS_DATA;
+  },
+
+  /**
    * Fetch current Google Business reviews and profile data.
    * Tries local cache / server API first, falls back to verified data.
    */
