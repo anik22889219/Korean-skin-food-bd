@@ -7,6 +7,7 @@ import {
   Headphones, MessageSquare, Hash, DollarSign, UserCheck, Send, Layers
 } from 'lucide-react';
 import { SlackUser, SlackPermission, SlackRole, Order, ProductImportPayload, AuditLog, CustomerSupportTicket, SlackChannel } from '../types';
+import { authFetch } from '../services/apiClient';
 
 export const AdminSlackSettings: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'customer_support' | 'channels' | 'slash_commands' | 'product_import' | 'notifications' | 'audit_logs' | 'auth'>('customer_support');
@@ -178,7 +179,7 @@ export const AdminSlackSettings: React.FC = () => {
     setActionMessage(null);
 
     try {
-      const res = await fetch('/api/slack/link-user', {
+      const res = await authFetch('/api/slack/link-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -215,7 +216,7 @@ export const AdminSlackSettings: React.FC = () => {
     if (!window.confirm(`Are you sure you want to unlink Slack User ID ${uId}?`)) return;
 
     try {
-      const res = await fetch('/api/slack/unlink-user', {
+      const res = await authFetch('/api/slack/unlink-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slackUserId: uId })

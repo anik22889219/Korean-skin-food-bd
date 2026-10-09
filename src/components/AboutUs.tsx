@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Check, Sparkles, ShieldCheck, ArrowRight, Globe, Truck, Award, Heart } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { Product } from '../types';
+import { SeoHead } from './SeoHead';
+import { buildStaticPageSeo } from '../services/seoService';
 
 interface ShowcaseItem {
   id: string;
@@ -225,6 +227,13 @@ export const AboutUs: React.FC = () => {
     }, 1800);
   };
 
+  const aboutUsSeo = React.useMemo(() => buildStaticPageSeo(
+    'About Us - Our Story & Authentic Seoul Heritage',
+    'Discover Korean Skin Food Bangladesh. Est. 2014, importing 100% genuine cosmeceuticals directly from Seoul with verified origin and dermatologist-tested standards.',
+    '/about-us',
+    ['About Korean Skin Food', 'Authentic K-Beauty Bangladesh', 'Seoul cosmetics importer Dhaka']
+  ), []);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -233,6 +242,8 @@ export const AboutUs: React.FC = () => {
       transition={{ duration: 0.6 }}
       className="w-full bg-[#fff8f5] text-[#1e1b18] font-sans-editorial overflow-hidden -mt-6 sm:-mt-8"
     >
+      <SeoHead metadata={aboutUsSeo} />
+
       {/* 1. HERO SECTION: The Ritual of Light */}
       <section className="relative min-h-[820px] lg:min-h-[920px] flex items-center justify-start overflow-hidden">
         <div className="absolute inset-0 z-0 overflow-hidden">

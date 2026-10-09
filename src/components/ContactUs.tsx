@@ -4,6 +4,8 @@ import {
   Mail, Phone, MessageSquare, MapPin, CheckCircle, 
   ChevronDown, ChevronUp, Wand2, Send 
 } from 'lucide-react';
+import { SeoHead } from './SeoHead';
+import { buildStaticPageSeo } from '../services/seoService';
 
 export const ContactUs: React.FC = () => {
   // Form State
@@ -46,6 +48,13 @@ export const ContactUs: React.FC = () => {
     }
   ];
 
+  const contactSeo = React.useMemo(() => buildStaticPageSeo(
+    'Contact Us - Customer Desk & Consultations',
+    'Get in touch with Korean Skin Food Bangladesh. Direct WhatsApp chat, phone support, and skincare consultations in Dhaka.',
+    '/contact-us',
+    ['Contact Korean Skin Food', 'K-Beauty Bangladesh helpline', 'Dhaka skincare customer care']
+  ), []);
+
   return (
     <motion.div 
       initial={{ opacity: 0, y: 15 }}
@@ -54,6 +63,8 @@ export const ContactUs: React.FC = () => {
       transition={{ duration: 0.4 }}
       className="w-full max-w-[1720px] mx-auto px-4 py-8 md:px-8 lg:px-12 space-y-16"
     >
+      <SeoHead metadata={contactSeo} />
+
       {/* Page Header */}
       <div className="text-center space-y-3 max-w-2xl mx-auto">
         <span className="bg-pink-50 text-[#E91E8C] text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border border-pink-200/50 inline-block">

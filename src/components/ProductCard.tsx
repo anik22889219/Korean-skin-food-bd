@@ -82,6 +82,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     e.stopPropagation();
     if (effectiveStock === 0) return;
     
+    // For wholesale users, always direct to PDP to configure wholesale order quantity & bulk tiers
+    if (hasWholesaleAccess) {
+      navigate(`/product/${product.id}`);
+      return;
+    }
+
     // For customizable combos, always direct customer to PDP to pick their items
     if (product.isCombo && product.comboConfig?.type === 'customizable') {
       navigate(`/product/${product.id}`);
@@ -294,6 +300,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 ? 'bg-emerald-600 text-white shadow-emerald-500/20'
                 : effectiveStock === 0
                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                : hasWholesaleAccess
+                ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 shadow-md shadow-amber-500/20 active:scale-[0.98]'
                 : product.isCombo && product.comboConfig?.type === 'customizable'
                 ? 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white shadow-md shadow-purple-500/20 active:scale-[0.98]'
                 : 'bg-gradient-to-r from-[#E91E8C] to-pink-600 hover:from-[#FF4B91] hover:to-[#E91E8C] text-white shadow-md shadow-pink-500/20 hover:shadow-pink-500/35 active:scale-[0.98]'
@@ -306,6 +314,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               </>
             ) : effectiveStock === 0 ? (
               <span>Out of Stock</span>
+            ) : hasWholesaleAccess ? (
+              <>
+                <Building2 size={13} />
+                <span>{language === 'bn' ? 'হোলসেল অর্ডার' : 'Order Wholesale'}</span>
+              </>
             ) : product.isCombo && product.comboConfig?.type === 'customizable' ? (
               <>
                 <Sparkles size={13} />

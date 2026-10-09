@@ -18,6 +18,107 @@ const PORT = 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+// ==========================================
+// SECURITY HEADERS & DEFENSIVE MIDDLEWARE
+// ==========================================
+app.use((req, res, next) => {
+  // Prevent MIME type sniffing
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  // Modern standard: disable browser XSS auditor
+  res.setHeader("X-XSS-Protection", "0");
+  // Strict Referrer Policy
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  // Prevent automatic file download executions
+  res.setHeader("X-Download-Options", "noopen");
+  // Enforce HTTPS
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+
+  // Prevent browser caching on sensitive API endpoints
+  if (req.path.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+});
+
+// ==========================================
+// RATE LIMITING PROTECTION (ANTI-DOS & ANTI-DENIAL-OF-WALLET)
+// ==========================================
+interface RateLimitRecord {
+  count: number;
+  resetAt: number;
+}
+const rateLimitStore = new Map<string, RateLimitRecord>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of rateLimitStore.entries()) {
+    if (now > record.resetAt) {
+      rateLimitStore.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
+function createRateLimiter(options: {
+  windowMs: number;
+  max: number;
+  message: string;
+  prefix?: string;
+}) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+                  req.socket.remoteAddress ||
+                  "unknown-client";
+    const key = `${options.prefix || "rl"}:${rawIp}`;
+    const now = Date.now();
+
+    const record = rateLimitStore.get(key);
+    if (!record || now > record.resetAt) {
+      rateLimitStore.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+
+    if (record.count >= options.max) {
+      const retryAfterSec = Math.ceil((record.resetAt - now) / 1000);
+      res.setHeader("Retry-After", String(retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: options.message,
+        retryAfter: retryAfterSec
+      });
+    }
+
+    record.count++;
+    return next();
+  };
+}
+
+const aiRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 30, // max 30 AI requests per minute per IP
+  message: "Too many AI requests. Please slow down.",
+  prefix: "ai"
+});
+
+const checkoutRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 15, // max 15 checkout submissions per minute per IP
+  message: "Checkout rate limit exceeded. Please wait a moment.",
+  prefix: "checkout"
+});
+
+const generalApiRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 150, // max 150 API requests per minute per IP
+  message: "Too many API requests. Please try again shortly.",
+  prefix: "general"
+});
+
+app.use("/api", generalApiRateLimiter);
+app.use("/api/gemini", aiRateLimiter);
+app.use("/api/chatbot", aiRateLimiter);
+
 // Initialize Slack Bolt SDK Foundation
 initializeSlackSDK();
 const receiver = slackService.getReceiver();
@@ -107,8 +208,8 @@ app.post("/api/notifications/register-token", async (req, res) => {
   }
 });
 
-// Send/trigger push notification broadcast
-app.post("/api/notifications/send-push", async (req, res) => {
+// Send/trigger push notification broadcast (Admin/Staff only)
+app.post("/api/notifications/send-push", verifyAdminAuth, async (req, res) => {
   try {
     const { title, body, url, token, targetRole } = req.body;
     console.log(`[FCM Web Push] Dispatch: "${title}" - "${body}" (target: ${targetRole || 'all'})`);
@@ -484,7 +585,7 @@ app.get("/api/slack/users", async (req, res) => {
   }
 });
 
-app.post("/api/slack/link-user", async (req, res) => {
+app.post("/api/slack/link-user", verifyAdminAuth, async (req, res) => {
   const { slackUserId, firestoreUserId, email, role, permissions, name, slackUsername } = req.body;
 
   if (!slackUserId || !email || !role) {
@@ -515,7 +616,7 @@ app.post("/api/slack/link-user", async (req, res) => {
   }
 });
 
-app.post("/api/slack/unlink-user", async (req, res) => {
+app.post("/api/slack/unlink-user", verifyAdminAuth, async (req, res) => {
   const { slackUserId } = req.body;
   if (!slackUserId) {
     return res.status(400).json({ success: false, error: "slackUserId is required" });
@@ -1280,7 +1381,7 @@ async function resolveFacebookObjectAndMetrics(
 }
 
 // ================= BACKEND AUTHENTICATION & ROLE VERIFICATION =================
-async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email?: string } | null> {
+async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email?: string; emailVerified?: boolean } | null> {
   if (!idToken) return null;
 
   let apiKey = process.env.VITE_FIREBASE_API_KEY;
@@ -1319,6 +1420,7 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; em
       return {
         uid: data.users[0].localId,
         email: data.users[0].email,
+        emailVerified: Boolean(data.users[0].emailVerified)
       };
     }
     return null;
@@ -1364,15 +1466,16 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     const userDocRef = doc(db, "users", verifiedUser.uid);
     const userSnap = await getDoc(userDocRef);
 
-    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr'];
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr', 'customer_support'];
+    const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd') && (verifiedUser as any).emailVerified === true;
     const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
 
     if (isSuperAdminEmail || (userRole && staffRoles.includes(userRole))) {
       (req as any).user = {
         uid: verifiedUser.uid,
         email: verifiedUser.email,
-        role: userRole || 'super_admin'
+        role: userRole || 'super_admin',
+        emailVerified: (verifiedUser as any).emailVerified
       };
       return next();
     }
@@ -1387,6 +1490,97 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
       success: false,
       error: "Internal server error verifying authorization credentials."
     });
+  }
+}
+
+async function verifyUserOrStaffAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Please provide a valid Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Empty Bearer token provided."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase ID token."
+    });
+  }
+
+  (req as any).user = verifiedUser;
+  return next();
+}
+
+async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Bearer token required for wholesale ledger."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase credentials."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({ success: false, error: "Database not initialized on server." });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr'];
+    const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd') && (verifiedUser as any).emailVerified === true;
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : 'customer');
+
+    const isStaff = isSuperAdminEmail || staffRoles.includes(userRole);
+    const requestedTargetId = (req.params?.wholesaleCustomerId || req.body?.wholesaleCustomerId || req.body?.userId || req.query?.wholesaleCustomerId) as string;
+
+    (req as any).user = {
+      uid: verifiedUser.uid,
+      email: verifiedUser.email,
+      role: userRole,
+      isStaff
+    };
+
+    if (isStaff) {
+      return next();
+    }
+
+    // If customer, ensure they are accessing only their own wholesale data
+    if (requestedTargetId && requestedTargetId !== verifiedUser.uid) {
+      const custDocRef = doc(db, "wholesale_customers", requestedTargetId);
+      const custSnap = await getDoc(custDocRef);
+      if (!custSnap.exists() || custSnap.data()?.userId !== verifiedUser.uid) {
+        return res.status(403).json({
+          success: false,
+          error: "Access Denied. You are not authorized to view or manage another wholesale account."
+        });
+      }
+    }
+
+    return next();
+  } catch (err: any) {
+    console.error("Error verifying wholesale authorization:", err);
+    return res.status(500).json({ success: false, error: "Authorization verification failure." });
   }
 }
 
@@ -1877,8 +2071,8 @@ app.get("/api/cloudinary/config", (req, res) => {
   });
 });
 
-// POST Generate Signed Cloudinary Signature (Keep API Secret 100% on server)
-app.post("/api/cloudinary/sign", (req, res) => {
+// POST Generate Signed Cloudinary Signature (Keep API Secret 100% on server, require authenticated user/creator/staff)
+app.post("/api/cloudinary/sign", verifyUserOrStaffAuth, (req, res) => {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
   const apiKey = process.env.CLOUDINARY_API_KEY || '';
   const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
@@ -2307,7 +2501,7 @@ app.post("/api/slack/support-tickets/:id/reply", async (req, res) => {
   }
 });
 
-app.post("/api/slack/support-tickets/:id/refund", async (req, res) => {
+app.post("/api/slack/support-tickets/:id/refund", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
   const { amount, staffName, slackUserId } = req.body;
 
@@ -2356,7 +2550,7 @@ app.post("/api/slack/test-notification", async (req, res) => {
   }
 });
 
-app.post("/api/slack/support-tickets/:id/close", async (req, res) => {
+app.post("/api/slack/support-tickets/:id/close", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
   const { staffName, slackUserId } = req.body;
 
@@ -2507,7 +2701,7 @@ app.post("/api/slack/trigger-test-notification", async (req, res) => {
 });
 
 // 1. placeOrder Endpoint (mirrors Firebase Cloud Function)
-app.post("/api/functions/placeOrder", async (req, res) => {
+app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
   const { items, customerName, customerPhone, customerEmail, address, deliveryArea } = req.body;
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Cart cannot be empty" });
@@ -2664,8 +2858,8 @@ app.post("/api/functions/placeOrder", async (req, res) => {
   }
 });
 
-// 1C. Finance Collect Due Endpoint
-app.post("/api/finance/collect-due", async (req, res) => {
+// 1C. Finance Collect Due Endpoint (Admin/Staff only)
+app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
   const { orderId, amount, method = "CASH", accountCode, note, receivedBy = "Store Staff", source = "POS", idempotencyKey } = req.body;
 
   if (!orderId || !amount || Number(amount) <= 0) {
@@ -2855,8 +3049,8 @@ app.post("/api/finance/collect-due", async (req, res) => {
   }
 });
 
-// 1D. Finance Wallet Transfer Endpoint
-app.post("/api/finance/transfer", async (req, res) => {
+// 1D. Finance Wallet Transfer Endpoint (Admin/Staff only)
+app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
   const { fromAccount, toAccount, amount, description, performedBy = "Store Admin" } = req.body;
 
   if (!fromAccount || !toAccount || !amount || Number(amount) <= 0) {
@@ -2896,8 +3090,8 @@ app.post("/api/finance/transfer", async (req, res) => {
   }
 });
 
-// 1E. Finance Record Transaction Endpoint (Expenses, Capital, Withdrawals)
-app.post("/api/finance/transaction", async (req, res) => {
+// 1E. Finance Record Transaction Endpoint (Expenses, Capital, Withdrawals - Admin/Staff only)
+app.post("/api/finance/transaction", verifyAdminAuth, async (req, res) => {
   const { transactionType, category, amount, accountCode, description, performedBy, referenceType, referenceId, receiptUrl } = req.body;
 
   if (!amount || Number(amount) <= 0 || !accountCode) {
@@ -5247,7 +5441,7 @@ function generateWholesaleOrderNumber(): string {
 
 // ====== WHOLESALE PAYMENTS API (Step 7) ======
 
-app.get("/api/wholesale/payments/:wholesaleCustomerId", async (req, res) => {
+app.get("/api/wholesale/payments/:wholesaleCustomerId", verifyStaffOrWholesaleAuth, async (req, res) => {
 
   if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
 
@@ -5270,7 +5464,7 @@ app.get("/api/wholesale/payments/:wholesaleCustomerId", async (req, res) => {
 });
 
 
-app.post("/api/wholesale/payments", async (req, res) => {
+app.post("/api/wholesale/payments", verifyAdminAuth, async (req, res) => {
 
   if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
 
@@ -5804,19 +5998,26 @@ app.post("/api/wholesale/orders/create", async (req, res) => {
  * GET /api/wholesale/orders
  * Fetch wholesale orders list (filtered by userId for customer or all for staff)
  */
-app.get("/api/wholesale/orders", async (req, res) => {
+app.get("/api/wholesale/orders", verifyStaffOrWholesaleAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ success: false, error: "Database not initialized" });
   }
 
+  const currentUser = (req as any).user;
   const { userId, status } = req.query;
 
   try {
     const ordersCol = collection(db, 'wholesale_orders');
-    let q = query(ordersCol);
+    let targetUserId = userId ? String(userId).trim() : null;
 
-    if (userId) {
-      q = query(ordersCol, where('customer.userId', '==', String(userId).trim()));
+    // If not staff, enforce that they only query their own wholesale orders
+    if (!currentUser.isStaff) {
+      targetUserId = currentUser.uid;
+    }
+
+    let q = query(ordersCol);
+    if (targetUserId) {
+      q = query(ordersCol, where('customer.userId', '==', targetUserId));
     }
 
     const snap = await getDocs(q);
@@ -5850,7 +6051,7 @@ app.get("/api/wholesale/orders", async (req, res) => {
  * POST /api/wholesale/orders/admin-create
  * Super Admin manual wholesale order creation with custom wholesale unit price, advance payment, and ledger balance sync.
  */
-app.post("/api/wholesale/orders/admin-create", async (req, res) => {
+app.post("/api/wholesale/orders/admin-create", verifyAdminAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({
       success: false,
@@ -6154,11 +6355,12 @@ app.post("/api/wholesale/orders/admin-create", async (req, res) => {
  * GET /api/wholesale/orders/:orderId
  * Fetch single wholesale order detail
  */
-app.get("/api/wholesale/orders/:orderId", async (req, res) => {
+app.get("/api/wholesale/orders/:orderId", verifyStaffOrWholesaleAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ success: false, error: "Database not initialized" });
   }
 
+  const currentUser = (req as any).user;
   const { orderId } = req.params;
   try {
     const orderRef = doc(db, 'wholesale_orders', String(orderId).trim());
@@ -6167,9 +6369,17 @@ app.get("/api/wholesale/orders/:orderId", async (req, res) => {
       return res.status(404).json({ success: false, error: "Wholesale order not found" });
     }
 
+    const orderData = snap.data();
+    if (!currentUser.isStaff) {
+      const ownerId = orderData.customer?.userId || orderData.userId;
+      if (ownerId && ownerId !== currentUser.uid) {
+        return res.status(403).json({ success: false, error: "Access Denied. You do not own this order." });
+      }
+    }
+
     return res.json({
       success: true,
-      order: { id: snap.id, ...snap.data() }
+      order: { id: snap.id, ...orderData }
     });
   } catch (err: any) {
     console.error("[Wholesale Order Engine] Error fetching order:", err);
@@ -6184,11 +6394,12 @@ app.get("/api/wholesale/orders/:orderId", async (req, res) => {
  * POST /api/wholesale/orders/:orderId/cancel
  * Cancel a wholesale order and restore inventory atomically
  */
-app.post("/api/wholesale/orders/:orderId/cancel", async (req, res) => {
+app.post("/api/wholesale/orders/:orderId/cancel", verifyStaffOrWholesaleAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ success: false, error: "Database not initialized" });
   }
 
+  const currentUser = (req as any).user;
   const { orderId } = req.params;
   const { reason, cancelledBy } = req.body;
 
@@ -6203,6 +6414,13 @@ app.post("/api/wholesale/orders/:orderId/cancel", async (req, res) => {
       }
 
       const orderData = snap.data();
+      if (!currentUser.isStaff) {
+        const ownerId = orderData.customer?.userId || orderData.userId;
+        if (ownerId && ownerId !== currentUser.uid) {
+          throw new Error("Access Denied. You are not authorized to cancel this order.");
+        }
+      }
+
       if (orderData.status === 'cancelled') {
         throw new Error(`Order #${orderData.orderNumber || orderId} is already cancelled.`);
       }
@@ -6366,7 +6584,7 @@ app.post("/api/wholesale/orders/:orderId/cancel", async (req, res) => {
  * PATCH /api/wholesale/orders/:orderId/status
  * Update wholesale order status with transition validation & cancellation inventory handling
  */
-app.patch("/api/wholesale/orders/:orderId/status", async (req, res) => {
+app.patch("/api/wholesale/orders/:orderId/status", verifyAdminAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ success: false, error: "Database not initialized" });
   }
@@ -6545,7 +6763,7 @@ app.patch("/api/wholesale/orders/:orderId/status", async (req, res) => {
  * POST /api/test/wholesale-inventory-runner
  * Comprehensive server-side test runner for Step 6 Wholesale Order + Inventory Integration
  */
-app.post("/api/test/wholesale-inventory-runner", async (req, res) => {
+app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ success: false, error: "Database not initialized" });
   }

@@ -4,6 +4,7 @@ import { wholesaleService } from '../services/wholesaleService';
 import { WholesaleLedgerModal } from './WholesaleLedgerModal';
 import { WholesaleCustomerEditModal } from './WholesaleCustomerEditModal';
 import { AdminWholesaleOrderModal } from './AdminWholesaleOrderModal';
+import { AdminAddWholesaleCustomerModal } from './AdminAddWholesaleCustomerModal';
 import { useAuth } from '../context/AuthContext';
 import { 
   Building2,
@@ -24,7 +25,8 @@ import {
   Calendar,
   Edit,
   Plus,
-  ShoppingCart
+  ShoppingCart,
+  UserPlus
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -43,6 +45,15 @@ export function AdminWholesaleManagement() {
   const [editingCustomer, setEditingCustomer] = useState<WholesaleCustomer | null>(null);
   const [orderModalCustomer, setOrderModalCustomer] = useState<WholesaleCustomer | null>(null);
   const [isCreateOrderModalOpen, setIsCreateOrderModalOpen] = useState(false);
+  const [isAddCustomerModalOpen, setIsAddCustomerModalOpen] = useState(false);
+
+  const handleCustomerAdded = (newCustomer: WholesaleCustomer, openOrderModal?: boolean) => {
+    setCustomers(prev => [newCustomer, ...prev.filter(c => c.id !== newCustomer.id)]);
+    if (openOrderModal) {
+      setOrderModalCustomer(newCustomer);
+      setIsCreateOrderModalOpen(true);
+    }
+  };
 
   const fetchCustomers = async () => {
     setIsLoading(true);
@@ -148,16 +159,23 @@ export function AdminWholesaleManagement() {
             Manage wholesale customers, ledger, and financials
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setIsAddCustomerModalOpen(true)}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <UserPlus size={18} />
+            <span>+ Add Wholesaler</span>
+          </button>
           <button
             onClick={() => {
               setOrderModalCustomer(null);
               setIsCreateOrderModalOpen(true);
             }}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-2 transition-all"
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-2 transition-all cursor-pointer"
           >
             <Plus size={18} />
-            + Create Wholesale Order
+            <span>+ Create Wholesale Order</span>
           </button>
         </div>
       </div>
@@ -424,6 +442,15 @@ export function AdminWholesaleManagement() {
             setLedgerCustomerId(null);
             fetchCustomers(); // Refresh stats when ledger is closed
           }}
+        />
+      )}
+
+      {/* Manually Add Wholesale Customer Modal */}
+      {isAddCustomerModalOpen && (
+        <AdminAddWholesaleCustomerModal
+          isOpen={isAddCustomerModalOpen}
+          onClose={() => setIsAddCustomerModalOpen(false)}
+          onCustomerAdded={handleCustomerAdded}
         />
       )}
     </div>

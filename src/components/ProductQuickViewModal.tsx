@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, ShoppingBag, MessageCircle, Star, Sparkles, ShieldCheck, Truck, Building2, Plus, Minus } from 'lucide-react';
 import { Product } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useWholesaleCart } from '../context/WholesaleCartContext';
 import { analytics } from '../services/analyticsService';
 import { formatWhatsAppNumber } from '../services/chatbotService';
 import {
@@ -31,6 +32,7 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
 }) => {
   const navigate = useNavigate();
   const trackedProductIdRef = useRef<string | null>(null);
+  const { addToWholesaleCart } = useWholesaleCart();
 
   const [quantity, setQuantity] = useState<number>(1);
   const [quantityInput, setQuantityInput] = useState<string>('1');
@@ -337,26 +339,44 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
 
               {/* Action Buttons */}
               <div className="pt-1 space-y-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onAddToCart(product, quantity);
-                    onClose();
-                  }}
-                  disabled={product.stock === 0}
-                  className={`w-full py-3 rounded-xl text-xs font-extrabold cursor-pointer transition shadow-md flex items-center justify-center gap-2 ${
-                    product.stock > 0
-                      ? 'bg-[#E91E8C] hover:bg-pink-600 text-white active:scale-[0.99]'
-                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-                >
-                  <ShoppingBag size={15} />
-                  <span>
-                    {product.stock > 0 
-                      ? (quantity > 1 ? `Add ${quantity} to Bag & View Cart` : 'Add to Bag & View Cart') 
-                      : 'Currently Unavailable'}
-                  </span>
-                </button>
+                {hasWholesaleAccess ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (product) {
+                        addToWholesaleCart(product, quantity);
+                        onClose();
+                        navigate('/wholesale/checkout');
+                      }
+                    }}
+                    disabled={product.stock === 0}
+                    className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 rounded-xl text-xs font-black cursor-pointer transition shadow-md shadow-amber-200/50 flex items-center justify-center gap-2 active:scale-[0.99] disabled:opacity-40"
+                  >
+                    <Building2 size={16} />
+                    <span>Order Wholesale & Checkout ({quantity} pcs)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onAddToCart(product, quantity);
+                      onClose();
+                    }}
+                    disabled={product.stock === 0}
+                    className={`w-full py-3 rounded-xl text-xs font-extrabold cursor-pointer transition shadow-md flex items-center justify-center gap-2 ${
+                      product.stock > 0
+                        ? 'bg-[#E91E8C] hover:bg-pink-600 text-white active:scale-[0.99]'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <ShoppingBag size={15} />
+                    <span>
+                      {product.stock > 0 
+                        ? (quantity > 1 ? `Add ${quantity} to Bag & View Cart` : 'Add to Bag & View Cart') 
+                        : 'Currently Unavailable'}
+                    </span>
+                  </button>
+                )}
 
                 <button
                   type="button"

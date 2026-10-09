@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, where } from 'firebase/firestore';
 import { Order, Product, UserRole } from '../types';
 import { posService } from '../services/posService';
 import { productService } from '../services/productService';
@@ -232,7 +232,9 @@ export const Profile: React.FC = () => {
     }
 
     const ordersRef = collection(db, 'orders');
-    const q = query(ordersRef, orderBy('createdAt', 'desc'));
+    const q = isAdmin 
+      ? query(ordersRef, orderBy('createdAt', 'desc'))
+      : query(ordersRef, where('customer_uid', '==', user.uid));
 
     const userEmailLower = user.email?.toLowerCase().trim();
     const userUid = user.uid;

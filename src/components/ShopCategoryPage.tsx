@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { productService } from '../services/productService';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { themeService, DEFAULT_SHOP_THEME } from '../services/themeService';
@@ -22,6 +23,8 @@ import { ProductCard } from './ProductCard';
 import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { analytics } from '../services/analyticsService';
 import { getRetailPrice } from '../utils/pricing';
+import { SeoHead } from './SeoHead';
+import { buildCategorySeo } from '../services/seoService';
 
 const CATEGORIES = [
   'All',
@@ -88,6 +91,7 @@ const SKIN_CONCERNS = [
 export const ShopCategoryPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { profile } = useAuth();
   const { addToCart, language, activeTranslations, setIsCartOpen } = useCart();
 
   // Theme State
@@ -391,8 +395,20 @@ export const ShopCategoryPage: React.FC = () => {
     setVisibleCount(shopTheme.itemsPerPage || 12);
   };
 
+  // Dynamic On-Page SEO metadata for Category / Brand / Filter Catalog
+  const categorySeo = useMemo(() => {
+    return buildCategorySeo({
+      category: selectedCategory !== 'All' ? selectedCategory : undefined,
+      brand: selectedBrand !== 'All' ? selectedBrand : undefined,
+      skinType: selectedSkinType !== 'All' ? selectedSkinType : undefined,
+      concern: selectedConcern !== 'All' ? selectedConcern : undefined,
+      search: searchQuery.trim() || undefined
+    });
+  }, [selectedCategory, selectedBrand, selectedSkinType, selectedConcern, searchQuery]);
+
   return (
     <div className="min-h-screen bg-[#fff8f5] text-[#1e1b18] font-sans selection:bg-[#e91e8c] selection:text-white pb-20">
+      <SeoHead metadata={categorySeo} />
       
       {/* 1. DYNAMIC EDITORIAL CATEGORY HERO HEADER */}
       <div className="relative w-full overflow-hidden bg-[#0d160d] text-white border-b border-[#2d402d] shadow-lg">
@@ -1026,8 +1042,12 @@ export const ShopCategoryPage: React.FC = () => {
         product={quickViewProduct}
         onClose={() => setQuickViewProduct(null)}
         onAddToCart={(p) => {
-          addToCart(p);
-          setIsCartOpen(true);
+          if (profile?.wholesaleAccess) {
+            navigate(`/product/${p.id}`);
+          } else {
+            addToCart(p);
+            setIsCartOpen(true);
+          }
         }}
         whatsappNumber={whatsappNumber}
       />

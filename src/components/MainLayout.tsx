@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useWholesaleCart } from '../context/WholesaleCartContext';
 import { 
   ShoppingBag, Languages, LogOut, User, X, 
   Trash2, Plus, Minus, CheckCircle, ShieldCheck, Settings,
@@ -36,6 +37,8 @@ export const MainLayout: React.FC = () => {
     appliedCoupon, couponDiscount, couponError, isFreeDelivery, applyCoupon, removeCoupon,
     calculateGrandTotal, calculatePointsEarned, addToCart
   } = useCart();
+  const { cart: wholesaleCart, totalUnits: wholesaleTotalUnits } = useWholesaleCart();
+  const isWholesaleUser = profile?.wholesaleAccess === true;
 
   const [couponInput, setCouponInput] = useState('');
   const [couponLoading, setCouponLoading] = useState(false);
@@ -55,6 +58,14 @@ export const MainLayout: React.FC = () => {
       analytics.trackViewCart(cart, calculateCartSubtotal());
     }
   }, [isCartOpen]);
+
+  // Wholesale Checkout Enforcement: Auto-redirect wholesale users away from customer cart drawer
+  useEffect(() => {
+    if (isWholesaleUser && isCartOpen) {
+      setIsCartOpen(false);
+      navigate('/wholesale/checkout');
+    }
+  }, [isWholesaleUser, isCartOpen, navigate, setIsCartOpen]);
 
   useEffect(() => {
     const unsubscribeTheme = themeService.subscribeGlobal((gt) => {
@@ -205,8 +216,12 @@ export const MainLayout: React.FC = () => {
               products={allProducts}
               onOpenImageSearch={() => setIsImageSearchOpen(true)}
               onAddToCart={(product) => {
-                addToCart(product);
-                setIsCartOpen(true);
+                if (isWholesaleUser) {
+                  navigate(`/product/${product.id}`);
+                } else {
+                  addToCart(product);
+                  setIsCartOpen(true);
+                }
               }}
             />
           </div>
@@ -236,15 +251,30 @@ export const MainLayout: React.FC = () => {
 
           {/* Cart Icon trigger */}
           <button 
-            onClick={() => setIsCartOpen(true)}
+            onClick={() => {
+              if (isWholesaleUser) {
+                navigate('/wholesale/checkout');
+              } else {
+                setIsCartOpen(true);
+              }
+            }}
             className="relative p-2 sm:p-2.5 bg-white hover:bg-pink-50 rounded-xl border border-pink-200 cursor-pointer transition text-gray-700 shadow-xs"
-            aria-label="Shopping Cart"
+            aria-label={isWholesaleUser ? "Wholesale Cart & Checkout" : "Shopping Cart"}
+            title={isWholesaleUser ? (language === 'bn' ? 'হোলসেল চেকআউট' : 'Wholesale Checkout') : (language === 'bn' ? 'শপিং ব্যাগ' : 'Shopping Cart')}
           >
-            <ShoppingBag size={16} />
-            {cart.length > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 sm:w-4.5 sm:h-4.5 bg-[#E91E8C] text-white text-[8px] font-black rounded-full flex items-center justify-center animate-bounce border border-white">
-                {cart.reduce((sum, i) => sum + i.quantity, 0)}
-              </span>
+            <ShoppingBag size={16} className={isWholesaleUser ? 'text-amber-600' : ''} />
+            {isWholesaleUser ? (
+              wholesaleTotalUnits > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 sm:w-4.5 sm:h-4.5 bg-amber-500 text-slate-950 text-[8px] font-black rounded-full flex items-center justify-center border border-white">
+                  {wholesaleTotalUnits}
+                </span>
+              )
+            ) : (
+              cart.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 sm:w-4.5 sm:h-4.5 bg-[#E91E8C] text-white text-[8px] font-black rounded-full flex items-center justify-center animate-bounce border border-white">
+                  {cart.reduce((sum, i) => sum + i.quantity, 0)}
+                </span>
+              )
             )}
           </button>
 
@@ -547,9 +577,9 @@ export const MainLayout: React.FC = () => {
       {/* 4. Footer */}
       <Footer />
 
-      {/* 5. Cart Drawer overlay */}
+      {/* 5. Cart Drawer overlay (Suppressed completely for Wholesale Users) */}
       <AnimatePresence>
-        {isCartOpen && (
+        {isCartOpen && !isWholesaleUser && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-end">
             <motion.div 
               initial={{ x: '100%' }}
@@ -1020,18 +1050,34 @@ export const MainLayout: React.FC = () => {
         </Link>
 
         <button 
-          onClick={() => setIsCartOpen(true)}
+          onClick={() => {
+            if (isWholesaleUser) {
+              navigate('/wholesale/checkout');
+            } else {
+              setIsCartOpen(true);
+            }
+          }}
           className="relative flex flex-col items-center gap-0.5 py-1 px-2.5 text-gray-500 hover:text-[#E91E8C] active:text-[#E91E8C] transition-all cursor-pointer"
         >
           <div className="relative">
-            <ShoppingBag size={18} />
-            {cart.length > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#E91E8C] text-white text-[8px] font-black rounded-full flex items-center justify-center border border-white">
-                {cart.reduce((sum, i) => sum + i.quantity, 0)}
-              </span>
+            <ShoppingBag size={18} className={isWholesaleUser ? 'text-amber-600' : ''} />
+            {isWholesaleUser ? (
+              wholesaleTotalUnits > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-500 text-slate-950 text-[8px] font-black rounded-full flex items-center justify-center border border-white">
+                  {wholesaleTotalUnits}
+                </span>
+              )
+            ) : (
+              cart.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#E91E8C] text-white text-[8px] font-black rounded-full flex items-center justify-center border border-white">
+                  {cart.reduce((sum, i) => sum + i.quantity, 0)}
+                </span>
+              )
             )}
           </div>
-          <span className="text-[9px] font-bold">{activeTranslations.cart || "Cart"}</span>
+          <span className="text-[9px] font-bold">
+            {isWholesaleUser ? (language === 'bn' ? 'হোলসেল' : 'Wholesale') : (activeTranslations.cart || "Cart")}
+          </span>
         </button>
 
         <Link 
@@ -1063,8 +1109,12 @@ export const MainLayout: React.FC = () => {
         onClose={() => setIsImageSearchOpen(false)}
         catalog={allProducts}
         onAddToCart={(product) => {
-          addToCart(product);
-          setIsCartOpen(true);
+          if (isWholesaleUser) {
+            navigate(`/product/${product.id}`);
+          } else {
+            addToCart(product);
+            setIsCartOpen(true);
+          }
         }}
         onSelectProduct={(product) => {
           navigate(`/shop`);

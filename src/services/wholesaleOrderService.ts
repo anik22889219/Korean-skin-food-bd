@@ -6,6 +6,7 @@ import {
   WholesaleOrderCheckoutInfo 
 } from '../types';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
+import { authFetch } from './apiClient';
 import { 
   collection, 
   doc, 
@@ -99,7 +100,7 @@ export const wholesaleOrderService = {
     }
 
     // Call server API for authoritative calculation and persistence
-    const response = await fetch('/api/wholesale/orders/admin-create', {
+    const response = await authFetch('/api/wholesale/orders/admin-create', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -130,7 +131,7 @@ export const wholesaleOrderService = {
     }
 
     // Call server API for authoritative calculation and persistence
-    const response = await fetch('/api/wholesale/orders/create', {
+    const response = await authFetch('/api/wholesale/orders/create', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -33,6 +33,8 @@ import {
   getComboEffectivePrice
 } from '../utils/pricing';
 import { ComboComponentDetail } from '../types';
+import { SeoHead } from './SeoHead';
+import { buildProductSeo } from '../services/seoService';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -329,19 +331,11 @@ export const ProductDetail: React.FC = () => {
       trackedProductIdRef.current = product.id;
       analytics.trackViewItem(product);
     }
-    if (product) {
-      const pageTitle = product.metaTitle || (product as any).seoTitle || `${product.name} | Korean Skin Food BD`;
-      document.title = pageTitle;
-      if (product.metaDescription) {
-        let metaTag = document.querySelector('meta[name="description"]');
-        if (!metaTag) {
-          metaTag = document.createElement('meta');
-          metaTag.setAttribute('name', 'description');
-          document.head.appendChild(metaTag);
-        }
-        metaTag.setAttribute('content', product.metaDescription);
-      }
-    }
+  }, [product]);
+
+  // Dynamic On-Page SEO metadata calculation with admin override priority
+  const productSeo = useMemo(() => {
+    return product ? buildProductSeo(product) : undefined;
   }, [product]);
 
   // If query failed completely after loading and no product found, redirect gracefully
@@ -566,6 +560,7 @@ export const ProductDetail: React.FC = () => {
 
   return (
     <div className="w-full max-w-[1720px] mx-auto px-4 py-8 md:px-8 lg:px-12 space-y-10">
+      <SeoHead metadata={productSeo} />
       
       {/* Lightbox Modal for Review Photos */}
       <AnimatePresence>
@@ -1273,6 +1268,7 @@ export const ProductDetail: React.FC = () => {
 
           {/* Add to Basket CTA */}
           <div className="space-y-3 pt-1">
+            {/* Wholesale Order CTA - Exclusive for wholesale access accounts */}
             {profile?.wholesaleAccess && product && !product.isCombo && (
               <button
                 type="button"
@@ -1293,84 +1289,95 @@ export const ProductDetail: React.FC = () => {
               </button>
             )}
 
-            <button
-              onClick={() => {
-                if (product.isCombo) {
-                  // Validate customizable combo
-                  if (product.comboConfig?.type === 'customizable') {
-                    const steps = product.comboConfig.steps || [];
-                    const missingStep = steps.find(s => !selectedCustomSteps[s.id]);
-                    if (missingStep) {
-                      setComboCustomError(`Please select an item for "${missingStep.title}" before adding to basket.`);
+            {profile?.wholesaleAccess && product?.isCombo && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 font-bold text-center">
+                {language === 'bn' 
+                  ? 'কম্বো প্যাকেজগুলো রিটেল কাস্টমারদের জন্য নির্ধারিত। পাইকারি মূল্যে অর্ডারের জন্য অনুগ্রহ করে একক পণ্যসমূহ সিলেক্ট করুন।' 
+                  : 'Combo packages are tailored for retail customers. For wholesale orders, please select individual catalog products.'}
+              </div>
+            )}
+
+            {/* Standard Retail Customer Add to Basket CTA - Hidden for wholesale accounts */}
+            {!profile?.wholesaleAccess && (
+              <button
+                onClick={() => {
+                  if (product.isCombo) {
+                    // Validate customizable combo
+                    if (product.comboConfig?.type === 'customizable') {
+                      const steps = product.comboConfig.steps || [];
+                      const missingStep = steps.find(s => !selectedCustomSteps[s.id]);
+                      if (missingStep) {
+                        setComboCustomError(`Please select an item for "${missingStep.title}" before adding to basket.`);
+                        return;
+                      }
+                      setComboCustomError(null);
+
+                      const components: ComboComponentDetail[] = steps.map(step => {
+                        const chosenId = selectedCustomSteps[step.id];
+                        const childProd = allProducts.find(p => p.id === chosenId);
+                        return {
+                          productId: chosenId,
+                          name: childProd?.name || 'Selected Item',
+                          quantity: 1,
+                          price: childProd ? getRetailPrice(childProd) : 0,
+                          image: childProd?.image || '',
+                          barcode: childProd?.barcode || ''
+                        };
+                      });
+
+                      const finalPrice = comboSavingsData ? comboSavingsData.finalPrice : getRetailPrice(product);
+                      const customComboProduct: Product = {
+                        ...product,
+                        price: finalPrice,
+                        retailPrice: finalPrice,
+                        discountRetailPrice: undefined,
+                        discountPrice: undefined
+                      };
+
+                      addToCart(customComboProduct, quantity, components);
                       return;
                     }
-                    setComboCustomError(null);
 
-                    const components: ComboComponentDetail[] = steps.map(step => {
-                      const chosenId = selectedCustomSteps[step.id];
-                      const childProd = allProducts.find(p => p.id === chosenId);
-                      return {
-                        productId: chosenId,
-                        name: childProd?.name || 'Selected Item',
-                        quantity: 1,
-                        price: childProd ? getRetailPrice(childProd) : 0,
-                        image: childProd?.image || '',
-                        barcode: childProd?.barcode || ''
-                      };
-                    });
+                    // Fixed bundle
+                    if (product.comboConfig?.type === 'fixed' && product.comboConfig.items) {
+                      const components: ComboComponentDetail[] = product.comboConfig.items.map(it => {
+                        const childProd = allProducts.find(p => p.id === it.productId);
+                        return {
+                          productId: it.productId,
+                          name: childProd?.name || 'Bundle Component',
+                          quantity: it.quantity,
+                          price: childProd ? getRetailPrice(childProd) : 0,
+                          image: childProd?.image || '',
+                          barcode: childProd?.barcode || ''
+                        };
+                      });
 
-                    const finalPrice = comboSavingsData ? comboSavingsData.finalPrice : getRetailPrice(product);
-                    const customComboProduct: Product = {
-                      ...product,
-                      price: finalPrice,
-                      retailPrice: finalPrice,
-                      discountRetailPrice: undefined,
-                      discountPrice: undefined
-                    };
+                      addToCart(product, quantity, components);
+                      return;
+                    }
 
-                    addToCart(customComboProduct, quantity, components);
-                    return;
+                    addToCart(product, quantity);
+                  } else {
+                    addToCart(product, quantity);
                   }
-
-                  // Fixed bundle
-                  if (product.comboConfig?.type === 'fixed' && product.comboConfig.items) {
-                    const components: ComboComponentDetail[] = product.comboConfig.items.map(it => {
-                      const childProd = allProducts.find(p => p.id === it.productId);
-                      return {
-                        productId: it.productId,
-                        name: childProd?.name || 'Bundle Component',
-                        quantity: it.quantity,
-                        price: childProd ? getRetailPrice(childProd) : 0,
-                        image: childProd?.image || '',
-                        barcode: childProd?.barcode || ''
-                      };
-                    });
-
-                    addToCart(product, quantity, components);
-                    return;
-                  }
-
-                  addToCart(product, quantity);
-                } else {
-                  addToCart(product, quantity);
-                }
-              }}
-              disabled={effectiveStock <= 0}
-              className={`w-full py-4 text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm active:scale-[0.99] ${
-                product.isCombo
-                  ? 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 shadow-purple-200'
-                  : 'bg-[#E91E8C] hover:bg-[#d0177c] shadow-pink-100'
-              }`}
-            >
-              {product.isCombo ? <Sparkles size={18} /> : <ShoppingBag size={18} />}
-              <span>
-                {effectiveStock > 0 
-                  ? (product.isCombo 
-                      ? (product.comboConfig?.type === 'customizable' ? 'Add Complete Routine Set to Basket' : `Add Combo Package to Basket`)
-                      : (quantity > 1 ? `Add ${quantity} to Skincare Basket` : "Add to Skincare Basket")) 
-                  : "Sold Out"}
-              </span>
-            </button>
+                }}
+                disabled={effectiveStock <= 0}
+                className={`w-full py-4 text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md flex items-center justify-center gap-2.5 disabled:opacity-40 text-sm active:scale-[0.99] ${
+                  product.isCombo
+                    ? 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 shadow-purple-200'
+                    : 'bg-[#E91E8C] hover:bg-[#d0177c] shadow-pink-100'
+                }`}
+              >
+                {product.isCombo ? <Sparkles size={18} /> : <ShoppingBag size={18} />}
+                <span>
+                  {effectiveStock > 0 
+                    ? (product.isCombo 
+                        ? (product.comboConfig?.type === 'customizable' ? 'Add Complete Routine Set to Basket' : `Add Combo Package to Basket`)
+                        : (quantity > 1 ? `Add ${quantity} to Skincare Basket` : "Add to Skincare Basket")) 
+                    : "Sold Out"}
+                </span>
+              </button>
+            )}
 
             {/* Order via WhatsApp CTA */}
             <button

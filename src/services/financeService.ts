@@ -6,6 +6,7 @@ import {
   Order 
 } from '../types';
 import { db, sanitizeForFirestore } from './firebase';
+import { authFetch } from './apiClient';
 import { 
   collection, 
   doc, 
@@ -182,7 +183,7 @@ export const financeService = {
 
     // Try server API first
     try {
-      const response = await fetch('/api/finance/transaction', {
+      const response = await authFetch('/api/finance/transaction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -261,7 +262,7 @@ export const financeService = {
 
     // Try server API first
     try {
-      const response = await fetch('/api/finance/transfer', {
+      const response = await authFetch('/api/finance/transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -333,7 +334,7 @@ export const financeService = {
 
     // Try server API first
     try {
-      const response = await fetch('/api/finance/transaction', {
+      const response = await authFetch('/api/finance/transaction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -420,7 +421,7 @@ export const financeService = {
 
     // 1. Try authoritative server-side endpoint first
     try {
-      const response = await fetch('/api/finance/collect-due', {
+      const response = await authFetch('/api/finance/collect-due', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

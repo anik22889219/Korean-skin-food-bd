@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { productService } from './productService';
 import { auth, db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
+import { authFetch } from './apiClient';
 import { collection, onSnapshot, doc, setDoc, updateDoc, query, where, orderBy, limit, startAfter, addDoc, getDocs, getDoc, arrayUnion, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
 import { findProductByScannedCode } from '../utils/barcode';
 import { getProductUnitPrice, aggregateProductQuantities, getComboEffectiveStock } from '../utils/pricing';
@@ -1098,7 +1099,7 @@ export const posService = {
 
     // 2. Try Authoritative Server-Side Checkout Endpoint First
     try {
-      const response = await fetch('/api/functions/posCheckout', {
+      const response = await authFetch('/api/functions/posCheckout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

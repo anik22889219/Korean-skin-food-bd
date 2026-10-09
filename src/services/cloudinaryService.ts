@@ -1,4 +1,5 @@
 import { db, handleFirestoreError, OperationType } from './firebase';
+import { authFetch } from './apiClient';
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 export interface CloudinaryImage {
@@ -138,7 +139,7 @@ export async function uploadFileToCloudinary(
   // Step 1: Request signature / config from server API
   let signData: any = null;
   try {
-    const signRes = await fetch('/api/cloudinary/sign', {
+    const signRes = await authFetch('/api/cloudinary/sign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

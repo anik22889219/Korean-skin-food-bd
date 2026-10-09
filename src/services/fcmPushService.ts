@@ -1,6 +1,7 @@
 import { getToken, onMessage, MessagePayload } from 'firebase/messaging';
 import { doc, setDoc, deleteDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db, getFirebaseMessaging, FCM_VAPID_KEY, sanitizeForFirestore } from './firebase';
+import { authFetch } from './apiClient';
 
 export interface FcmTokenRecord {
   token: string;
@@ -288,7 +289,7 @@ class FcmPushService {
 
     // Also trigger server endpoint if available
     try {
-      await fetch('/api/notifications/send-push', {
+      await authFetch('/api/notifications/send-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -7,6 +7,7 @@ import { useCategories } from '../hooks/queries/categories';
 import { useBrands } from '../hooks/queries/brands';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
 import { 
@@ -26,6 +27,8 @@ import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { GoogleBusinessReviewsSection } from './GoogleBusinessReviewsSection';
 import { analytics } from '../services/analyticsService';
 import { getRetailPrice } from '../utils/pricing';
+import { SeoHead } from './SeoHead';
+import { buildHomepageSeo } from '../services/seoService';
 
 const CATEGORIES = [
   'All', 
@@ -49,6 +52,7 @@ const SKIN_TYPES = ['All', 'Oily', 'Dry', 'Sensitive', 'Combination', 'Acne-Pron
 
 export const StoreCatalog: React.FC = () => {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const { addToCart, setIsCartOpen, language, activeTranslations } = useCart();
   
   // Theme & Query state
@@ -56,6 +60,9 @@ export const StoreCatalog: React.FC = () => {
   const { data: products = [], isLoading } = useProducts();
   const { data: categories = CATEGORIES } = useCategories();
   const { data: brandsData } = useBrands();
+
+  // Dynamic Homepage On-Page SEO metadata & rich Organization / WebSite schemas
+  const homepageSeo = useMemo(() => buildHomepageSeo(), []);
 
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1797,6 +1804,8 @@ export const StoreCatalog: React.FC = () => {
       transition={{ duration: 0.3 }}
       className="w-full bg-[#fff8f5] space-y-10 md:space-y-12 pb-12"
     >
+      <SeoHead metadata={homepageSeo} />
+
       {/* Dynamic Sections ordered according to theme settings */}
       {theme.sectionOrder.map((secKey) => {
         if (secKey === 'hero') {
@@ -1818,7 +1827,13 @@ export const StoreCatalog: React.FC = () => {
         isOpen={isImageSearchOpen}
         onClose={() => setIsImageSearchOpen(false)}
         catalog={products}
-        onAddToCart={(product) => addToCart(product)}
+        onAddToCart={(product) => {
+          if (profile?.wholesaleAccess) {
+            navigate(`/product/${product.id}`);
+          } else {
+            addToCart(product);
+          }
+        }}
       />
 
       {/* Quick View Modal (GA4: view_item & Meta: ViewContent) */}
@@ -1827,8 +1842,12 @@ export const StoreCatalog: React.FC = () => {
         product={quickViewProduct}
         onClose={() => setQuickViewProduct(null)}
         onAddToCart={(product) => {
-          addToCart(product);
-          setIsCartOpen(true);
+          if (profile?.wholesaleAccess) {
+            navigate(`/product/${product.id}`);
+          } else {
+            addToCart(product);
+            setIsCartOpen(true);
+          }
         }}
       />
 

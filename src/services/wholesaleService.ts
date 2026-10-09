@@ -1,5 +1,6 @@
 import { WholesaleCustomer, UserProfile } from '../types';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
+import { authFetch } from './apiClient';
 import { 
   collection, 
   doc, 
@@ -374,6 +375,107 @@ export const wholesaleService = {
   },
 
   /**
+   * Admin / Staff manually creates a new wholesale customer profile
+   */
+  async adminCreateWholesaleCustomer(data: {
+    name: string;
+    phone: string;
+    altPhone?: string;
+    email?: string;
+    businessName?: string;
+    storeName?: string;
+    pageName?: string;
+    businessType?: string;
+    location?: string;
+    businessAddress?: string;
+    address?: string;
+    facebookPageUrl?: string;
+    instagramUrl?: string;
+    whatsappNumber?: string;
+    websiteUrl?: string;
+    tradeLicenseNumber?: string;
+    creditLimit?: number;
+    status?: 'active' | 'pending' | 'suspended';
+    wholesaleAccess?: boolean;
+    tier?: string;
+    notes?: string;
+  }): Promise<WholesaleCustomer> {
+    if (!data.name?.trim()) throw new Error('Customer full name is required.');
+    if (!data.phone?.trim()) throw new Error('Customer primary phone number is required.');
+
+    const newCustomerId = `ws_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const nowIso = new Date().toISOString();
+
+    const customerPayload: WholesaleCustomer = {
+      id: newCustomerId,
+      userId: newCustomerId,
+      name: data.name.trim(),
+      phone: data.phone.trim(),
+      altPhone: data.altPhone?.trim() || '',
+      email: data.email?.trim() || '',
+      businessName: data.businessName?.trim() || data.storeName?.trim() || '',
+      storeName: data.storeName?.trim() || data.businessName?.trim() || '',
+      pageName: data.pageName?.trim() || '',
+      businessType: data.businessType || 'Retailer',
+      location: data.location?.trim() || '',
+      address: data.businessAddress?.trim() || data.address?.trim() || '',
+      businessAddress: data.businessAddress?.trim() || data.address?.trim() || '',
+      facebookPageUrl: data.facebookPageUrl ? formatUrl(data.facebookPageUrl) : '',
+      instagramUrl: data.instagramUrl ? formatUrl(data.instagramUrl) : '',
+      whatsappNumber: data.whatsappNumber?.trim() || data.phone.trim(),
+      websiteUrl: data.websiteUrl ? formatUrl(data.websiteUrl) : '',
+      tradeLicenseNumber: data.tradeLicenseNumber?.trim() || '',
+      wholesaleAccess: data.wholesaleAccess !== false,
+      status: data.status || 'active',
+      creditLimit: Number(data.creditLimit) || 50000,
+      currentDue: 0,
+      totalPurchasedBDT: 0,
+      totalOrders: 0,
+      totalWholesalePurchase: 0,
+      totalPaid: 0,
+      totalDue: 0,
+      tier: data.tier || 'standard',
+      notes: data.notes?.trim() || '',
+      customerSince: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    try {
+      const wholesaleDocRef = doc(db, 'wholesale_customers', newCustomerId);
+      await setDoc(wholesaleDocRef, sanitizeForFirestore(customerPayload));
+
+      // Also create user placeholder doc
+      const userDocRef = doc(db, 'users', newCustomerId);
+      await setDoc(userDocRef, sanitizeForFirestore({
+        uid: newCustomerId,
+        name: customerPayload.name,
+        phone: customerPayload.phone,
+        email: customerPayload.email || '',
+        businessName: customerPayload.businessName,
+        pageName: customerPayload.pageName,
+        businessType: customerPayload.businessType,
+        location: customerPayload.location,
+        address: customerPayload.businessAddress,
+        businessAddress: customerPayload.businessAddress,
+        role: 'customer',
+        wholesaleAccess: customerPayload.wholesaleAccess,
+        wholesaleStatus: customerPayload.status,
+        creditLimit: customerPayload.creditLimit,
+        currentDue: 0,
+        createdAt: nowIso,
+        updatedAt: serverTimestamp()
+      }), { merge: true });
+
+      return customerPayload;
+    } catch (err) {
+      console.error('[WholesaleService] Error creating manual wholesale customer:', err);
+      handleFirestoreError(err, OperationType.WRITE, `wholesale_customers/${newCustomerId}`);
+      throw err;
+    }
+  },
+
+  /**
    * Get all wholesale customer records for admin dashboard.
    * Merges wholesale_customers collection and users collection (with wholesaleAccess === true).
    */
@@ -553,7 +655,7 @@ export const wholesaleLedgerService = {
     orderId?: string;
   }) {
     try {
-      const res = await fetch('/api/wholesale/payments', {
+      const res = await authFetch('/api/wholesale/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(paymentData)
@@ -610,7 +712,7 @@ export const wholesaleLedgerService = {
     if (!wholesaleCustomerId) return [];
 
     try {
-      const res = await fetch(`/api/wholesale/payments/${wholesaleCustomerId}`);
+      const res = await authFetch(`/api/wholesale/payments/${wholesaleCustomerId}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.payments)) {
