@@ -29,7 +29,7 @@ export const MainLayout: React.FC = () => {
   const location = useLocation();
   const { user, profile, signOut, isAdmin, signInWithGoogle, creatorProfile } = useAuth();
   const { 
-    cart, isCartOpen, setIsCartOpen, language, setLanguage, 
+    cart, isSubmitting, isCartOpen, setIsCartOpen, language, setLanguage, 
     checkoutStep, setCheckoutStep, checkoutForm, setCheckoutForm,
     lastCreatedOrder, calculateCartSubtotal, calculateShipping, 
     handleCheckoutSubmit, activeTranslations, updateCartQty, removeFromCart,
@@ -980,8 +980,23 @@ export const MainLayout: React.FC = () => {
                         </div>
                       </div>
 
-                      <button type="submit" className="w-full bg-[#E91E8C] hover:bg-[#FF4B91] text-white py-3 rounded-xl font-bold cursor-pointer transition shadow-sm">
-                        {activeTranslations.orderNow}
+                      <button 
+                        type="submit" 
+                        disabled={isSubmitting}
+                        className={`w-full py-3 rounded-xl font-bold transition shadow-sm flex items-center justify-center gap-2 ${
+                          isSubmitting 
+                            ? 'bg-gray-400 cursor-not-allowed opacity-80 text-white' 
+                            : 'bg-[#E91E8C] hover:bg-[#FF4B91] text-white cursor-pointer'
+                        }`}
+                      >
+                        {isSubmitting ? (
+                          <>
+                            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            <span>{language === 'bn' ? 'অর্ডার প্রক্রিয়াধীন...' : 'Processing Order...'}</span>
+                          </>
+                        ) : (
+                          activeTranslations.orderNow
+                        )}
                       </button>
                     </form>
                   )

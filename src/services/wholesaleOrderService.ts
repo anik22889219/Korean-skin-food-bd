@@ -174,7 +174,7 @@ export const wholesaleOrderService = {
   async getWholesaleOrders(userId?: string): Promise<WholesaleOrder[]> {
     try {
       const url = userId ? `/api/wholesale/orders?userId=${encodeURIComponent(userId)}` : '/api/wholesale/orders';
-      const response = await fetch(url);
+      const response = await authFetch(url);
       if (response.ok) {
         const data = await response.json();
         if (data.success && Array.isArray(data.orders)) {
@@ -211,7 +211,7 @@ export const wholesaleOrderService = {
   async getWholesaleOrder(orderId: string): Promise<WholesaleOrder | null> {
     if (!orderId) return null;
     try {
-      const response = await fetch(`/api/wholesale/orders/${encodeURIComponent(orderId)}`);
+      const response = await authFetch(`/api/wholesale/orders/${encodeURIComponent(orderId)}`);
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.order) {
@@ -279,7 +279,7 @@ export const wholesaleOrderService = {
     if (!orderId) throw new Error('Order ID is required.');
 
     try {
-      const response = await fetch(`/api/wholesale/orders/${encodeURIComponent(orderId)}/status`, {
+      const response = await authFetch(`/api/wholesale/orders/${encodeURIComponent(orderId)}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, notes, updatedBy })
@@ -314,7 +314,7 @@ export const wholesaleOrderService = {
   ): Promise<WholesaleOrder> {
     if (!orderId) throw new Error('Order ID is required.');
 
-    const response = await fetch(`/api/wholesale/orders/${encodeURIComponent(orderId)}/cancel`, {
+    const response = await authFetch(`/api/wholesale/orders/${encodeURIComponent(orderId)}/cancel`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason, cancelledBy })

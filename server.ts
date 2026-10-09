@@ -6,7 +6,7 @@ import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, collection, doc, getDoc, setDoc, getDocs, runTransaction, query, where, deleteDoc, orderBy } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, getDocs, runTransaction, query, where, deleteDoc, orderBy } from "firebase/firestore";
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
 
@@ -1493,6 +1493,63 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
   }
 }
 
+async function verifyFinanceAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Missing Bearer token."
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1]?.trim();
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authentication required. Empty Bearer token provided."
+    });
+  }
+
+  const verifiedUser = await verifyFirebaseIdToken(idToken);
+  if (!verifiedUser || !verifiedUser.uid) {
+    return res.status(401).json({
+      success: false,
+      error: "Invalid or expired Firebase ID token."
+    });
+  }
+
+  if (!db) {
+    return res.status(503).json({ success: false, error: "Database not initialized on server." });
+  }
+
+  try {
+    const userDocRef = doc(db, "users", verifiedUser.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    const financeRoles = ['admin', 'super_admin'];
+    const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd') && verifiedUser.emailVerified === true;
+    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : null);
+
+    if (isSuperAdminEmail || (userRole && financeRoles.includes(userRole))) {
+      (req as any).user = {
+        uid: verifiedUser.uid,
+        email: verifiedUser.email,
+        role: userRole || 'super_admin',
+        emailVerified: verifiedUser.emailVerified
+      };
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: "Access Denied. Executive Financial Authority (Super Admin or Store Admin) required."
+    });
+  } catch (err: any) {
+    console.error("Error verifying finance role in Firestore:", err);
+    return res.status(500).json({ success: false, error: "Internal server error verifying authorization." });
+  }
+}
+
 async function verifyUserOrStaffAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -2700,9 +2757,23 @@ app.post("/api/slack/trigger-test-notification", async (req, res) => {
   }
 });
 
-// 1. placeOrder Endpoint (mirrors Firebase Cloud Function)
+// 1. placeOrder Endpoint (Authoritative Server-Side Checkout with Idempotency)
 app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
-  const { items, customerName, customerPhone, customerEmail, address, deliveryArea } = req.body;
+  const { 
+    items, 
+    customerName, 
+    customerPhone, 
+    customerEmail, 
+    address, 
+    deliveryArea,
+    customer_uid,
+    couponCode,
+    couponDiscount,
+    pointsDiscount,
+    idempotencyKey,
+    attribution
+  } = req.body;
+
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Cart cannot be empty" });
   }
@@ -2717,6 +2788,23 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
 
   try {
     const committedOrder = await runTransaction(db, async (transaction) => {
+      // 0. Idempotency Check (Check if order was already committed under this idempotencyKey)
+      if (idempotencyKey) {
+        const idempRef = doc(db, "payment_idempotency", String(idempotencyKey));
+        const idempSnap = await transaction.get(idempRef);
+        if (idempSnap.exists()) {
+          const idempData = idempSnap.data() as any;
+          if (idempData.orderId) {
+            const existingOrderRef = doc(db, "orders", idempData.orderId);
+            const existingOrderSnap = await transaction.get(existingOrderRef);
+            if (existingOrderSnap.exists()) {
+              console.log(`[placeOrder] Idempotent hit: returning existing order #${idempData.orderId} without duplicate stock deduction.`);
+              return existingOrderSnap.data();
+            }
+          }
+        }
+      }
+
       const validatedProducts: Array<{
         ref: any;
         data: any;
@@ -2764,7 +2852,8 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
 
       // Calculate server-side total
       const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
-      const totalAmount = itemsSubtotal + deliveryCharge;
+      const totalDiscount = Number(couponDiscount || 0) + Number(pointsDiscount || 0);
+      const totalAmount = Math.max(0, itemsSubtotal + deliveryCharge - totalDiscount);
       const cogsAmount = validatedProducts.reduce((sum, p) => {
         const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
         return sum + (cost * p.quantity);
@@ -2817,13 +2906,14 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
         customerName: (customerName || "").trim() || "Website Customer",
         customerPhone: (customerPhone || "").trim() || "N/A",
         customerEmail: customerEmail || "",
+        customer_uid: customer_uid || null,
         address: address || "Inside Dhaka",
         items: validatedProducts.map(p => ({
           productId: p.productId,
           name: p.name,
           price: p.unitPrice,
           quantity: p.quantity,
-          scannedQuantity: p.quantity
+          scannedQuantity: 0
         })),
         totalAmount,
         totalPaid: 0,
@@ -2836,21 +2926,49 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
         paymentMethod: "COD",
         sessionType: "Web",
         isPaid: false,
+        couponCode: couponCode || undefined,
+        couponDiscount: couponDiscount > 0 ? couponDiscount : undefined,
+        pointsDiscount: pointsDiscount > 0 ? pointsDiscount : undefined,
+        shippingCharge: deliveryCharge,
         cogsAmount,
         grossProfit,
+        attribution: attribution || {},
+        analytics: {
+          purchaseEventId: `purchase_${orderId}`,
+          capiStatus: "pending"
+        },
         paymentTransactions: []
       };
 
       const orderRef = doc(db, "orders", orderId);
       transaction.set(orderRef, newOrder);
+
+      // Record Idempotency Key
+      if (idempotencyKey) {
+        const idempRef = doc(db, "payment_idempotency", String(idempotencyKey));
+        transaction.set(idempRef, {
+          id: idempotencyKey,
+          orderId,
+          status: "completed",
+          createdAt: nowIso,
+          totalAmount,
+          source: "WEBSITE"
+        });
+      }
+
       return newOrder;
     });
 
+    // Notify Slack asynchronously
+    import('./src/services/slackNotificationService').then(({ slackNotificationService }) => {
+      slackNotificationService.notifyNewOrder(committedOrder as any).catch(console.warn);
+    }).catch(() => {});
+
     res.json({
       success: true,
-      orderId,
+      orderId: (committedOrder as any).id || orderId,
       order: committedOrder,
-      message: `Successfully placed order ${orderId}`
+      message: `Successfully placed order ${(committedOrder as any).id || orderId}`
     });
   } catch (error: any) {
     console.error("placeOrder transaction failed:", error);
@@ -2858,8 +2976,8 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
   }
 });
 
-// 1C. Finance Collect Due Endpoint (Admin/Staff only)
-app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
+// 1C. Finance Collect Due Endpoint (Executive Finance Only)
+app.post("/api/finance/collect-due", verifyFinanceAuth, async (req, res) => {
   const { orderId, amount, method = "CASH", accountCode, note, receivedBy = "Store Staff", source = "POS", idempotencyKey } = req.body;
 
   if (!orderId || !amount || Number(amount) <= 0) {
@@ -3049,8 +3167,8 @@ app.post("/api/finance/collect-due", verifyAdminAuth, async (req, res) => {
   }
 });
 
-// 1D. Finance Wallet Transfer Endpoint (Admin/Staff only)
-app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
+// 1D. Finance Wallet Transfer Endpoint (Executive Finance Only)
+app.post("/api/finance/transfer", verifyFinanceAuth, async (req, res) => {
   const { fromAccount, toAccount, amount, description, performedBy = "Store Admin" } = req.body;
 
   if (!fromAccount || !toAccount || !amount || Number(amount) <= 0) {
@@ -3090,8 +3208,8 @@ app.post("/api/finance/transfer", verifyAdminAuth, async (req, res) => {
   }
 });
 
-// 1E. Finance Record Transaction Endpoint (Expenses, Capital, Withdrawals - Admin/Staff only)
-app.post("/api/finance/transaction", verifyAdminAuth, async (req, res) => {
+// 1E. Finance Record Transaction Endpoint (Executive Finance Only)
+app.post("/api/finance/transaction", verifyFinanceAuth, async (req, res) => {
   const { transactionType, category, amount, accountCode, description, performedBy, referenceType, referenceId, receiptUrl } = req.body;
 
   if (!amount || Number(amount) <= 0 || !accountCode) {
@@ -4933,7 +5051,52 @@ const serverDispatchedCapiEvents = new Set<string>();
 
 app.post("/api/tracking/meta-capi", async (req, res) => {
   const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = req.body;
-  const orderSource = req.body.order_source || req.body.orderSource;
+  let orderSource = req.body.order_source || req.body.orderSource;
+  let verifiedValue = Number(value || 0);
+  let verifiedItems = items || [];
+
+  // 1. Authoritative Database Verification for Purchase Events
+  let orderDocRef: any = null;
+  if (eventName === "Purchase" && orderId) {
+    if (!db) {
+      return res.status(503).json({ success: false, error: "Database not initialized on server" });
+    }
+
+    try {
+      orderDocRef = doc(db, "orders", String(orderId));
+      const orderSnap = await getDoc(orderDocRef);
+
+      if (!orderSnap.exists()) {
+        console.warn(`[Meta CAPI] Rejected: Order #${orderId} does not exist in database.`);
+        return res.status(404).json({
+          success: false,
+          error: `Order #${orderId} does not exist. CAPI event rejected.`,
+          eventId
+        });
+      }
+
+      const orderData = orderSnap.data() as any;
+      orderSource = orderData.order_source || orderData.orderSource || orderSource;
+      verifiedValue = Number(orderData.totalAmount || orderData.total || verifiedValue);
+      if (Array.isArray(orderData.items) && orderData.items.length > 0) {
+        verifiedItems = orderData.items;
+      }
+
+      // Check Durable Persistent CAPI State in Firestore
+      if (orderData.analytics?.capiStatus === "dispatched") {
+        console.log(`[Meta CAPI] Durable Idempotency: Order #${orderId} was already dispatched at ${orderData.analytics?.capiDispatchedAt}.`);
+        if (eventId) serverDispatchedCapiEvents.add(eventId);
+        return res.json({
+          success: true,
+          alreadyDispatched: true,
+          message: `Order #${orderId} CAPI conversion already dispatched.`,
+          eventId
+        });
+      }
+    } catch (dbErr: any) {
+      console.error(`[Meta CAPI] Error verifying order #${orderId} in Firestore:`, dbErr);
+    }
+  }
 
   // Strict Allow-List: For Purchase events, ONLY website orders (order_source === 'WEBSITE') may generate CAPI conversion.
   // POS, ADMIN, MANUAL, null, undefined, or any unknown sources are strictly rejected.
@@ -5006,13 +5169,13 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
       userDataPayload.fbc = customerData.fbc;
     }
 
-    const contents = (items || []).map((it: any) => ({
+    const contents = (verifiedItems || []).map((it: any) => ({
       id: it.productId || it.id || it.item_id,
       quantity: Number(it.quantity || 1),
       item_price: Number(it.price || 0)
     }));
 
-    const contentIds = (items || []).map((it: any) => it.productId || it.id || it.item_id).filter(Boolean);
+    const contentIds = (verifiedItems || []).map((it: any) => it.productId || it.id || it.item_id).filter(Boolean);
 
     const eventPayload: Record<string, any> = {
       event_name: eventName,
@@ -5023,12 +5186,12 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
       user_data: userDataPayload,
       custom_data: {
         currency: currency || "BDT",
-        value: Number(value || 0),
+        value: verifiedValue,
         order_id: orderId,
         content_type: "product",
         content_ids: contentIds,
         contents: contents,
-        num_items: (items || []).reduce((sum: number, it: any) => sum + Number(it.quantity || 1), 0)
+        num_items: (verifiedItems || []).reduce((sum: number, it: any) => sum + Number(it.quantity || 1), 0)
       }
     };
 
@@ -5055,6 +5218,13 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
 
     if (fbResponse.ok && !fbResult.error) {
       console.log(`[Meta CAPI] Successfully dispatched ${eventName} event to Meta Graph API`, fbResult);
+      if (orderDocRef) {
+        updateDoc(orderDocRef, {
+          "analytics.capiStatus": "dispatched",
+          "analytics.capiDispatchedAt": new Date().toISOString(),
+          "analytics.purchaseEventId": eventId || `purchase_${orderId}`
+        }).catch(() => {});
+      }
       return res.json({
         success: true,
         eventId,
@@ -5464,7 +5634,7 @@ app.get("/api/wholesale/payments/:wholesaleCustomerId", verifyStaffOrWholesaleAu
 });
 
 
-app.post("/api/wholesale/payments", verifyAdminAuth, async (req, res) => {
+app.post("/api/wholesale/payments", verifyFinanceAuth, async (req, res) => {
 
   if (!db) return res.status(500).json({ success: false, error: "Database not initialized" });
 
@@ -6051,7 +6221,7 @@ app.get("/api/wholesale/orders", verifyStaffOrWholesaleAuth, async (req, res) =>
  * POST /api/wholesale/orders/admin-create
  * Super Admin manual wholesale order creation with custom wholesale unit price, advance payment, and ledger balance sync.
  */
-app.post("/api/wholesale/orders/admin-create", verifyAdminAuth, async (req, res) => {
+app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({
       success: false,

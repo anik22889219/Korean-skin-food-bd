@@ -96,6 +96,8 @@ export const AdminLayout: React.FC = () => {
 
   const location = useLocation();
   const isInventoryManager = profile?.role === 'inventory_manager';
+  const isCustomerSupport = profile?.role === 'customer_support';
+  const isHr = profile?.role === 'hr';
 
   const navItems = [
     { to: '/admin/wholesale', label: 'Wholesale Management', badge: 'B2B', icon: Building2 },
@@ -126,7 +128,7 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
   ];
 
-  // Inventory Manager user gets access to Dashboard Overview, Skincare Catalog, All Reports & Analytics, Order Fulfillment, WhatsApp Leads, POS Register, Combo Packages, Taxonomies
+  // Role-Specific Navigation & Access Control Matrices
   const inventoryManagerAllowedPaths = [
     '/admin',
     '/admin/products',
@@ -139,27 +141,53 @@ export const AdminLayout: React.FC = () => {
     '/admin/pos',
   ];
 
+  const customerSupportAllowedPaths = [
+    '/admin/orders',
+    '/admin/chat-leads',
+    '/admin/testimonials',
+  ];
+
+  const hrAllowedPaths = [
+    '/admin/users',
+    '/admin/reports',
+  ];
+
   const visibleNavItems = navItems.filter((item) => {
-    if (isInventoryManager) {
-      return inventoryManagerAllowedPaths.includes(item.to);
-    }
-    return true;
+    if (isAdminOrSuperAdmin) return true;
+    if (isInventoryManager) return inventoryManagerAllowedPaths.includes(item.to);
+    if (isCustomerSupport) return customerSupportAllowedPaths.includes(item.to);
+    if (isHr) return hrAllowedPaths.includes(item.to);
+    return false;
   });
 
-  // Redirect Inventory Manager if trying to access unauthorized dashboard pages
+  // Strict Direct URL Redirection Guards
   useEffect(() => {
+    if (isAdminOrSuperAdmin) return;
+
     if (isInventoryManager) {
       const isAllowed = inventoryManagerAllowedPaths.some((path) => {
-        if (path === '/admin') {
-          return location.pathname === '/admin';
-        }
+        if (path === '/admin') return location.pathname === '/admin';
         return location.pathname === path || location.pathname.startsWith(path + '/');
       });
       if (!isAllowed) {
         navigate('/admin', { replace: true });
       }
+    } else if (isCustomerSupport) {
+      const isAllowed = customerSupportAllowedPaths.some((path) => {
+        return location.pathname === path || location.pathname.startsWith(path + '/');
+      });
+      if (!isAllowed) {
+        navigate('/admin/orders', { replace: true });
+      }
+    } else if (isHr) {
+      const isAllowed = hrAllowedPaths.some((path) => {
+        return location.pathname === path || location.pathname.startsWith(path + '/');
+      });
+      if (!isAllowed) {
+        navigate('/admin/users', { replace: true });
+      }
     }
-  }, [isInventoryManager, location.pathname, navigate]);
+  }, [isAdminOrSuperAdmin, isInventoryManager, isCustomerSupport, isHr, location.pathname, navigate]);
 
   const handleSignOut = async () => {
     try {

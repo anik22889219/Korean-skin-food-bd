@@ -1,149 +1,94 @@
-# Comprehensive On-Page SEO Engine & Structured Data Implementation
+# Korean Skin Food BD — Comprehensive System Hardening Implementation Plan
 
-A full-spectrum On-Page SEO solution for Korean Skin Food Bangladesh, delivering dynamic meta tags, OpenGraph social cards, canonical link injection, and complete Schema.org JSON-LD microdata across the homepage, category catalogs, and product details.
+## 1. System Architecture & Objectives
+This implementation plan establishes enterprise-level security, data consistency, and transactional integrity for the Korean Skin Food BD platform across retail e-commerce, Point of Sale (POS), B2B Wholesale, Live Barcode Scanning, Courier Logistics, Meta CAPI Tracking, and Role-Based Access Control (RBAC).
 
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> The following architectural decisions have been confirmed through user consultation:
-
-- **Confirmed Decision 1 (Page Scope)**: Full dynamic On-Page SEO coverage across all core routes: Homepage, Product Details Pages (`/product/:id`), and Category/Brand Taxonomy Catalog pages (`/shop`, `/category/:slug`, `/brand/:slug`).
-- **Confirmed Decision 2 (Metadata Generation)**: Hybrid automated dynamic generation with priority admin overrides. When custom SEO titles, meta descriptions, or keywords are authored in Admin SEO (or generated via Gemini AI), they take precedence over auto-generated product and taxonomy meta fallbacks.
-- **Confirmed Decision 3 (Schema.org Rich Snippets)**: Complete ("All") JSON-LD schema integration:
-  - **Product Schema**: Price in BDT, stock status, ratings, brand, GTIN/barcode, and review snippets.
-  - **Organization & WebSite Schema**: Brand logo, contact points, sameAs social profiles, and sitelinks searchbox.
-  - **BreadcrumbList Schema**: Clean hierarchical navigation chains for Google rich search results.
-  - **LocalBusiness / Store Schema**: Bangladesh storefront identity, Google Business verified rating links, and service areas.
+All 6 phases have been completed, verified via automated linting (`tsc --noEmit`), compiled with Vite production build (`compile_applet`), and security rules deployed to Firebase (`deploy_firebase`).
 
 ---
 
-## 1. Overview & Core Concept
+## 2. Phased Implementation Breakdown
 
-- **What It Does**: Establishes a centralized SEO management manager and dynamic `<head>` injector for this single-page application (SPA). As users and search crawlers navigate between the storefront, catalog categories, and individual K-beauty products, the system automatically synchronizes the document title, meta descriptions, canonical links, OpenGraph / Twitter social previews, and structured JSON-LD schemas.
-- **Target Audience / Persona**: Organic search shoppers looking for authentic Korean skincare products in Bangladesh, social media users sharing product links via WhatsApp, Facebook, or Messenger, and store administrators managing brand search ranking.
-- **Key Value**: Dramatically elevates search engine crawlability, rich snippet eligibility in Google Search (star ratings, price displays, in-stock badges), and provides rich preview cards when sharing K-beauty products across social platforms.
-
----
-
-## 2. User Experience & Visual Design
-
-### Key User Flows
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                      Centralized SEO Route Flow                        │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-         ┌─────────────────────────┼─────────────────────────┐
-         ▼                         ▼                         ▼
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────────┐
-│  Homepage (/)    │     │ Category (/shop) │     │ Product (/product/)  │
-├──────────────────┤     ├──────────────────┤     ├──────────────────────┤
-│ • Branded Title  │     │ • Dynamic Title  │     │ • Product Title      │
-│ • Site Meta Desc │     │   (e.g., "COSRX  │     │   (Name + Brand)     │
-│ • WebSite Schema │     │   Products in BD")│    │ • Auto/Custom Meta   │
-│ • LocalBusiness  │     │ • Category Meta  │     │ • Price, Stock, Star │
-│   & Org Schema   │     │ • BreadcrumbList │     │ • Product JSON-LD    │
-│ • Social OG tags │     │   JSON-LD Schema │     │ • Rich OG Image Card │
-└──────────────────┘     └──────────────────┘     └──────────────────────┘
-```
-
-1. **Browsing Product Details**:
-   - The browser tab title instantly reflects: `[Product Name] - [Brand] | Korean Skin Food Bangladesh`.
-   - The `<meta name="description">` renders an organic search snippet highlighting ingredients, skin type suitability, and Seoul authentication.
-   - Dynamic OpenGraph tags render high-resolution product photography with direct BDT pricing metadata.
-   - Embedded JSON-LD microdata enables Google Search to display rich stars, review count, price in BDT, and stock availability directly in search results.
-
-2. **Browsing Category & Brand Taxonomies**:
-   - Navigating to `/shop?category=Serum` or `/shop?brand=COSRX` updates the title to target high-intent Bangladeshi search queries (e.g., `COSRX Skincare in Bangladesh - Authentic K-Beauty | Korean Skin Food`).
-   - BreadcrumbList microdata creates structured navigation paths in Google SERPs (`Home > Skincare > Serums`).
-
-3. **Social Sharing Experience (WhatsApp, Facebook, Messenger, X)**:
-   - When a link is shared into chat, the recipient sees a rich preview card with a high-res image, clear promotional summary, and verified authentic guarantee.
-
-4. **Admin SEO Customization**:
-   - Within the existing Admin SEO suite, administrators can view live previews of Google search snippet cards and social sharing cards.
-   - Custom overrides saved in the admin panel immediately reflect on the live storefront.
-
-### Visual Identity & Theme
-
-- **SEO Card Previews**: Clean Google SERP style preview (blue clickable headline, green/gray breadcrumb path, snippet description) and Facebook/Twitter large image card preview in the Admin SEO editor.
-- **Micro-Interactions**: Real-time character counters for Title (30–60 chars) and Meta Description (120–160 chars) with color-coded optimal indicators (green for ideal, amber for close, red for over-length).
+### Phase 1: Authentication & Courier Logistics Bridge [COMPLETED]
+* **Objective**: Resolve 401 Unauthorized errors on Steadfast Courier consignment creation and Wholesale Order history fetching by properly propagating Firebase Bearer tokens.
+* **Exact Files Targeted**:
+  * `src/services/steadfastService.ts`
+  * `src/services/wholesaleOrderService.ts`
+* **Changes Delivered**:
+  * `src/services/steadfastService.ts`: Replaced plain `fetch` with `authFetch('/api/steadfast/create-consignment')`.
+  * `src/services/wholesaleOrderService.ts`: Migrated `/api/wholesale/orders` queries to `authFetch(url)`.
+  * `src/services/wholesaleService.ts`: Migrated payment requests to `authFetch`.
+* **Verification**: Type checks and network proxy headers verified.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
-
-- **Decision 1: Lightweight Native Document Head Manager vs. Heavy Third-Party Libraries**
-  - *Chosen Approach*: Implement a lightweight, zero-dependency `SeoHead` React component and helper service that manages `<head>` elements (title, meta, link canonical, script ld+json) directly.
-  - *Why*: Eliminates dependency incompatibilities or runtime React 18/19 conflicts often encountered with legacy `react-helmet` packages, while ensuring fast and leak-free cleanup on route transitions.
-  - *Alternatives Considered*: Standard `react-helmet-async` (adds external dependency weight and provider wrappers).
-
-- **Decision 2: Automated Dynamic Fallbacks with Admin Priority**
-  - *Chosen Approach*: When a product or taxonomy has custom `seoTitle` or `metaDescription` saved in Firestore / product data, prioritize it. If absent, fall back to well-crafted algorithmic templates based on product name, brand, key ingredients, and authentic Bangladesh delivery promise.
-  - *Why*: Ensures 100% of products and categories have immediate, search-optimized meta tags from day one, without requiring the admin to manually author every single item before launching.
-
-- **Decision 3: Complete Schema.org Structured Data Suite**
-  - *Chosen Approach*: Inject dynamic `<script type="application/ld+json">` tags containing Product, BreadcrumbList, WebSite, and LocalBusiness specifications.
-  - *Why*: Directly aligns with user requirement for all schemas, unlocking maximum visibility across Google rich cards, image search, knowledge panels, and merchant listings.
+### Phase 2: Role-Based Access Control (RBAC) Hardening Across All Tiers [COMPLETED]
+* **Objective**: Enforce strict least-privilege role boundaries across UI navigation, Express backend APIs, and Firestore Security Rules. Ensure `hr`, `customer_support`, and `inventory_manager` cannot access unauthorized financial ledgers, debt adjustments, or user credential files.
+* **Exact Files Targeted**:
+  * `src/components/AdminLayout.tsx`
+  * `server.ts`
+  * `firestore.rules`
+* **Changes Delivered**:
+  * **Frontend Navigation & Direct URL Guards**:
+    * Defined `inventoryManagerAllowedPaths`, `customerSupportAllowedPaths`, `hrAllowedPaths`.
+    * Implemented direct URL redirection hooks preventing unauthorized URL entry.
+  * **Backend API Guards**:
+    * Created `verifyFinanceAuth` strictly permitting `['admin', 'super_admin']`.
+    * Applied `verifyFinanceAuth` to `/api/finance/transfer`, `/api/finance/collect-due`, `/api/finance/transaction`, `/api/wholesale/payments`, and `/api/wholesale/orders/admin-create`.
+    * Protected Slack user linking, support ticket refunds, push notifications, and Cloudinary signing.
+  * **Firestore Rules**:
+    * Restricted `financial_transactions`, `payment_transactions`, and `wholesale_payments` to `isAdminOrSuperAdmin()`.
+* **Verification**: Full type check and rule verification completed.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+### Phase 3: Meta Conversions API (CAPI) Durable Deduplication & Verification [COMPLETED]
+* **Objective**: Eliminate in-memory loss on server restarts, prevent spoofed conversion submissions, and enforce database verification of order values and origins.
+* **Exact Files Targeted**:
+  * `server.ts` (`/api/tracking/meta-capi`)
+* **Changes Delivered**:
+  * Validates order document in `orders/{orderId}` before accepting Purchase event.
+  * Strict Allow-List: only `order_source === 'WEBSITE'` can trigger CAPI purchase conversions; POS, ADMIN, MANUAL are strictly excluded.
+  * Reads authoritative `totalAmount` and `items` directly from the database record rather than client payload.
+  * Checks persistent `analytics.capiStatus === 'dispatched'` in Firestore.
+  * Updates `analytics.capiStatus = 'dispatched'` upon successful dispatch.
+* **Verification**: Tested against order schemas and server restart persistence.
 
-### System Architecture Diagram
+---
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        SEO State & Injection Flow                      │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-      ┌────────────────────────────┼────────────────────────────┐
-      ▼                            ▼                            ▼
-┌───────────────┐          ┌───────────────┐          ┌──────────────────┐
-│  Product Data │          │ Admin SEO     │          │ Storefront       │
-│  & Taxonomies │          │ Custom Values │          │ Context / Router │
-└───────┬───────┘          └───────┬───────┘          └────────┬─────────┘
-        │                          │                           │
-        └──────────────────────────┼───────────────────────────┘
-                                   ▼
-                   ┌───────────────────────────────┐
-                   │       seoService Utility      │
-                   │ • buildProductMetadata()      │
-                   │ • buildCategoryMetadata()     │
-                   │ • buildGlobalSchemas()        │
-                   └───────────────┬───────────────┘
-                                   ▼
-                   ┌───────────────────────────────┐
-                   │       <SeoHead /> Component   │
-                   │ • Updates document.title      │
-                   │ • Upserts <meta> tags         │
-                   │ • Upserts <link rel=canonical>│
-                   │ • Injects JSON-LD <script>    │
-                   └───────────────┬───────────────┘
-                                   ▼
-                   ┌───────────────────────────────┐
-                   │ DOM Head & Search Bot Preview │
-                   └───────────────────────────────┘
-```
+### Phase 4: Website Checkout Server-Side Idempotency & Concurrency Hardening [COMPLETED]
+* **Objective**: Prevent duplicate orders from double-clicks or network retries, route website checkouts through server-side transaction validation, and ensure idempotency.
+* **Exact Files Targeted**:
+  * `src/context/CartContext.tsx`
+  * `src/components/MainLayout.tsx`
+  * `server.ts` (`/api/functions/placeOrder`)
+* **Changes Delivered**:
+  * `src/context/CartContext.tsx`: Added `isSubmitting` state, generated unique client idempotency keys (`idem_web_${userId || 'guest'}_${Date.now()}_${cartChecksum}`), and wired checkout to `/api/functions/placeOrder`.
+  * `src/components/MainLayout.tsx`: Connected `disabled={isSubmitting}` to the Order Now button with loading spinner and disabled styling to prevent double-click submissions.
+  * `server.ts`: Server-side transactional checkout locks stock, validates prices, records `payment_idempotency/{idempotencyKey}`, and returns existing orders idempotently on duplicate requests.
+* **Verification**: Tested submission state and idempotency checks.
 
-### Component & State Mapping
+---
 
-1. **`src/services/seoService.ts`**:
-   - `buildProductSeo(product, origin)`: Resolves title, description, canonical URL, OG tags, and full Product + Breadcrumb JSON-LD schema (with price in BDT, in-stock availability, brand, and reviews).
-   - `buildCategorySeo(category, brand, origin)`: Generates search-optimized title, description, canonical link, and CollectionPage / Breadcrumb JSON-LD schema.
-   - `buildHomepageSeo(origin)`: Provides organization and local business schemas with Google Business rating references.
-   - `updateHeadMetadata(metaConfig)`: Helper to cleanly update document title, open-graph tags, meta tags, and LD+JSON scripts in the DOM.
+### Phase 5: Unified Inventory Fulfillment & Concurrency Consistency [COMPLETED]
+* **Objective**: Eliminate race conditions during online order fulfillment and unify inventory accounting logs across POS, Wholesale, and Website.
+* **Exact Files Targeted**:
+  * `src/services/posService.ts`
+  * `firestore.rules`
+* **Changes Delivered**:
+  * `posService.ts`: Pre-fulfillment barcode validation, catalog stock re-verification, atomic stock deduction, and synchronized `inventory_logs` and `stock_movements`.
+  * `firestore.rules`: Added strict schema validation on `orders.create`:
+    * `status in ['pending', 'unpaid']`
+    * `items.size() > 0`
+    * `totalAmount >= 0`
+* **Verification**: Verified transaction integrity and rule constraints.
 
-2. **`src/components/SeoHead.tsx`**:
-   - Declarative React component wrapping `updateHeadMetadata`.
-   - Cleans up and restores baseline title/tags when routes unmount.
+---
 
-3. **Storefront Route Integration**:
-   - **`src/components/ProductDetail.tsx`**: Renders `<SeoHead />` with product specific data, prices, ratings, and image tags.
-   - **`src/components/ShopCategoryPage.tsx`** & **`src/components/StoreCatalog.tsx`**: Renders `<SeoHead />` with category/brand filtered tags.
-   - **`src/App.tsx`** / **`src/components/MainLayout.tsx`**: Renders baseline store metadata and Global Organization / LocalBusiness schema.
-
-4. **`src/components/AdminSEO.tsx`**:
-   - Enhanced with live Google SERP and Social Share Card previews.
-   - Character count indicators and quick AI regeneration with Gemini.
+### Phase 6: Full Verification, Linting & Build Verification [COMPLETED]
+* **Objective**: Validate the entire application bundle, confirm zero regressions, and ensure all services are operational.
+* **Automated Verification Results**:
+  * `lint_applet` (`tsc --noEmit`): **0 errors (Pass)**
+  * `compile_applet` (Vite production bundle): **Build succeeded (Pass)**
+  * `deploy_firebase`: **Firestore security rules deployed successfully (Pass)**
+  * Dev Server: **Running & responsive on port 3000 (`/api/health` status: ok)**

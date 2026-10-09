@@ -1,5 +1,6 @@
 import { Order, CourierData } from '../types';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
+import { authFetch } from './apiClient';
 import { doc, updateDoc, setDoc } from 'firebase/firestore';
 
 export interface CreateConsignmentResult {
@@ -26,7 +27,7 @@ export async function createSteadfastConsignment(
   const codAmount = order.isPaid ? 0 : order.totalAmount;
 
   try {
-    const response = await fetch('/api/steadfast/create-consignment', {
+    const response = await authFetch('/api/steadfast/create-consignment', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

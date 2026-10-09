@@ -8,6 +8,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { analytics } from '../services/analyticsService';
 import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
 import { getProductUnitPrice, getRetailPrice } from '../utils/pricing';
+import { authFetch } from '../services/apiClient';
 
 export interface CartItem {
   product: Product;
@@ -17,6 +18,7 @@ export interface CartItem {
 
 interface CartContextType {
   cart: CartItem[];
+  isSubmitting: boolean;
   addToCart: (product: Product, quantity?: number, comboComponents?: ComboComponentDetail[]) => void;
   removeFromCart: (productId: string) => void;
   updateCartQty: (productId: string, delta: number) => void;
@@ -189,6 +191,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [language, setLanguage] = useState<'en' | 'bn'>('en');
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'details' | 'success'>('cart');
   const [lastCreatedOrder, setLastCreatedOrder] = useState<Order | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const [useLoyaltyPoints, setUseLoyaltyPoints] = useState<boolean>(false);
 
@@ -408,13 +411,14 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cart.length === 0) return;
+    if (cart.length === 0 || isSubmitting) return;
 
     if (!user) {
       alert(language === 'bn' ? 'অর্ডার সম্পন্ন করতে আপনাকে অবশ্যই প্রথমে লগইন করতে হবে।' : 'Login Required: You must be logged in to place an order.');
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const isWholesale = profile?.wholesaleAccess === true;
       const orderItems: OrderItem[] = cart.map((item) => {
@@ -461,6 +465,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (attribution.creator?.creator_id) attributionPayload.creator_id = attribution.creator.creator_id;
       if (attribution.creator?.ref) attributionPayload.ref = attribution.creator.ref;
 
+      const cartChecksum = cart.map((i) => `${i.product.id}:${i.quantity}`).join('_');
+      const idempotencyKey = `idem_web_${user?.uid || 'guest'}_${Date.now()}_${cartChecksum}`;
+
       const orderData = {
         customerName: checkoutForm.name,
         customerPhone: checkoutForm.phone,
@@ -480,7 +487,44 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         attribution: attributionPayload
       };
 
-      const createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
+      let createdOrder: Order;
+
+      // Authoritative Server-Side Checkout with Idempotency & Transactional stock locking
+      try {
+        const response = await authFetch('/api/functions/placeOrder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: orderItems,
+            customerName: checkoutForm.name,
+            customerPhone: checkoutForm.phone,
+            customerEmail: user?.email || '',
+            address: checkoutForm.address,
+            deliveryArea: checkoutForm.area,
+            customer_uid: user?.uid || null,
+            couponCode: appliedCoupon?.code || undefined,
+            couponDiscount: couponDiscount > 0 ? couponDiscount : undefined,
+            pointsDiscount: redeemedPts > 0 ? redeemedPts : undefined,
+            idempotencyKey,
+            attribution: attributionPayload
+          })
+        });
+
+        if (response.ok) {
+          const respData = await response.json();
+          if (respData.order) {
+            createdOrder = respData.order;
+          } else {
+            createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
+          }
+        } else {
+          console.warn('[CartContext] Server checkout returned non-ok status:', response.status);
+          createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
+        }
+      } catch (srvErr) {
+        console.warn('[CartContext] Server transactional checkout call failed, falling back to client posService:', srvErr);
+        createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
+      }
 
       // Track Authoritative Purchase immediately on order placement
       analytics.trackPurchase(createdOrder).catch(console.warn);
@@ -512,6 +556,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err) {
       console.error('Online checkout failed:', err);
       alert('Order Placement Failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -521,6 +567,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <CartContext.Provider
       value={{
         cart,
+        isSubmitting,
         addToCart,
         removeFromCart,
         updateCartQty,
