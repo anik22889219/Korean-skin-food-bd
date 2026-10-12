@@ -199,7 +199,31 @@ export const AdminTaxonomyManagement: React.FC = () => {
 
   const getItemProductCount = (item: TaxonomyItem): number => {
     const key = `${item.type}:${item.name.trim().toLowerCase()}`;
-    return productUsageMap.get(key) || 0;
+    const direct = productUsageMap.get(key) || 0;
+    if (direct > 0) return direct;
+
+    const targetName = item.name.toLowerCase().trim();
+    let count = 0;
+    products.forEach((p) => {
+      if (item.type === 'brand' && p.brand && p.brand.toLowerCase().includes(targetName)) {
+        count++;
+      } else if (item.type === 'category' && p.category && p.category.toLowerCase().includes(targetName)) {
+        count++;
+      } else if (item.type === 'skin_type' && Array.isArray(p.skinTypes) && p.skinTypes.some(s => s.toLowerCase().includes(targetName) || targetName.includes(s.toLowerCase()))) {
+        count++;
+      } else if (item.type === 'skin_concern' && Array.isArray(p.concerns) && p.concerns.some(c => c.toLowerCase().includes(targetName) || targetName.includes(c.toLowerCase()))) {
+        count++;
+      } else if (item.type === 'target_benefit' && Array.isArray(p.benefits) && p.benefits.some(b => b.toLowerCase().includes(targetName) || targetName.includes(b.toLowerCase()))) {
+        count++;
+      } else if (item.type === 'routine_step' && p.routineStep && (p.routineStep.toLowerCase().includes(targetName) || targetName.includes(p.routineStep.toLowerCase()))) {
+        count++;
+      } else if (item.type === 'ingredient') {
+        const inKey = Array.isArray(p.keyIngredients) && p.keyIngredients.some(i => i.toLowerCase().includes(targetName) || targetName.includes(i.toLowerCase()));
+        const inDesc = p.description && p.description.toLowerCase().includes(targetName);
+        if (inKey || inDesc) count++;
+      }
+    });
+    return count;
   };
 
   // Filter items for current active tab
@@ -326,11 +350,11 @@ export const AdminTaxonomyManagement: React.FC = () => {
           id: editingItem.id,
           updates: {
             name: formName.trim(),
-            nameBN: formNameBN.trim() || undefined,
+            nameBN: formNameBN.trim() || '',
             slug,
-            description: formDescription.trim() || undefined,
-            descriptionBN: formDescriptionBN.trim() || undefined,
-            image: formImage.trim() || undefined,
+            description: formDescription.trim() || '',
+            descriptionBN: formDescriptionBN.trim() || '',
+            image: formImage.trim() || '',
             displayOrder: Number(formDisplayOrder) || 1,
             isActive: formIsActive,
             isFeatured: formIsFeatured,
@@ -342,11 +366,11 @@ export const AdminTaxonomyManagement: React.FC = () => {
         await createMutation.mutateAsync({
           type: activeTab,
           name: formName.trim(),
-          nameBN: formNameBN.trim() || undefined,
+          nameBN: formNameBN.trim() || '',
           slug,
-          description: formDescription.trim() || undefined,
-          descriptionBN: formDescriptionBN.trim() || undefined,
-          image: formImage.trim() || undefined,
+          description: formDescription.trim() || '',
+          descriptionBN: formDescriptionBN.trim() || '',
+          image: formImage.trim() || '',
           displayOrder: Number(formDisplayOrder) || tabItems.length + 1,
           isActive: formIsActive,
           isFeatured: formIsFeatured,

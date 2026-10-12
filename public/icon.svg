@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="ksfGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF4B91" />
+      <stop offset="100%" stop-color="#E91E8C" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#E91E8C" flood-opacity="0.3" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="#FFF5F8" />
+  <circle cx="256" cy="256" r="180" fill="url(#ksfGradient)" filter="url(#shadow)" />
+  <!-- Barcode + Sparkle icon inside -->
+  <g fill="#FFFFFF" transform="translate(146, 156)">
+    <!-- Barcode stripes -->
+    <rect x="20" y="30" width="14" height="140" rx="4" />
+    <rect x="46" y="30" width="8" height="140" rx="3" />
+    <rect x="66" y="30" width="22" height="140" rx="4" />
+    <rect x="100" y="30" width="10" height="140" rx="3" />
+    <rect x="122" y="30" width="26" height="140" rx="4" />
+    <rect x="160" y="30" width="12" height="140" rx="3" />
+    <rect x="184" y="30" width="16" height="140" rx="4" />
+    <!-- Horizontal laser scanner beam in white with glow -->
+    <rect x="10" y="95" width="200" height="8" rx="4" fill="#FFFFFF" opacity="0.9" />
+  </g>
+</svg>

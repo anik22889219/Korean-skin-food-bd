@@ -22,6 +22,7 @@ import { findProductByScannedCode } from '../utils/barcode';
 import { getProductUnitPrice, aggregateProductQuantities, getComboEffectiveStock } from '../utils/pricing';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
+import { posOfflineStorage } from './posOfflineStorage';
 
 export const ALLOWED_POS_ROLES: PosAllowedRole[] = ['admin', 'super_admin', 'inventory_manager'];
 
@@ -445,6 +446,30 @@ export async function addProductToSession(
     };
   }
 
+  // If browser is offline or in outage, directly save to persistent offline queue without failing
+  const isOffline = typeof navigator !== 'undefined' && (!navigator.onLine || !posOfflineStorage.isOnline());
+  if (isOffline) {
+    try {
+      await posOfflineStorage.recordOfflineScan({
+        sessionId,
+        productId: canonicalProductId,
+        productName: product.name,
+        barcode: product.barcode,
+        price: product.discountPrice || product.price,
+        quantity: qtyToAdd
+      });
+      posService.scanProductIntoSession(sessionId, canonicalProductId);
+      return {
+        success: true,
+        message: `"${product.name}" added (saved locally offline)!`,
+        product,
+        isOffline: true
+      } as any;
+    } catch (e) {
+      console.warn('[posService] Offline scan local record note:', e);
+    }
+  }
+
   try {
     const scansColRef = collection(db, 'pos_sessions', sessionId, 'scans');
     const nowIso = new Date().toISOString();
@@ -480,8 +505,26 @@ export async function addProductToSession(
       product
     };
   } catch (err: any) {
-    console.error('Error adding product scan to session:', err);
-    return { success: false, message: 'Failed to add product to session.' };
+    console.warn('[posService] Error adding scan to Firestore, saving to persistent offline queue:', err);
+    try {
+      await posOfflineStorage.recordOfflineScan({
+        sessionId,
+        productId: canonicalProductId,
+        productName: product.name,
+        barcode: product.barcode,
+        price: product.discountPrice || product.price,
+        quantity: qtyToAdd
+      });
+      posService.scanProductIntoSession(sessionId, canonicalProductId);
+      return {
+        success: true,
+        message: `"${product.name}" added (saved offline, will auto-sync)!`,
+        product,
+        isOffline: true
+      } as any;
+    } catch {
+      return { success: false, message: 'Failed to add product to session.' };
+    }
   }
 }
 
@@ -525,6 +568,32 @@ export const posService = {
     const nowIso = new Date().toISOString();
     const userSessionStorageKey = `ksf_pos_user_session_${userId}`;
 
+    // Fast-path: If browser is currently offline, restore persistent session snapshot immediately
+    if (typeof navigator !== 'undefined' && (!navigator.onLine || !posOfflineStorage.isOnline())) {
+      try {
+        const cached = await posOfflineStorage.getCachedActiveSession(userId);
+        if (cached) {
+          return {
+            id: cached.sessionId,
+            sessionId: cached.sessionId,
+            userId: cached.userId,
+            userName: cached.userName,
+            userRole: cached.userRole as PosAllowedRole,
+            deviceType: (cached.deviceType as any) || deviceType,
+            status: 'active',
+            startedAt: cached.startedAt,
+            lastSeenAt: nowIso,
+            name: `${cached.userName}'s POS Session (Offline Mode)`,
+            created_at: cached.startedAt,
+            updated_at: nowIso,
+            items: []
+          };
+        }
+      } catch (e) {
+        console.warn('[posService] Offline session cache check notice:', e);
+      }
+    }
+
     // 1. Check local storage cache for rapid session ID restoration
     try {
       const cachedSessionId = localStorage.getItem(userSessionStorageKey);
@@ -544,13 +613,15 @@ export const posService = {
               userRole: userRole || data.userRole
             };
             await updateDoc(sessionRef, sanitizeForFirestore(updatedFields)).catch(() => {});
-            return {
+            const finalRestored = {
               ...data,
               ...updatedFields,
               id: snap.id,
               sessionId: data.sessionId || snap.id,
               items: Array.isArray(data.items) ? data.items : []
             };
+            posOfflineStorage.cacheActiveSession(finalRestored).catch(() => {});
+            return finalRestored;
           }
         }
       }
@@ -618,12 +689,14 @@ export const posService = {
         };
         setDoc(doc(db, 'admin_notifications', notifId), sanitizeForFirestore(notificationPayload), { merge: true }).catch(() => {});
 
-        return {
+        const sessionResult = {
           ...activeSession,
           lastSeenAt: nowIso,
           updated_at: nowIso,
           deviceType
         };
+        posOfflineStorage.cacheActiveSession(sessionResult).catch(() => {});
+        return sessionResult;
       }
     } catch (err) {
       console.warn('[posService] Error querying active user POS sessions from Firestore:', err);
@@ -688,6 +761,7 @@ export const posService = {
       console.error('[posService] Error creating new user POS session:', err);
     }
 
+    posOfflineStorage.cacheActiveSession(newSession).catch(() => {});
     return newSession;
   },
 

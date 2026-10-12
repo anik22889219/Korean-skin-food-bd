@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { productService } from '../services/productService';
+import { taxonomyService } from '../services/taxonomyService';
 import { useProducts } from '../hooks/queries/products';
 import { useCategories } from '../hooks/queries/categories';
 import { useBrands } from '../hooks/queries/brands';
+import { useAllTaxonomies } from '../hooks/queries/taxonomies';
 import { agentService } from '../services/agentService';
 import { cloudinaryService } from '../services/cloudinaryService';
-import { Product } from '../types';
+import { Product, TaxonomyDimensionType } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { 
   auditProductsBarcodes, 
@@ -27,7 +29,8 @@ import {
   Image as ImageIcon, Languages, HelpCircle, Eye, EyeOff,
   Barcode, ShieldAlert, Check, RefreshCw, Camera, Tag, Info,
   LayoutGrid, List, Package, AlertTriangle, Layers, Copy, DollarSign, ArrowUpDown,
-  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet, Box, SlidersHorizontal
+  Globe, FileText, Sparkles, Banknote, Download, FileSpreadsheet, Box, SlidersHorizontal,
+  Filter, Droplets, Droplet, Target, ChevronDown, ChevronUp, CheckCircle2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -80,12 +83,38 @@ export const ProductManagement: React.FC = () => {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [auditResult, setAuditResult] = useState<BarcodeAuditReport | null>(null);
 
-  // Search and filters
+  // Search and dynamic taxonomy filters
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [brandFilter, setBrandFilter] = useState('All');
+  const [skinTypeFilter, setSkinTypeFilter] = useState('All');
+  const [concernFilter, setConcernFilter] = useState('All');
+  const [benefitFilter, setBenefitFilter] = useState('All');
+  const [routineStepFilter, setRoutineStepFilter] = useState('All');
+  const [ingredientFilter, setIngredientFilter] = useState('All');
   const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc' | 'stock_asc' | 'stock_desc' | 'name_asc'>('newest');
+  const [isAdvancedFiltersExpanded, setIsAdvancedFiltersExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
+  const [selectedSkinTypes, setSelectedSkinTypes] = useState<string[]>([]);
+  const [selectedConcerns, setSelectedConcerns] = useState<string[]>([]);
+  const [selectedBenefits, setSelectedBenefits] = useState<string[]>([]);
+  const [selectedRoutineSteps, setSelectedRoutineSteps] = useState<string[]>([]);
+  const [selectedIngredients, setSelectedIngredients] = useState<string[]>([]);
+
+  const toggleMultiSelect = (list: string[], item: string, setter: (val: string[]) => void) => {
+    if (list.includes(item)) {
+      setter(list.filter(i => i !== item));
+    } else {
+      setter([...list, item]);
+    }
+  };
+
+  // Live dynamic taxonomies
+  const { data: allTaxonomies = [] } = useAllTaxonomies();
   const [copiedBarcode, setCopiedBarcode] = useState<string | null>(null);
   const [isAiGeneratingContent, setIsAiGeneratingContent] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
@@ -306,8 +335,105 @@ export const ProductManagement: React.FC = () => {
 
   // Memoized unique brands for single products filter
   const availableBrandsForFilter = useMemo(() => {
-    return getUniqueBrandList(singleProducts);
-  }, [singleProducts]);
+    const taxBrands = allTaxonomies.filter((t) => t.type === 'brand' && t.isActive).map((t) => t.name);
+    const prodBrands = getUniqueBrandList(singleProducts);
+    const merged = Array.from<string>(new Set<string>([...taxBrands, ...prodBrands]));
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Dynamic categories from live taxonomies + existing products
+  const dynamicCategories = useMemo(() => {
+    const taxCats = allTaxonomies.filter((t) => t.type === 'category' && t.isActive).map((t) => t.name);
+    const prodCats = Array.from<string>(new Set<string>(singleProducts.map((p) => p.category).filter((c): c is string => Boolean(c))));
+    const merged = Array.from<string>(new Set<string>([...taxCats, ...prodCats]));
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Dynamic skin types from live taxonomies + existing products
+  const dynamicSkinTypes = useMemo(() => {
+    const taxST = allTaxonomies.filter((t) => t.type === 'skin_type' && t.isActive).map((t) => t.name);
+    const prodST: string[] = [];
+    singleProducts.forEach((p) => {
+      if (Array.isArray(p.skinTypes)) prodST.push(...p.skinTypes);
+    });
+    const merged = Array.from<string>(new Set<string>([...taxST, ...prodST])).filter(Boolean);
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Dynamic skin concerns from live taxonomies + existing products
+  const dynamicSkinConcerns = useMemo(() => {
+    const taxC = allTaxonomies.filter((t) => t.type === 'skin_concern' && t.isActive).map((t) => t.name);
+    const prodC: string[] = [];
+    singleProducts.forEach((p) => {
+      if (Array.isArray(p.concerns)) prodC.push(...p.concerns);
+    });
+    const merged = Array.from<string>(new Set<string>([...taxC, ...prodC])).filter(Boolean);
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Dynamic target benefits from live taxonomies + existing products
+  const dynamicTargetBenefits = useMemo(() => {
+    const taxB = allTaxonomies.filter((t) => t.type === 'target_benefit' && t.isActive).map((t) => t.name);
+    const prodB: string[] = [];
+    singleProducts.forEach((p) => {
+      if (Array.isArray(p.benefits)) prodB.push(...p.benefits);
+    });
+    const merged = Array.from<string>(new Set<string>([...taxB, ...prodB])).filter(Boolean);
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Dynamic routine steps from live taxonomies + existing products
+  const dynamicRoutineSteps = useMemo(() => {
+    const taxR = allTaxonomies.filter((t) => t.type === 'routine_step' && t.isActive).map((t) => t.name);
+    const prodR: string[] = singleProducts.map((p) => p.routineStep).filter((r): r is string => Boolean(r));
+    const merged = Array.from<string>(new Set<string>([...taxR, ...prodR])).filter(Boolean);
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Dynamic key ingredients from live taxonomies + existing products
+  const dynamicIngredients = useMemo(() => {
+    const taxI = allTaxonomies.filter((t) => t.type === 'ingredient' && t.isActive).map((t) => t.name);
+    const prodI: string[] = [];
+    singleProducts.forEach((p) => {
+      if (Array.isArray(p.keyIngredients)) prodI.push(...p.keyIngredients);
+    });
+    const merged = Array.from<string>(new Set<string>([...taxI, ...prodI])).filter(Boolean);
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [allTaxonomies, singleProducts]);
+
+  // Count active extra filters (Skin type, Concern, Benefit, Routine, Ingredient)
+  const activeExtraFiltersCount = useMemo(() => {
+    let count = 0;
+    if (skinTypeFilter !== 'All') count++;
+    if (concernFilter !== 'All') count++;
+    if (benefitFilter !== 'All') count++;
+    if (routineStepFilter !== 'All') count++;
+    if (ingredientFilter !== 'All') count++;
+    return count;
+  }, [skinTypeFilter, concernFilter, benefitFilter, routineStepFilter, ingredientFilter]);
+
+  // Total active filters count
+  const totalActiveFiltersCount = useMemo(() => {
+    let count = activeExtraFiltersCount;
+    if (categoryFilter !== 'All') count++;
+    if (brandFilter !== 'All') count++;
+    if (stockStatusFilter !== 'all') count++;
+    if (searchQuery.trim()) count++;
+    return count;
+  }, [activeExtraFiltersCount, categoryFilter, brandFilter, stockStatusFilter, searchQuery]);
+
+  const handleResetAllFilters = () => {
+    setSearchQuery('');
+    setCategoryFilter('All');
+    setBrandFilter('All');
+    setSkinTypeFilter('All');
+    setConcernFilter('All');
+    setBenefitFilter('All');
+    setRoutineStepFilter('All');
+    setIngredientFilter('All');
+    setStockStatusFilter('all');
+    setSortBy('newest');
+  };
 
   // Cloudinary media library popup states
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
@@ -1072,6 +1198,36 @@ export const ProductManagement: React.FC = () => {
         barcodeNormalized: normBc
       };
 
+      if (updatedProd.brand) {
+        await taxonomyService.ensureTaxonomyItemExists('brand', updatedProd.brand);
+      }
+      if (updatedProd.category) {
+        await taxonomyService.ensureTaxonomyItemExists('category', updatedProd.category);
+      }
+      if (updatedProd.routineStep) {
+        await taxonomyService.ensureTaxonomyItemExists('routine_step', updatedProd.routineStep);
+      }
+      if (Array.isArray(updatedProd.skinTypes)) {
+        for (const st of updatedProd.skinTypes) {
+          if (st && st !== 'All') await taxonomyService.ensureTaxonomyItemExists('skin_type', st);
+        }
+      }
+      if (Array.isArray(updatedProd.concerns)) {
+        for (const c of updatedProd.concerns) {
+          if (c && c !== 'All') await taxonomyService.ensureTaxonomyItemExists('skin_concern', c);
+        }
+      }
+      if (Array.isArray(updatedProd.benefits)) {
+        for (const b of updatedProd.benefits) {
+          if (b && b !== 'All') await taxonomyService.ensureTaxonomyItemExists('target_benefit', b);
+        }
+      }
+      if (Array.isArray(updatedProd.keyIngredients)) {
+        for (const ing of updatedProd.keyIngredients) {
+          if (ing) await taxonomyService.ensureTaxonomyItemExists('ingredient', ing);
+        }
+      }
+
       if (isAddingProduct) {
         await productService.createProduct(updatedProd);
         setAlertMsg({ 
@@ -1272,29 +1428,169 @@ export const ProductManagement: React.FC = () => {
     setIsMediaModalOpen(true);
   };
 
-  // Filtered Single Products list
+  // Filtered Single Products list with complete dynamic taxonomy filters & sorting
   const filteredProducts = useMemo(() => {
-    return singleProducts.filter((p) => {
+    const list = singleProducts.filter((p) => {
       const q = searchQuery.toLowerCase().trim();
-      const matchesSearch = !q || 
-                            (p.name && p.name.toLowerCase().includes(q)) || 
-                            (p.nameBN && p.nameBN.toLowerCase().includes(q)) || 
-                            (p.brand && p.brand.toLowerCase().includes(q)) ||
-                            (p.barcode && p.barcode.includes(q)) ||
-                            (p.sku && p.sku.toLowerCase().includes(q));
-      const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter;
-      const matchesBrand = brandFilter === 'All' || (p.brand && isSameBrand(p.brand, brandFilter));
+      if (q) {
+        const matchesBasic = 
+          (p.name && p.name.toLowerCase().includes(q)) || 
+          (p.nameBN && p.nameBN.toLowerCase().includes(q)) || 
+          (p.brand && p.brand.toLowerCase().includes(q)) ||
+          (p.category && p.category.toLowerCase().includes(q)) ||
+          (p.barcode && p.barcode.includes(q)) ||
+          (p.sku && p.sku.toLowerCase().includes(q)) ||
+          (p.description && p.description.toLowerCase().includes(q));
+
+        const matchesTaxonomy =
+          (Array.isArray(p.skinTypes) && p.skinTypes.some(st => st.toLowerCase().includes(q))) ||
+          (Array.isArray(p.concerns) && p.concerns.some(c => c.toLowerCase().includes(q))) ||
+          (Array.isArray(p.benefits) && p.benefits.some(b => b.toLowerCase().includes(q))) ||
+          (p.routineStep && p.routineStep.toLowerCase().includes(q)) ||
+          (Array.isArray(p.keyIngredients) && p.keyIngredients.some(k => k.toLowerCase().includes(q)));
+
+        if (!matchesBasic && !matchesTaxonomy) return false;
+      }
+
+      // Category Filter (multi-select or single)
+      if (selectedCategories.length > 0) {
+        if (!p.category || !selectedCategories.some(c => c.toLowerCase() === p.category.toLowerCase())) return false;
+      } else if (categoryFilter !== 'All') {
+        if (!p.category || p.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
+      }
+
+      // Brand Filter (multi-select or single)
+      if (selectedBrands.length > 0) {
+        if (!p.brand || !selectedBrands.some(b => isSameBrand(p.brand, b))) return false;
+      } else if (brandFilter !== 'All') {
+        if (!p.brand || !isSameBrand(p.brand, brandFilter)) return false;
+      }
       
-      let matchesStock = true;
+      // Stock Status Filter
       const stockQty = Number(p.stock) || 0;
       const threshold = p.lowStockThreshold ?? 5;
-      if (stockStatusFilter === 'in_stock') matchesStock = stockQty > threshold;
-      if (stockStatusFilter === 'low_stock') matchesStock = stockQty > 0 && stockQty <= threshold;
-      if (stockStatusFilter === 'out_of_stock') matchesStock = stockQty === 0;
+      if (stockStatusFilter === 'in_stock' && stockQty <= threshold) return false;
+      if (stockStatusFilter === 'low_stock' && (stockQty === 0 || stockQty > threshold)) return false;
+      if (stockStatusFilter === 'out_of_stock' && stockQty !== 0) return false;
 
-      return matchesSearch && matchesCategory && matchesBrand && matchesStock;
+      // Skin Type Filter (multi-select or single)
+      if (selectedSkinTypes.length > 0) {
+        const stList = Array.isArray(p.skinTypes) ? p.skinTypes : [];
+        const matchST = selectedSkinTypes.some(sel => 
+          stList.some(st => st.toLowerCase().includes(sel.toLowerCase()) || sel.toLowerCase().includes(st.toLowerCase()) || st.toLowerCase() === 'all')
+        );
+        if (!matchST) return false;
+      } else if (skinTypeFilter !== 'All') {
+        const stList = Array.isArray(p.skinTypes) ? p.skinTypes : [];
+        const matchST = stList.some((st) => 
+          st.toLowerCase().includes(skinTypeFilter.toLowerCase()) || 
+          skinTypeFilter.toLowerCase().includes(st.toLowerCase()) || 
+          st.toLowerCase() === 'all' || 
+          st.toLowerCase() === 'all skin types'
+        );
+        if (!matchST) return false;
+      }
+
+      // Skin Concern Filter (multi-select or single)
+      if (selectedConcerns.length > 0) {
+        const cList = Array.isArray(p.concerns) ? p.concerns : [];
+        const matchC = selectedConcerns.some(sel => 
+          cList.some(c => c.toLowerCase().includes(sel.toLowerCase()) || sel.toLowerCase().includes(c.toLowerCase()))
+        );
+        if (!matchC) return false;
+      } else if (concernFilter !== 'All') {
+        const cList = Array.isArray(p.concerns) ? p.concerns : [];
+        const matchC = cList.some((c) => 
+          c.toLowerCase().includes(concernFilter.toLowerCase()) || 
+          concernFilter.toLowerCase().includes(c.toLowerCase())
+        );
+        if (!matchC) return false;
+      }
+
+      // Target Benefit Filter (multi-select or single)
+      if (selectedBenefits.length > 0) {
+        const bList = Array.isArray(p.benefits) ? p.benefits : [];
+        const matchB = selectedBenefits.some(sel => 
+          bList.some(b => b.toLowerCase().includes(sel.toLowerCase()) || sel.toLowerCase().includes(b.toLowerCase()))
+        );
+        if (!matchB) return false;
+      } else if (benefitFilter !== 'All') {
+        const bList = Array.isArray(p.benefits) ? p.benefits : [];
+        const matchB = bList.some((b) => 
+          b.toLowerCase().includes(benefitFilter.toLowerCase()) || 
+          benefitFilter.toLowerCase().includes(b.toLowerCase())
+        );
+        if (!matchB) return false;
+      }
+
+      // Routine Step Filter (multi-select or single)
+      if (selectedRoutineSteps.length > 0) {
+        const matchR = selectedRoutineSteps.some(sel => 
+          p.routineStep && (p.routineStep.toLowerCase().includes(sel.toLowerCase()) || sel.toLowerCase().includes(p.routineStep.toLowerCase()))
+        );
+        if (!matchR) return false;
+      } else if (routineStepFilter !== 'All') {
+        if (!p.routineStep || (!p.routineStep.toLowerCase().includes(routineStepFilter.toLowerCase()) && !routineStepFilter.toLowerCase().includes(p.routineStep.toLowerCase()))) {
+          return false;
+        }
+      }
+
+      // Key Ingredient Filter (multi-select or single)
+      if (selectedIngredients.length > 0) {
+        const iList = Array.isArray(p.keyIngredients) ? p.keyIngredients : [];
+        const matchI = selectedIngredients.some(sel => 
+          iList.some(ing => ing.toLowerCase().includes(sel.toLowerCase()) || sel.toLowerCase().includes(ing.toLowerCase())) ||
+          (p.description && p.description.toLowerCase().includes(sel.toLowerCase()))
+        );
+        if (!matchI) return false;
+      } else if (ingredientFilter !== 'All') {
+        const iList = Array.isArray(p.keyIngredients) ? p.keyIngredients : [];
+        const matchI = iList.some((ing) => 
+          ing.toLowerCase().includes(ingredientFilter.toLowerCase()) || 
+          ingredientFilter.toLowerCase().includes(ing.toLowerCase())
+        ) || (p.description && p.description.toLowerCase().includes(ingredientFilter.toLowerCase()));
+        if (!matchI) return false;
+      }
+
+      return true;
     });
-  }, [singleProducts, searchQuery, categoryFilter, brandFilter, stockStatusFilter]);
+
+    // Sort order
+    return [...list].sort((a, b) => {
+      if (sortBy === 'price_asc') {
+        const npA = normalizeProductPricing(a);
+        const npB = normalizeProductPricing(b);
+        return getRetailPrice(npA) - getRetailPrice(npB);
+      }
+      if (sortBy === 'price_desc') {
+        const npA = normalizeProductPricing(a);
+        const npB = normalizeProductPricing(b);
+        return getRetailPrice(npB) - getRetailPrice(npA);
+      }
+      if (sortBy === 'stock_asc') {
+        return (Number(a.stock) || 0) - (Number(b.stock) || 0);
+      }
+      if (sortBy === 'stock_desc') {
+        return (Number(b.stock) || 0) - (Number(a.stock) || 0);
+      }
+      if (sortBy === 'name_asc') {
+        return (a.name || '').localeCompare(b.name || '');
+      }
+      return 0; // newest
+    });
+  }, [
+    singleProducts, 
+    searchQuery, 
+    categoryFilter, 
+    brandFilter, 
+    stockStatusFilter,
+    skinTypeFilter,
+    concernFilter,
+    benefitFilter,
+    routineStepFilter,
+    ingredientFilter,
+    sortBy
+  ]);
 
   return (
     <div className="bg-white p-4 sm:p-6 lg:p-7 rounded-[28px] border border-pink-100 shadow-sm space-y-6">
@@ -1544,121 +1840,348 @@ export const ProductManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters & View Switcher Bar */}
-      <div className="flex flex-col lg:flex-row gap-3 justify-between items-stretch lg:items-center bg-pink-50/20 p-3.5 sm:p-4 rounded-2xl border border-pink-100/60">
+      {/* Filters & View Switcher Bar (Comprehensive Dynamic Taxonomy Filter System) */}
+      <div className="bg-pink-50/25 p-3.5 sm:p-4 rounded-2xl border border-pink-100/80 shadow-xs space-y-3.5">
         
-        {/* Search Field */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3.5 top-3 h-4 w-4 text-pink-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by single product brand, title, barcode or SKU..."
-            className="w-full pl-10 pr-4 py-2 text-xs border border-pink-200 bg-white rounded-xl outline-none focus:ring-2 focus:ring-[#E91E8C]/20 focus:border-[#E91E8C] transition text-slate-900 placeholder:text-slate-400 font-medium"
-          />
-          {searchQuery && (
-            <button 
-              type="button" 
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
-            >
-              <X size={14} />
-            </button>
-          )}
-        </div>
-
-        {/* Filter controls & View toggle */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        {/* Row 1: Search, Brand, Category, Stock, Sort & Actions */}
+        <div className="flex flex-col xl:flex-row gap-3 justify-between items-stretch xl:items-center">
           
-          {/* Brand Filter */}
-          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100">
-            <Tag size={13} className="text-[#E91E8C] shrink-0" />
-            <select
-              value={brandFilter}
-              onChange={(e) => setBrandFilter(e.target.value)}
-              className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[130px] truncate"
-            >
-              <option value="All">All Brands ({availableBrandsForFilter.length})</option>
-              {availableBrandsForFilter.map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
+          {/* Search Field */}
+          <div className="relative flex-1 min-w-[260px] max-w-lg">
+            <Search className="absolute left-3.5 top-3 h-4 w-4 text-pink-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by brand, title, barcode, SKU, active ingredients..."
+              className="w-full pl-10 pr-9 py-2 text-xs border border-pink-200 bg-white rounded-xl outline-none focus:ring-2 focus:ring-[#E91E8C]/20 focus:border-[#E91E8C] transition text-slate-900 placeholder:text-slate-400 font-medium shadow-xs"
+            />
+            {searchQuery && (
+              <button 
+                type="button" 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
+                title="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
 
-          {/* Category Filter */}
-          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100">
-            <Layers size={13} className="text-[#E91E8C] shrink-0" />
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[140px] truncate"
-            >
-              {SINGLE_CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
+          {/* Quick primary filter controls & view toggle */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            
+            {/* Category Filter (Dynamic from taxonomies) */}
+            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100 shadow-xs">
+              <Layers size={13} className="text-[#E91E8C] shrink-0" />
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[140px] truncate"
+                title="Filter by product category"
+              >
+                <option value="All">All Categories ({dynamicCategories.length})</option>
+                {dynamicCategories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
 
-          {/* Stock Filter */}
-          <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100">
-            <select
-              value={stockStatusFilter}
-              onChange={(e) => setStockStatusFilter(e.target.value as any)}
-              className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer"
-            >
-              <option value="all">All Stocks</option>
-              <option value="in_stock">In Stock ({inventoryMetrics.totalProducts - inventoryMetrics.lowStockCount - inventoryMetrics.outOfStockCount})</option>
-              <option value="low_stock">Low Stock ({inventoryMetrics.lowStockCount})</option>
-              <option value="out_of_stock">Out of Stock ({inventoryMetrics.outOfStockCount})</option>
-            </select>
-          </div>
+            {/* Brand Filter (Dynamic from taxonomies) */}
+            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100 shadow-xs">
+              <Tag size={13} className="text-[#E91E8C] shrink-0" />
+              <select
+                value={brandFilter}
+                onChange={(e) => setBrandFilter(e.target.value)}
+                className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[130px] truncate"
+                title="Filter by K-Beauty brand"
+              >
+                <option value="All">All Brands ({availableBrandsForFilter.length})</option>
+                {availableBrandsForFilter.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
 
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-white p-1 rounded-xl border border-pink-100 shadow-xs">
+            {/* Stock Filter */}
+            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100 shadow-xs">
+              <Package size={13} className="text-emerald-600 shrink-0" />
+              <select
+                value={stockStatusFilter}
+                onChange={(e) => setStockStatusFilter(e.target.value as any)}
+                className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer"
+                title="Filter by stock status"
+              >
+                <option value="all">All Stocks</option>
+                <option value="in_stock">In Stock ({inventoryMetrics.totalProducts - inventoryMetrics.lowStockCount - inventoryMetrics.outOfStockCount})</option>
+                <option value="low_stock">Low Stock ({inventoryMetrics.lowStockCount})</option>
+                <option value="out_of_stock">Out of Stock ({inventoryMetrics.outOfStockCount})</option>
+              </select>
+            </div>
+
+            {/* Sort Order Selector */}
+            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100 shadow-xs">
+              <ArrowUpDown size={13} className="text-slate-500 shrink-0" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[130px] truncate"
+                title="Sort items"
+              >
+                <option value="newest">Newest First</option>
+                <option value="price_asc">Price: Low to High</option>
+                <option value="price_desc">Price: High to Low</option>
+                <option value="stock_asc">Stock: Low to High</option>
+                <option value="stock_desc">Stock: High to Low</option>
+                <option value="name_asc">Name: A to Z</option>
+              </select>
+            </div>
+
+            {/* Advanced Taxonomy Filters Toggle */}
             <button
               type="button"
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition cursor-pointer ${
-                viewMode === 'grid' 
-                  ? 'bg-[#E91E8C] text-white shadow-xs' 
-                  : 'text-slate-400 hover:text-slate-700'
+              onClick={() => setIsAdvancedFiltersExpanded(!isAdvancedFiltersExpanded)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border shadow-xs ${
+                isAdvancedFiltersExpanded || activeExtraFiltersCount > 0
+                  ? 'bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] text-white border-transparent'
+                  : 'bg-white hover:bg-pink-50 text-slate-700 border-pink-100'
               }`}
-              title="Grid Card View"
+              title="Toggle Skin Type, Concern, Benefit, Routine, and Ingredient filters"
             >
-              <LayoutGrid size={15} />
+              <SlidersHorizontal size={13} />
+              <span>Taxonomy Filters (ট্যাক্সোনমি)</span>
+              {activeExtraFiltersCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black bg-white text-[#E91E8C]">
+                  {activeExtraFiltersCount}
+                </span>
+              )}
+              {isAdvancedFiltersExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             </button>
+
+            {/* Mobile Filter Button */}
             <button
               type="button"
-              onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-lg transition cursor-pointer ${
-                viewMode === 'table' 
-                  ? 'bg-[#E91E8C] text-white shadow-xs' 
-                  : 'text-slate-400 hover:text-slate-700'
-              }`}
-              title="Dense Table View"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="flex sm:hidden items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
             >
-              <List size={15} />
+              <Filter size={14} />
+              <span>Mobile Filter</span>
+              {(selectedCategories.length + selectedBrands.length + selectedSkinTypes.length + selectedConcerns.length + selectedBenefits.length + selectedRoutineSteps.length + selectedIngredients.length) > 0 && (
+                <span className="w-4 h-4 rounded-full bg-white text-[#E91E8C] font-mono font-black text-[10px] flex items-center justify-center">
+                  {selectedCategories.length + selectedBrands.length + selectedSkinTypes.length + selectedConcerns.length + selectedBenefits.length + selectedRoutineSteps.length + selectedIngredients.length}
+                </span>
+              )}
             </button>
+
+            {/* View Mode Toggle */}
+            <div className="flex items-center bg-white p-1 rounded-xl border border-pink-100 shadow-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  viewMode === 'grid' 
+                    ? 'bg-[#E91E8C] text-white shadow-xs' 
+                    : 'text-slate-400 hover:text-slate-700'
+                }`}
+                title="Grid Card View"
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  viewMode === 'table' 
+                    ? 'bg-[#E91E8C] text-white shadow-xs' 
+                    : 'text-slate-400 hover:text-slate-700'
+                }`}
+                title="Dense Table View"
+              >
+                <List size={15} />
+              </button>
+            </div>
+
           </div>
-
-          {/* Reset Filters */}
-          {(brandFilter !== 'All' || categoryFilter !== 'All' || stockStatusFilter !== 'all' || searchQuery) && (
-            <button
-              type="button"
-              onClick={() => {
-                setBrandFilter('All');
-                setCategoryFilter('All');
-                setStockStatusFilter('all');
-                setSearchQuery('');
-              }}
-              className="text-[11px] font-black text-[#E91E8C] hover:underline cursor-pointer bg-pink-100/60 hover:bg-pink-100 px-3 py-1.5 rounded-xl transition"
-            >
-              Reset Filters
-            </button>
-          )}
-
         </div>
+
+        {/* Row 2: Expanded Dynamic Taxonomy Filters (Skin Type, Concern, Benefit, Routine Step, Key Ingredient) */}
+        {isAdvancedFiltersExpanded && (
+          <div className="pt-3 border-t border-pink-100/80 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
+            
+            {/* Skin Type Filter */}
+            <div className="bg-white p-2 rounded-xl border border-pink-100 shadow-2xs space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-blue-600 flex items-center gap-1">
+                <Droplets size={12} />
+                <span>Skin Type (স্কিন টাইপ)</span>
+              </label>
+              <select
+                value={skinTypeFilter}
+                onChange={(e) => setSkinTypeFilter(e.target.value)}
+                className="w-full bg-slate-50/70 text-xs text-slate-800 font-bold p-1.5 rounded-lg border border-slate-200 outline-none cursor-pointer"
+              >
+                <option value="All">All Skin Types ({dynamicSkinTypes.length})</option>
+                {dynamicSkinTypes.map((st) => (
+                  <option key={st} value={st}>{st}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Skin Concern Filter */}
+            <div className="bg-white p-2 rounded-xl border border-pink-100 shadow-2xs space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                <Target size={12} />
+                <span>Skin Concern (কনসার্ন)</span>
+              </label>
+              <select
+                value={concernFilter}
+                onChange={(e) => setConcernFilter(e.target.value)}
+                className="w-full bg-slate-50/70 text-xs text-slate-800 font-bold p-1.5 rounded-lg border border-slate-200 outline-none cursor-pointer"
+              >
+                <option value="All">All Concerns ({dynamicSkinConcerns.length})</option>
+                {dynamicSkinConcerns.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Target Benefit Filter */}
+            <div className="bg-white p-2 rounded-xl border border-pink-100 shadow-2xs space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-emerald-600 flex items-center gap-1">
+                <Sparkles size={12} />
+                <span>Target Benefit (বেনিফিট)</span>
+              </label>
+              <select
+                value={benefitFilter}
+                onChange={(e) => setBenefitFilter(e.target.value)}
+                className="w-full bg-slate-50/70 text-xs text-slate-800 font-bold p-1.5 rounded-lg border border-slate-200 outline-none cursor-pointer"
+              >
+                <option value="All">All Benefits ({dynamicTargetBenefits.length})</option>
+                {dynamicTargetBenefits.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Routine Step Filter */}
+            <div className="bg-white p-2 rounded-xl border border-pink-100 shadow-2xs space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-rose-600 flex items-center gap-1">
+                <Layers size={12} />
+                <span>Routine Step (রুটিন ধাপ)</span>
+              </label>
+              <select
+                value={routineStepFilter}
+                onChange={(e) => setRoutineStepFilter(e.target.value)}
+                className="w-full bg-slate-50/70 text-xs text-slate-800 font-bold p-1.5 rounded-lg border border-slate-200 outline-none cursor-pointer"
+              >
+                <option value="All">All Steps ({dynamicRoutineSteps.length})</option>
+                {dynamicRoutineSteps.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Key Ingredient Filter */}
+            <div className="bg-white p-2 rounded-xl border border-pink-100 shadow-2xs space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-wider text-teal-600 flex items-center gap-1">
+                <Tag size={12} />
+                <span>Key Ingredient (উপাদান)</span>
+              </label>
+              <select
+                value={ingredientFilter}
+                onChange={(e) => setIngredientFilter(e.target.value)}
+                className="w-full bg-slate-50/70 text-xs text-slate-800 font-bold p-1.5 rounded-lg border border-slate-200 outline-none cursor-pointer"
+              >
+                <option value="All">All Ingredients ({dynamicIngredients.length})</option>
+                {dynamicIngredients.map((i) => (
+                  <option key={i} value={i}>{i}</option>
+                ))}
+              </select>
+            </div>
+
+          </div>
+        )}
+
+        {/* Row 3: Active Filter Pills & Reset Control */}
+        {totalActiveFiltersCount > 0 && (
+          <div className="pt-2.5 border-t border-pink-100/70 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
+              <Filter size={12} className="text-[#E91E8C]" />
+              <span>Active filters:</span>
+            </span>
+
+            {searchQuery && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-pink-200 rounded-lg text-slate-700 font-semibold text-[11px] shadow-2xs">
+                <span>Search: &ldquo;{searchQuery}&rdquo;</span>
+                <button type="button" onClick={() => setSearchQuery('')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {categoryFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-50 border border-purple-200 rounded-lg text-purple-800 font-semibold text-[11px] shadow-2xs">
+                <span>Category: {categoryFilter}</span>
+                <button type="button" onClick={() => setCategoryFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {brandFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-pink-50 border border-pink-200 rounded-lg text-pink-800 font-semibold text-[11px] shadow-2xs">
+                <span>Brand: {brandFilter}</span>
+                <button type="button" onClick={() => setBrandFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {stockStatusFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 font-semibold text-[11px] shadow-2xs">
+                <span>Stock: {stockStatusFilter === 'in_stock' ? 'In Stock' : stockStatusFilter === 'low_stock' ? 'Low Stock' : 'Out of Stock'}</span>
+                <button type="button" onClick={() => setStockStatusFilter('all')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {skinTypeFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 font-semibold text-[11px] shadow-2xs">
+                <span>Skin: {skinTypeFilter}</span>
+                <button type="button" onClick={() => setSkinTypeFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {concernFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 font-semibold text-[11px] shadow-2xs">
+                <span>Concern: {concernFilter}</span>
+                <button type="button" onClick={() => setConcernFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {benefitFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 font-semibold text-[11px] shadow-2xs">
+                <span>Benefit: {benefitFilter}</span>
+                <button type="button" onClick={() => setBenefitFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {routineStepFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 font-semibold text-[11px] shadow-2xs">
+                <span>Routine: {routineStepFilter}</span>
+                <button type="button" onClick={() => setRoutineStepFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            {ingredientFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-50 border border-teal-200 rounded-lg text-teal-800 font-semibold text-[11px] shadow-2xs">
+                <span>Ingredient: {ingredientFilter}</span>
+                <button type="button" onClick={() => setIngredientFilter('All')} className="hover:text-rose-600 p-0.5"><X size={11} /></button>
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResetAllFilters}
+              className="text-[11px] font-black text-[#E91E8C] hover:underline cursor-pointer bg-pink-100/70 hover:bg-pink-100 px-3 py-1 rounded-lg transition ml-auto"
+            >
+              Clear All ({totalActiveFiltersCount})
+            </button>
+          </div>
+        )}
+
       </div>
 
       {/* Results Header Count */}
@@ -2852,7 +3375,7 @@ export const ProductManagement: React.FC = () => {
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                   />
                   <datalist id="product-categories-list">
-                    {categories.filter(c => c !== 'All').map(c => (
+                    {dynamicCategories.filter(c => c !== 'All').map(c => (
                       <option key={c} value={c} />
                     ))}
                   </datalist>
@@ -2867,6 +3390,166 @@ export const ProductManagement: React.FC = () => {
                     className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                   />
                 </div>
+              </div>
+
+              {/* Dynamic Taxonomy & Filter Attributes (Skin Types, Concerns, Benefits, Routine, Ingredients) */}
+              <div className="p-4 bg-pink-50/20 border border-pink-100/80 rounded-2xl space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <SlidersHorizontal size={14} className="text-[#E91E8C]" />
+                    <span>Product Taxonomy & Store Filter Classification</span>
+                  </span>
+                  <span className="text-[10px] text-pink-600 font-bold bg-pink-50 px-2.5 py-0.5 rounded-full border border-pink-100">
+                    Live Dynamic Tags
+                  </span>
+                </div>
+
+                {/* Routine Step Selector */}
+                <div>
+                  <label className="block text-[11px] font-extrabold text-slate-700 mb-1 flex items-center gap-1">
+                    <Layers size={12} className="text-rose-500" />
+                    <span>Korean Routine Step (রুটিন ধাপ)</span>
+                  </label>
+                  <select
+                    value={editingProduct.routineStep || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, routineStep: e.target.value })}
+                    className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C] text-xs font-semibold"
+                  >
+                    <option value="">Select Routine Step (Optional)</option>
+                    {dynamicRoutineSteps.map((step) => (
+                      <option key={step} value={step}>{step}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Skin Types Multi-select pills */}
+                <div>
+                  <label className="block text-[11px] font-extrabold text-slate-700 mb-1.5 flex items-center gap-1">
+                    <Droplets size={12} className="text-blue-500" />
+                    <span>Skin Types Suitability (স্কিন টাইপ)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {dynamicSkinTypes.map((st) => {
+                      const isSelected = Array.isArray(editingProduct.skinTypes) && editingProduct.skinTypes.includes(st);
+                      return (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => {
+                            const cur = Array.isArray(editingProduct.skinTypes) ? editingProduct.skinTypes : [];
+                            const next = isSelected ? cur.filter(x => x !== st) : [...cur, st];
+                            setEditingProduct({ ...editingProduct, skinTypes: next });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer border ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-white hover:bg-blue-50 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {isSelected && <Check size={11} className="inline mr-1" />}
+                          {st}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Skin Concerns Multi-select pills */}
+                <div>
+                  <label className="block text-[11px] font-extrabold text-slate-700 mb-1.5 flex items-center gap-1">
+                    <Target size={12} className="text-amber-500" />
+                    <span>Targeted Skin Concerns (স্কিন কনসার্ন)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1 bg-white/70 rounded-xl border border-pink-100/50">
+                    {dynamicSkinConcerns.map((c) => {
+                      const isSelected = Array.isArray(editingProduct.concerns) && editingProduct.concerns.includes(c);
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => {
+                            const cur = Array.isArray(editingProduct.concerns) ? editingProduct.concerns : [];
+                            const next = isSelected ? cur.filter(x => x !== c) : [...cur, c];
+                            setEditingProduct({ ...editingProduct, concerns: next });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                            isSelected
+                              ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                              : 'bg-white hover:bg-amber-50 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {isSelected && <Check size={11} className="inline mr-1" />}
+                          {c}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Target Benefits Multi-select pills */}
+                <div>
+                  <label className="block text-[11px] font-extrabold text-slate-700 mb-1.5 flex items-center gap-1">
+                    <Sparkles size={12} className="text-emerald-500" />
+                    <span>Target Benefits (টার্গেটেড বেনিফিট)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {dynamicTargetBenefits.map((b) => {
+                      const isSelected = Array.isArray(editingProduct.benefits) && editingProduct.benefits.includes(b);
+                      return (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => {
+                            const cur = Array.isArray(editingProduct.benefits) ? editingProduct.benefits : [];
+                            const next = isSelected ? cur.filter(x => x !== b) : [...cur, b];
+                            setEditingProduct({ ...editingProduct, benefits: next });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                              : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {isSelected && <Check size={11} className="inline mr-1" />}
+                          {b}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Key Ingredients Multi-select pills */}
+                <div>
+                  <label className="block text-[11px] font-extrabold text-slate-700 mb-1.5 flex items-center gap-1">
+                    <Tag size={12} className="text-teal-500" />
+                    <span>Key Ingredients Active Tags (প্রধান উপাদান)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1 bg-white/70 rounded-xl border border-pink-100/50">
+                    {dynamicIngredients.map((i) => {
+                      const isSelected = Array.isArray(editingProduct.keyIngredients) && editingProduct.keyIngredients.includes(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            const cur = Array.isArray(editingProduct.keyIngredients) ? editingProduct.keyIngredients : [];
+                            const next = isSelected ? cur.filter(x => x !== i) : [...cur, i];
+                            setEditingProduct({ ...editingProduct, keyIngredients: next });
+                          }}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer border ${
+                            isSelected
+                              ? 'bg-teal-600 text-white border-teal-600 shadow-2xs'
+                              : 'bg-white hover:bg-teal-50 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {isSelected && <Check size={10} className="inline mr-1" />}
+                          {i}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
               </div>
 
               {/* Multiple Image Gallery for Product */}
@@ -3813,6 +4496,229 @@ export const ProductManagement: React.FC = () => {
             setTimeout(() => setAlertMsg(null), 5000);
           }}
         />
+      )}
+
+      {/* Mobile Filter Right Sidebar Drawer with Multi-select */}
+      {isMobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-xs sm:max-w-sm bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+            {/* Header */}
+            <div className="p-4 border-b border-pink-100 flex items-center justify-between bg-pink-50/50">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal size={16} className="text-[#E91E8C]" />
+                <h3 className="text-sm font-black text-slate-900">Mobile Filters (ফিল্টার)</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(false)}
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-white transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content / Filter Sections with Multi-select */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Category Filter */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-[#E91E8C] flex items-center gap-1">
+                  <Layers size={13} />
+                  <span>Categories (ক্যাটেগরি - Multi-select)</span>
+                </label>
+                <div className="space-y-1 max-h-40 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedCategories.length === 0}
+                      onChange={() => setSelectedCategories([])}
+                      className="rounded text-[#E91E8C] focus:ring-[#E91E8C]"
+                    />
+                    <span>All Categories</span>
+                  </label>
+                  {dynamicCategories.filter(c => c !== 'All').map(c => (
+                    <label key={c} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedCategories.includes(c)}
+                        onChange={() => toggleMultiSelect(selectedCategories, c, setSelectedCategories)}
+                        className="rounded text-[#E91E8C] focus:ring-[#E91E8C]"
+                      />
+                      <span>{c}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Brand Filter */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-[#E91E8C] flex items-center gap-1">
+                  <Tag size={13} />
+                  <span>Brands (ব্র্যান্ড - Multi-select)</span>
+                </label>
+                <div className="space-y-1 max-h-40 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedBrands.length === 0}
+                      onChange={() => setSelectedBrands([])}
+                      className="rounded text-[#E91E8C] focus:ring-[#E91E8C]"
+                    />
+                    <span>All Brands</span>
+                  </label>
+                  {availableBrandsForFilter.map(b => (
+                    <label key={b} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedBrands.includes(b)}
+                        onChange={() => toggleMultiSelect(selectedBrands, b, setSelectedBrands)}
+                        className="rounded text-[#E91E8C] focus:ring-[#E91E8C]"
+                      />
+                      <span>{b}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Skin Types */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-blue-600 flex items-center gap-1">
+                  <Droplets size={13} />
+                  <span>Skin Types (স্কিন টাইপ)</span>
+                </label>
+                <div className="space-y-1 max-h-36 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  {dynamicSkinTypes.filter(st => st !== 'All').map(st => (
+                    <label key={st} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedSkinTypes.includes(st)}
+                        onChange={() => toggleMultiSelect(selectedSkinTypes, st, setSelectedSkinTypes)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>{st}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Concerns */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-amber-600 flex items-center gap-1">
+                  <Target size={13} />
+                  <span>Skin Concerns (কনসার্ন)</span>
+                </label>
+                <div className="space-y-1 max-h-36 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  {dynamicSkinConcerns.filter(c => c !== 'All').map(c => (
+                    <label key={c} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedConcerns.includes(c)}
+                        onChange={() => toggleMultiSelect(selectedConcerns, c, setSelectedConcerns)}
+                        className="rounded text-amber-600 focus:ring-amber-500"
+                      />
+                      <span>{c}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Benefits */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-emerald-600 flex items-center gap-1">
+                  <Sparkles size={13} />
+                  <span>Target Benefits (বেনিফিট)</span>
+                </label>
+                <div className="space-y-1 max-h-36 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  {dynamicTargetBenefits.filter(b => b !== 'All').map(b => (
+                    <label key={b} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedBenefits.includes(b)}
+                        onChange={() => toggleMultiSelect(selectedBenefits, b, setSelectedBenefits)}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>{b}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Routine Step */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-rose-600 flex items-center gap-1">
+                  <Layers size={13} />
+                  <span>Routine Steps (রুটিন ধাপ)</span>
+                </label>
+                <div className="space-y-1 max-h-36 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  {dynamicRoutineSteps.filter(r => r !== 'All').map(r => (
+                    <label key={r} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedRoutineSteps.includes(r)}
+                        onChange={() => toggleMultiSelect(selectedRoutineSteps, r, setSelectedRoutineSteps)}
+                        className="rounded text-rose-600 focus:ring-rose-500"
+                      />
+                      <span>{r}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ingredients */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase text-teal-600 flex items-center gap-1">
+                  <Tag size={13} />
+                  <span>Key Ingredients (উপাদান)</span>
+                </label>
+                <div className="space-y-1 max-h-36 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  {dynamicIngredients.filter(i => i !== 'All').map(i => (
+                    <label key={i} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedIngredients.includes(i)}
+                        onChange={() => toggleMultiSelect(selectedIngredients, i, setSelectedIngredients)}
+                        className="rounded text-teal-600 focus:ring-teal-500"
+                      />
+                      <span>{i}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-4 border-t border-pink-100 bg-pink-50/40 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCategories([]);
+                  setSelectedBrands([]);
+                  setSelectedSkinTypes([]);
+                  setSelectedConcerns([]);
+                  setSelectedBenefits([]);
+                  setSelectedRoutineSteps([]);
+                  setSelectedIngredients([]);
+                  setCategoryFilter('All');
+                  setBrandFilter('All');
+                  setSkinTypeFilter('All');
+                  setConcernFilter('All');
+                  setBenefitFilter('All');
+                  setRoutineStepFilter('All');
+                  setIngredientFilter('All');
+                }}
+                className="flex-1 py-2.5 bg-white border border-pink-200 hover:bg-pink-50 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Clear All
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(false)}
+                className="flex-1 py-2.5 bg-gradient-to-r from-[#E91E8C] to-[#FF4B91] text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
+              >
+                Apply Filters ({filteredProducts.length})
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

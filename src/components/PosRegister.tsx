@@ -24,6 +24,8 @@ import { PosScannerNotification } from './pos/PosScannerNotification';
 import { PosScannerStatusBadge } from './pos/PosScannerStatusBadge';
 import PosScan from './PosScan';
 import { posService, isAllowedPosRole, detectDeviceType } from '../services/posService';
+import { posOfflineStorage, OfflineScanRecord } from '../services/posOfflineStorage';
+import { PWAInstallButton } from './PWAInstallButton';
 import { PosSession } from '../types';
 
 import { 
@@ -47,7 +49,11 @@ import {
   UserCheck,
   Monitor,
   Tablet,
-  Loader2
+  Loader2,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  CloudOff
 } from 'lucide-react';
 
 interface PosRegisterProps {
@@ -151,6 +157,39 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   // Direct quantity typing buffer
   const [editingQty, setEditingQty] = useState<{ [productId: string]: string }>({});
 
+  // Online / Offline Connectivity & Offline Queue State
+  const [isOnline, setIsOnline] = useState<boolean>(() => posOfflineStorage.isOnline());
+  const [pendingOfflineScans, setPendingOfflineScans] = useState<OfflineScanRecord[]>([]);
+  const [isSyncingOffline, setIsSyncingOffline] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubConn = posOfflineStorage.subscribeConnection((online) => {
+      setIsOnline(online);
+    });
+    const unsubScans = posOfflineStorage.subscribeScans((pending) => {
+      setPendingOfflineScans(pending);
+    });
+    return () => {
+      unsubConn();
+      unsubScans();
+    };
+  }, []);
+
+  const handleManualSyncOfflineScans = async () => {
+    if (isSyncingOffline || !sessionId) return;
+    setIsSyncingOffline(true);
+    try {
+      const res = await posOfflineStorage.syncPendingScans(sessionId);
+      if (res.synced > 0) {
+        if (soundEnabled) playSuccessBeep(0.3);
+      }
+    } catch (err) {
+      console.warn('[PosRegister] Manual sync error:', err);
+    } finally {
+      setIsSyncingOffline(false);
+    }
+  };
+
   // Sound toggle (persisted)
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     try {
@@ -169,7 +208,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     if (next) playSuccessBeep(0.2);
   };
 
-  // 1. Initialize & Maintain User-based POS session in Firestore
+  // 1. Initialize & Maintain User-based POS session in Firestore (with offline fallback)
   useEffect(() => {
     if (!user?.uid || !userRole) {
       setIsLoadingSession(false);
@@ -198,9 +237,26 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           setSessionId(session.id);
         }
       } catch (err: any) {
-        console.error('[PosRegister] Error initializing user POS session:', err);
+        console.warn('[PosRegister] Network error initializing session, restoring from offline cache:', err);
+        const cached = await posOfflineStorage.getCachedActiveSession(user.uid);
+        const fallbackSid = cached?.sessionId || `pos-offline-${user.uid.slice(0, 6)}-${Date.now()}`;
+        const fallbackSession: PosSession = {
+          id: fallbackSid,
+          sessionId: fallbackSid,
+          userId: user.uid,
+          userName: operatorName,
+          userRole: userRole,
+          deviceType: detectDeviceType(),
+          status: 'active',
+          startedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          name: `${operatorName}'s POS Session (Offline)`,
+          items: []
+        };
+        posOfflineStorage.cacheActiveSession(fallbackSession).catch(() => {});
         if (isMounted) {
-          setSessionError(err?.message || 'Failed to initialize POS session.');
+          setCurrentSession(fallbackSession);
+          setSessionId(fallbackSid);
         }
       } finally {
         if (isMounted) {
@@ -332,7 +388,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     return () => unsub();
   }, []);
 
-  // 5. Map scans to product details & quantities
+  // 5. Map scans to product details & quantities (merges server scans with persistent offline queue)
   const cartItems: CartItem[] = useMemo(() => {
     const counts: { [pId: string]: { count: number; docIds: string[] } } = {};
     scans.forEach((s) => {
@@ -342,6 +398,20 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         }
         counts[s.product_id].count += 1;
         counts[s.product_id].docIds.push(s.id);
+      }
+    });
+
+    // Merge pending offline scans if not already present in scans via opt_
+    pendingOfflineScans.forEach((offScan) => {
+      if (offScan.productId) {
+        const hasOpt = scans.some((s) => s.id?.startsWith('opt_') && s.product_id === offScan.productId);
+        if (!hasOpt) {
+          if (!counts[offScan.productId]) {
+            counts[offScan.productId] = { count: 0, docIds: [] };
+          }
+          counts[offScan.productId].count += offScan.quantity || 1;
+          counts[offScan.productId].docIds.push(offScan.id);
+        }
       }
     });
 
@@ -363,11 +433,11 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         docIds: counts[pId].docIds
       };
     });
-  }, [scans, products]);
+  }, [scans, products, pendingOfflineScans]);
 
   // Sync live cart items & scan count to pos_sessions Firestore doc for live admin monitoring
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || sessionId.startsWith('pos-offline-')) return;
     const itemsPayload = cartItems.map((it) => ({
       productId: it.product.id,
       name: it.product.name,
@@ -443,15 +513,26 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     }));
     setScans(prev => [...prev, ...tempDocs]);
 
-    // Atomic sync to Firestore
-    addProductToSession(sessionId, product.id, currentCartQty, quantityToAdd).then((res) => {
+    // Atomic sync to Firestore or record to persistent offline storage
+    addProductToSession(sessionId, product.id, currentCartQty, quantityToAdd).then((res: any) => {
+      if (res.isOffline) {
+        // Saved in persistent offline queue, retain optimistic item in cart
+        return;
+      }
       if (!res.success) {
         alert(res.message);
         setScans(prev => prev.filter(s => !tempDocs.some(t => t.id === s.id)));
       }
     }).catch(err => {
-      console.error('Session sync error:', err);
-      setScans(prev => prev.filter(s => !tempDocs.some(t => t.id === s.id)));
+      console.warn('Session sync network error, saving to offline storage queue:', err);
+      posOfflineStorage.recordOfflineScan({
+        sessionId,
+        productId: product.id,
+        productName: product.name,
+        barcode: product.barcode,
+        price: product.discountPrice || product.price,
+        quantity: quantityToAdd
+      }).catch(() => {});
     });
   };
 
@@ -850,6 +931,33 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             </button>
           </div>
 
+          {/* Online / Offline Connectivity Badge */}
+          <div className={`px-2.5 py-1.5 rounded-2xl border text-xs font-bold flex items-center gap-1.5 ${
+            isOnline
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-amber-50 border-amber-300 text-amber-900 animate-pulse'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500 animate-ping'}`} />
+            <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline Mode'}</span>
+          </div>
+
+          {/* Pending Offline Scans Sync Button */}
+          {pendingOfflineScans.length > 0 && (
+            <button
+              type="button"
+              onClick={handleManualSyncOfflineScans}
+              disabled={isSyncingOffline || !isOnline}
+              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-60"
+              title="Sync offline scans with server"
+            >
+              <RefreshCw size={13} className={isSyncingOffline ? 'animate-spin' : ''} />
+              <span>Sync Queue ({pendingOfflineScans.reduce((s, it) => s + (it.quantity || 1), 0)})</span>
+            </button>
+          )}
+
+          {/* PWA Home Screen Install Button */}
+          <PWAInstallButton />
+
           {/* Sound Toggle */}
           <button
             type="button"
@@ -874,7 +982,24 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         </div>
 
         {/* Mobile Header Controls */}
-        <div className="flex items-center gap-2 lg:hidden">
+        <div className="flex items-center gap-1.5 lg:hidden">
+          {/* Status Dot */}
+          <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500 animate-ping'}`} title={isOnline ? 'Online' : 'Offline'} />
+
+          {pendingOfflineScans.length > 0 && isOnline && (
+            <button
+              type="button"
+              onClick={handleManualSyncOfflineScans}
+              disabled={isSyncingOffline}
+              className="px-2 py-1 bg-amber-500 text-white rounded-xl text-[10px] font-bold flex items-center gap-1"
+            >
+              <RefreshCw size={11} className={isSyncingOffline ? 'animate-spin' : ''} />
+              <span>{pendingOfflineScans.length}</span>
+            </button>
+          )}
+
+          <PWAInstallButton />
+
           <button
             type="button"
             onClick={toggleSound}
@@ -895,6 +1020,37 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           />
         </div>
       </header>
+
+      {/* OFFLINE RESILIENCE BANNER */}
+      {(!isOnline || pendingOfflineScans.length > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-amber-50/90 border border-amber-300 rounded-3xl text-xs text-amber-900 shadow-xs animate-scaleIn">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+              <WifiOff size={16} />
+            </div>
+            <div>
+              <p className="font-extrabold text-amber-950">
+                {!isOnline ? '⚡ Internet Outage Mode Active' : '🔄 Offline Scans Saved in Browser'}
+              </p>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Store staff can continue scanning products and updating the register cart seamlessly.
+                {pendingOfflineScans.length > 0 && ` (${pendingOfflineScans.reduce((s, it) => s + (it.quantity || 1), 0)} items pending automatic sync)`}
+              </p>
+            </div>
+          </div>
+          {pendingOfflineScans.length > 0 && isOnline && (
+            <button
+              type="button"
+              onClick={handleManualSyncOfflineScans}
+              disabled={isSyncingOffline}
+              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer shrink-0 disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={isSyncingOffline ? 'animate-spin' : ''} />
+              <span>{isSyncingOffline ? 'Syncing...' : 'Sync Items Now'}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* QR PAIRING MODAL (FALLBACK) */}
       <PosPairingModal

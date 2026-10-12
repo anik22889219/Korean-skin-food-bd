@@ -1,6 +1,7 @@
-// Firebase Cloud Messaging Service Worker
-// Automatically handles background web push notifications
+// Firebase Cloud Messaging Service Worker + Offline Caching
+// Handles background web push notifications and offline asset caching
 
+importScripts('/sw.js');
 importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js');
 

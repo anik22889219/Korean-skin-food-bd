@@ -37,8 +37,12 @@ import {
   EyeOff,
   Sparkles,
   X,
-  Layers
+  Layers,
+  Wifi,
+  WifiOff,
+  CloudOff
 } from 'lucide-react';
+import { posOfflineStorage, OfflineScanRecord } from '../services/posOfflineStorage';
 import { PosProductQuickViewModal } from './pos/PosProductQuickViewModal';
 
 export { type ScannerContext };
@@ -246,6 +250,56 @@ export const PosScan = React.memo(function PosScan({
     });
   }, []);
 
+  // Online / Offline Connectivity & Offline Scans Queue state
+  const [isOnline, setIsOnline] = useState<boolean>(() => posOfflineStorage.isOnline());
+  const [pendingOfflineScans, setPendingOfflineScans] = useState<OfflineScanRecord[]>([]);
+  const [isSyncingOffline, setIsSyncingOffline] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubConn = posOfflineStorage.subscribeConnection((online) => {
+      setIsOnline(online);
+    });
+    const unsubScans = posOfflineStorage.subscribeScans((scans) => {
+      setPendingOfflineScans(scans);
+    });
+    return () => {
+      unsubConn();
+      unsubScans();
+    };
+  }, []);
+
+  const handleManualSyncOfflineScans = async () => {
+    if (isSyncingOffline) return;
+    setIsSyncingOffline(true);
+    try {
+      const res = await posOfflineStorage.syncPendingScans(activeSessionId);
+      if (res.synced > 0) {
+        if (soundEnabled) playSuccessBeep(0.3);
+        setScanStatusMsg({
+          type: 'success',
+          text: `✓ Synced ${res.synced} offline scans to POS session!`
+        });
+      } else if (res.failed > 0) {
+        setScanStatusMsg({
+          type: 'error',
+          text: `Sync failed for ${res.failed} items. Retrying when connection stabilizes.`
+        });
+      } else {
+        setScanStatusMsg({
+          type: 'success',
+          text: 'All offline scans are already synchronized.'
+        });
+      }
+    } catch (err: any) {
+      setScanStatusMsg({
+        type: 'error',
+        text: err?.message || 'Sync failed.'
+      });
+    } finally {
+      setIsSyncingOffline(false);
+    }
+  };
+
   const barcodeIndex = useMemo(() => {
     return buildBarcodeIndex(productsList);
   }, [productsList]);
@@ -293,14 +347,32 @@ export const PosScan = React.memo(function PosScan({
           setIsLoadingSession(false);
         }
       } catch (err: any) {
-        console.error('[PosScan] Error starting/restoring user POS session:', err);
+        console.warn('[PosScan] Live session initialization notice, falling back to persistent offline cache:', err);
+        // Resilient fallback to cached session or offline session
+        const cached = await posOfflineStorage.getCachedActiveSession(currentUser.uid);
+        const fallbackSid = cached?.sessionId || `pos-offline-${currentUser.uid.slice(0, 6)}-${Date.now()}`;
+        const fallbackSession: PosSession = {
+          id: fallbackSid,
+          sessionId: fallbackSid,
+          userId: currentUser.uid,
+          userName: currentUser.name || 'Store Staff',
+          userRole: currentUser.role,
+          deviceType: 'mobile',
+          status: 'active',
+          startedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          name: `${currentUser.name || 'Staff'}'s Offline Session`,
+          items: []
+        };
+        posOfflineStorage.cacheActiveSession(fallbackSession).catch(() => {});
         if (isMounted) {
-          if (context === 'STOCK_IN') {
-            setIsLoadingSession(false);
-          } else {
-            setSessionError(err?.message || 'Failed to initialize mobile POS session.');
-            setIsLoadingSession(false);
-          }
+          setActiveSession(fallbackSession);
+          setActiveSessionId(fallbackSid);
+          setIsLoadingSession(false);
+          setScanStatusMsg({
+            type: 'success',
+            text: '⚡ Offline Mode Active: Products can be scanned seamlessly.'
+          });
         }
       }
     };
@@ -314,7 +386,7 @@ export const PosScan = React.memo(function PosScan({
 
   // ================= 2. ACTIVE SESSION HEARTBEAT & REAL-TIME SYNC =================
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!activeSessionId || activeSessionId.startsWith('pos-offline-')) return;
 
     const nowIso = new Date().toISOString();
     const sessionRef = doc(db, 'pos_sessions', activeSessionId);
@@ -333,6 +405,9 @@ export const PosScan = React.memo(function PosScan({
 
     const unsub = onSnapshot(sessionRef, (snap) => {
       if (!snap.exists()) {
+        if (activeSessionId.startsWith('pos-offline-') || !posOfflineStorage.isOnline()) {
+          return;
+        }
         if (context === 'SALE') {
           setSessionError('POS session was closed or removed.');
         }
@@ -517,10 +592,16 @@ export const PosScan = React.memo(function PosScan({
       if (onAddToCart) {
         onAddToCart(product, qtyToAdd);
       } else if (activeSessionId) {
-        // Fallback: standalone mode without parent handler
+        // Standalone mode without parent handler
         addProductToSession(activeSessionId, product.id, currentCartQty, qtyToAdd)
-          .then((res) => {
-            if (!res.success) {
+          .then((res: any) => {
+            if (res.isOffline) {
+              setScanStatusMsg({
+                type: 'success',
+                text: `✓ Added "${product.name}" (Stored in offline queue - will auto-sync)`
+              });
+            } else if (!res.success) {
+              // Rollback only on actual business error (out of stock, invalid)
               setOptimisticCart((prev) => {
                 const item = prev.find((it) => it.product.id === product.id);
                 if (!item) return prev;
@@ -539,18 +620,19 @@ export const PosScan = React.memo(function PosScan({
             }
           })
           .catch((err) => {
-            console.error('[PosScan] Background session sync error:', err);
-            setOptimisticCart((prev) => {
-              const item = prev.find((it) => it.product.id === product.id);
-              if (!item) return prev;
-              if (item.quantity <= qtyToAdd) {
-                return prev.filter((it) => it.product.id !== product.id);
-              }
-              return prev.map((it) =>
-                it.product.id === product.id ? { ...it, quantity: it.quantity - qtyToAdd } : it
-              );
+            console.warn('[PosScan] Background session sync notice, saving to offline storage:', err);
+            posOfflineStorage.recordOfflineScan({
+              sessionId: activeSessionId,
+              productId: product.id,
+              productName: product.name,
+              barcode: product.barcode,
+              price: product.discountPrice || product.price,
+              quantity: qtyToAdd
+            }).catch(() => {});
+            setScanStatusMsg({
+              type: 'success',
+              text: `✓ Added "${product.name}" (Stored in offline queue)`
             });
-            if (soundEnabled) playErrorBeep();
           });
       }
     }
@@ -956,9 +1038,17 @@ export const PosScan = React.memo(function PosScan({
           </button>
 
           <div className="text-center">
-            <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full border border-emerald-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>{context === 'STOCK_IN' ? 'STOCK-IN SCAN' : 'POS SCANNER'}</span>
+            <span className={`inline-flex items-center gap-1.5 font-extrabold text-[11px] px-2.5 py-0.5 rounded-full border ${
+              isOnline 
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                : 'bg-amber-50 text-amber-800 border-amber-300'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-ping'}`} />
+              <span>
+                {context === 'STOCK_IN' 
+                  ? (isOnline ? 'STOCK-IN SCAN' : 'STOCK-IN (OFFLINE)') 
+                  : (isOnline ? 'POS SCANNER' : 'OFFLINE MODE')}
+              </span>
             </span>
             <p className="text-[10px] text-gray-500 font-mono mt-0.5">
               {activeSessionId ? `Session: #${activeSessionId.slice(-6).toUpperCase()}` : 'Ready to scan'}
@@ -1000,6 +1090,35 @@ export const PosScan = React.memo(function PosScan({
 
       {/* MAIN SCANNER VIEW */}
       <main className="flex-1 flex flex-col p-4 space-y-3">
+        {/* OFFLINE RESILIENCE BANNER */}
+        {(!isOnline || pendingOfflineScans.length > 0) && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-amber-500/10 border border-amber-300 rounded-2xl text-xs text-amber-900 shadow-xs animate-scaleIn">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
+              <div className="truncate text-[11px]">
+                <span className="font-extrabold">
+                  {!isOnline ? '⚡ Offline Mode:' : '🔄 Queue Ready:'}
+                </span>{' '}
+                <span>
+                  {pendingOfflineScans.length > 0
+                    ? `${pendingOfflineScans.reduce((s, it) => s + (it.quantity || 1), 0)} offline scans waiting to sync`
+                    : 'Outage detected. Scanning continues with cached catalog'}
+                </span>
+              </div>
+            </div>
+            {pendingOfflineScans.length > 0 && isOnline && (
+              <button
+                type="button"
+                onClick={handleManualSyncOfflineScans}
+                disabled={isSyncingOffline}
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[10px] font-bold shrink-0 flex items-center gap-1 transition shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw size={11} className={isSyncingOffline ? 'animate-spin' : ''} />
+                <span>{isSyncingOffline ? 'Syncing...' : 'Sync Now'}</span>
+              </button>
+            )}
+          </div>
+        )}
         {/* CAMERA PREVIEW CONTAINER */}
         <div className="relative w-full aspect-[4/3] max-h-[50vh] bg-black rounded-3xl overflow-hidden shadow-2xl border-4 border-white/60 flex items-center justify-center">
           {/* Native HTML5 Video Element directly managed with videoRef */}

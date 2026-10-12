@@ -167,6 +167,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   }
 }
 
+function isPlainObject(val: unknown): val is Record<string, any> {
+  if (val === null || typeof val !== 'object') return false;
+  const proto = Object.getPrototypeOf(val);
+  return proto === Object.prototype || proto === null;
+}
+
 export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
   if (obj === null || typeof obj !== 'object') {
     return obj;
@@ -174,14 +180,13 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
   if (Array.isArray(obj)) {
     return obj.map(item => sanitizeForFirestore(item)) as unknown as T;
   }
+  if (!isPlainObject(obj)) {
+    return obj;
+  }
   const cleanObj: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
-      if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
-        cleanObj[key] = sanitizeForFirestore(value);
-      } else {
-        cleanObj[key] = value;
-      }
+      cleanObj[key] = sanitizeForFirestore(value);
     }
   }
   return cleanObj as T;

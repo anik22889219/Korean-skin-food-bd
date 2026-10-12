@@ -7,9 +7,21 @@ import { getCanonicalBrandName } from '../data/brands';
 import { normalizeProductPricing } from '../utils/pricing';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
+import { posOfflineStorage } from './posOfflineStorage';
 
-// Ensure initial products cache starts empty
+// Ensure initial products cache starts empty, but immediately hydrate from persistent offline storage
 let productsCache: Product[] = [];
+if (typeof window !== 'undefined') {
+  posOfflineStorage.getCachedProducts().then((cached) => {
+    if (cached && cached.length > 0 && productsCache.length === 0) {
+      productsCache = cached;
+      notifySubscribers();
+      try {
+        queryClient.setQueryData(queryKeys.products.all, cached);
+      } catch {}
+    }
+  }).catch(() => {});
+}
 let inventoryLogsCache: InventoryLog[] = [];
 let stockMovementsCache: StockMovement[] = [];
 let stockReceiptsCache: StockReceipt[] = [];
@@ -65,6 +77,8 @@ onSnapshot(collection(db, 'products'), (snapshot) => {
     isSeedingDone = true;
     productsCache = prods;
     notifySubscribers();
+    // Persist to offline IndexedDB / browser storage for uninterrupted POS scanning
+    posOfflineStorage.cacheProducts(prods).catch(() => {});
     try {
       queryClient.setQueryData(queryKeys.products.all, prods);
       queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
@@ -164,6 +178,7 @@ export const productService = {
       });
       productsCache = prods;
       notifySubscribers();
+      posOfflineStorage.cacheProducts(prods).catch(() => {});
       try {
         queryClient.setQueryData(queryKeys.products.all, prods);
         queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
@@ -174,7 +189,13 @@ export const productService = {
       }
       return prods;
     } catch (err: any) {
-      console.warn('[ProductService] fetchProducts error:', err);
+      console.warn('[ProductService] fetchProducts network warning, falling back to persistent offline cache:', err);
+      const offlineProds = await posOfflineStorage.getCachedProducts();
+      if (offlineProds.length > 0) {
+        productsCache = offlineProds;
+        notifySubscribers();
+        return offlineProds;
+      }
       return productsCache;
     }
   },
@@ -185,7 +206,10 @@ export const productService = {
 
     try {
       const docSnap = await getDoc(doc(db, 'products', id));
-      if (!docSnap.exists()) return null;
+      if (!docSnap.exists()) {
+        const offlineMatch = posOfflineStorage.lookupProductOffline(id);
+        return offlineMatch || null;
+      }
       const rawData = docSnap.data() as Product;
       const data = normalizeProductPricing(rawData);
       const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
@@ -203,8 +227,9 @@ export const productService = {
       }
       return prod;
     } catch (err) {
-      console.warn('[ProductService] fetchProductById error:', err);
-      return null;
+      console.warn('[ProductService] fetchProductById error (checking offline storage):', err);
+      const offlineMatch = posOfflineStorage.lookupProductOffline(id);
+      return offlineMatch || null;
     }
   },
 
@@ -220,6 +245,7 @@ export const productService = {
     const normalized = products.map(p => normalizeProductPricing(p));
     productsCache = normalized;
     notifySubscribers();
+    posOfflineStorage.cacheProducts(normalized).catch(() => {});
     try {
       queryClient.setQueryData(queryKeys.products.all, normalized);
       queryClient.invalidateQueries({ queryKey: queryKeys.products.lists() });
@@ -240,11 +266,15 @@ export const productService = {
   },
 
   getProductById(id: string): Product | undefined {
-    return productsCache.find(p => p.id === id);
+    const mem = productsCache.find(p => p.id === id);
+    if (mem) return mem;
+    return posOfflineStorage.lookupProductOffline(id);
   },
 
   getProductByBarcode(barcode: string): Product | undefined {
-    return findProductByScannedCode(productsCache, barcode).product;
+    const mem = findProductByScannedCode(productsCache, barcode).product;
+    if (mem) return mem;
+    return posOfflineStorage.lookupProductOffline(barcode);
   },
 
   createProduct(product: Omit<Product, 'qrCodeUrl'>): Product {

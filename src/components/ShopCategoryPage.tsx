@@ -16,6 +16,7 @@ import { themeService, DEFAULT_SHOP_THEME } from '../services/themeService';
 import { useProducts } from '../hooks/queries/products';
 import { useCategories } from '../hooks/queries/categories';
 import { useBrands } from '../hooks/queries/brands';
+import { useAllTaxonomies } from '../hooks/queries/taxonomies';
 import { Product } from '../types';
 import { ShopThemeSettings } from '../types/theme';
 import { KOREAN_BRANDS, getUniqueBrandList, getBrandProductCounts, isSameBrand } from '../data/brands';
@@ -101,6 +102,21 @@ export const ShopCategoryPage: React.FC = () => {
   const { data: products = [], isLoading } = useProducts();
   const { data: categories = CATEGORIES } = useCategories();
   const { data: brandsData } = useBrands();
+  const { data: allTaxonomies = [] } = useAllTaxonomies();
+
+  // Dynamic Skin Types from live taxonomies
+  const dynamicSkinTypes = useMemo(() => {
+    const taxST = allTaxonomies.filter((t) => t.type === 'skin_type' && t.isActive).map((t) => t.name);
+    const fallback = SKIN_TYPES.filter((st) => st !== 'All');
+    return ['All', ...Array.from(new Set([...taxST, ...fallback]))];
+  }, [allTaxonomies]);
+
+  // Dynamic Skin Concerns from live taxonomies
+  const dynamicSkinConcerns = useMemo(() => {
+    const taxSC = allTaxonomies.filter((t) => t.type === 'skin_concern' && t.isActive).map((t) => t.name);
+    const fallback = SKIN_CONCERNS.filter((sc) => sc !== 'All');
+    return ['All', ...Array.from(new Set([...taxSC, ...fallback]))];
+  }, [allTaxonomies]);
 
   // Filters State derived from searchParams or defaults
   const [selectedCategory, setSelectedCategory] = useState<string>(searchParams.get('category') || 'All');
@@ -535,7 +551,7 @@ export const ShopCategoryPage: React.FC = () => {
                   Skin Type
                 </h4>
                 <div className="grid grid-cols-2 gap-1.5 text-xs">
-                  {SKIN_TYPES.map((st) => {
+                  {dynamicSkinTypes.map((st) => {
                     const isSelected = selectedSkinType.toLowerCase() === st.toLowerCase();
                     return (
                       <button
@@ -560,7 +576,7 @@ export const ShopCategoryPage: React.FC = () => {
                   Skin Concern
                 </h4>
                 <div className="space-y-1 max-h-40 overflow-y-auto pr-1 text-xs">
-                  {SKIN_CONCERNS.map((sc) => {
+                  {dynamicSkinConcerns.map((sc) => {
                     const isSelected = selectedConcern.toLowerCase() === sc.toLowerCase();
                     return (
                       <button
@@ -962,8 +978,22 @@ export const ShopCategoryPage: React.FC = () => {
                     onChange={(e) => setSelectedSkinType(e.target.value)}
                     className="w-full bg-pink-50/20 border border-pink-100 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-[#e91e8c]"
                   >
-                    {SKIN_TYPES.map(st => (
+                    {dynamicSkinTypes.map(st => (
                       <option key={st} value={st}>{st}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Skin Concern */}
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-black uppercase tracking-wider text-[#8c7b70]">Skin Concern</h4>
+                  <select
+                    value={selectedConcern}
+                    onChange={(e) => setSelectedConcern(e.target.value)}
+                    className="w-full bg-pink-50/20 border border-pink-100 rounded-xl p-2.5 text-xs font-semibold outline-none focus:border-[#e91e8c]"
+                  >
+                    {dynamicSkinConcerns.map(sc => (
+                      <option key={sc} value={sc}>{sc}</option>
                     ))}
                   </select>
                 </div>

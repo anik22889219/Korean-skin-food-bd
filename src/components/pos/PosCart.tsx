@@ -584,6 +584,13 @@ export const PosCart: React.FC<PosCartProps> = ({
           );
         })()}
 
+        {typeof navigator !== 'undefined' && !navigator.onLine && (
+          <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-900">
+            <AlertCircle size={15} className="text-amber-600 shrink-0" />
+            <span>⚡ Offline Mode: Scans and cart totals are safely stored in browser memory. Final server transaction requires internet connection.</span>
+          </div>
+        )}
+
         <button
           type="submit"
           disabled={cartItems.length === 0 || isSubmitting}

@@ -12,7 +12,7 @@ import {
   serverTimestamp,
   writeBatch
 } from 'firebase/firestore';
-import { db, auth } from './firebase';
+import { db, auth, sanitizeForFirestore } from './firebase';
 import { TaxonomyItem, TaxonomyDimensionType, Product } from '../types';
 import { KOREAN_BRANDS } from '../data/brands';
 import { CANONICAL_CATEGORIES } from '../hooks/queries/categories';
@@ -695,34 +695,40 @@ class TaxonomyService {
     };
   }
 
+  private autoSeeded = false;
+
   private initRealtimeSubscription(): void {
     if (typeof window === 'undefined') return;
 
     try {
-      const q = query(
-        collection(db, TAXONOMIES_COLLECTION),
-        orderBy('displayOrder', 'asc')
-      );
+      const collRef = collection(db, TAXONOMIES_COLLECTION);
 
       this.unsubscribeFirestore = onSnapshot(
-        q,
+        collRef,
         (snapshot) => {
           if (!snapshot.empty) {
             const items: TaxonomyItem[] = snapshot.docs.map((d) => ({
               id: d.id,
               ...(d.data() as Omit<TaxonomyItem, 'id'>),
             }));
+            items.sort((a, b) => (a.displayOrder || 999) - (b.displayOrder || 999));
             this.cache = items;
             this.isInitialized = true;
             this.saveToLocalStorage(items);
             this.notifySubscribers();
           } else {
-            // If empty in Firestore, fallback to built-in seed items in memory
+            // If empty in Firestore, fallback to built-in seed items in memory and auto-seed to Firestore
             if (this.cache.length === 0) {
               this.cache = this.generateDefaultItemsWithIds();
               this.isInitialized = true;
               this.saveToLocalStorage(this.cache);
               this.notifySubscribers();
+            }
+            if (!this.autoSeeded) {
+              this.autoSeeded = true;
+              this.seedDefaultTaxonomies().catch((err) => {
+                console.warn('[TaxonomyService] Background auto-seeding skipped/deferred:', err?.message || err);
+              });
             }
           }
         },
@@ -792,6 +798,26 @@ class TaxonomyService {
     }
   }
 
+  public async ensureTaxonomyItemExists(type: TaxonomyDimensionType, name: string): Promise<void> {
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    const existing = this.getTaxonomiesSync(type);
+    const found = existing.find(i => i.name.toLowerCase() === trimmed.toLowerCase());
+    if (!found) {
+      await this.createTaxonomyItem({
+        type,
+        name: trimmed,
+        slug: generateTaxonomySlug(trimmed),
+        description: `Auto-registered from product catalog`,
+        descriptionBN: `প্রোডাক্ট ক্যাটালগ থেকে স্বয়ংক্রিয়ভাবে যুক্ত`,
+        displayOrder: existing.length + 1,
+        isActive: true,
+        isFeatured: false,
+        isPopular: false
+      }).catch(err => console.warn('[TaxonomyService] Auto-create taxonomy error:', err));
+    }
+  }
+
   public getTaxonomiesSync(type?: TaxonomyDimensionType): TaxonomyItem[] {
     const list = this.cache.length > 0 ? this.cache : this.generateDefaultItemsWithIds();
     return type ? list.filter((i) => i.type === type) : list;
@@ -814,11 +840,14 @@ class TaxonomyService {
 
     try {
       const docRef = doc(db, TAXONOMIES_COLLECTION, id);
-      await setDoc(docRef, {
-        ...newItem,
-        serverCreatedAt: serverTimestamp(),
-        serverUpdatedAt: serverTimestamp(),
-      });
+      await setDoc(
+        docRef,
+        sanitizeForFirestore({
+          ...newItem,
+          serverCreatedAt: serverTimestamp(),
+          serverUpdatedAt: serverTimestamp(),
+        })
+      );
 
       // Optimistically update local cache
       this.cache = [...this.cache, newItem].sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
@@ -841,10 +870,14 @@ class TaxonomyService {
 
     try {
       const docRef = doc(db, TAXONOMIES_COLLECTION, id);
-      await updateDoc(docRef, {
+      const existing = this.cache.find((i) => i.id === id);
+      const merged = {
+        ...(existing || {}),
         ...cleanUpdates,
+        id,
         serverUpdatedAt: serverTimestamp(),
-      });
+      };
+      await setDoc(docRef, sanitizeForFirestore(merged), { merge: true });
 
       // Update local cache
       this.cache = this.cache.map((item) => (item.id === id ? { ...item, ...cleanUpdates } : item));
@@ -881,7 +914,15 @@ class TaxonomyService {
         if (item) {
           item.displayOrder = index + 1;
           const docRef = doc(db, TAXONOMIES_COLLECTION, id);
-          batch.update(docRef, { displayOrder: index + 1, serverUpdatedAt: serverTimestamp() });
+          batch.set(
+            docRef,
+            sanitizeForFirestore({
+              ...item,
+              displayOrder: index + 1,
+              serverUpdatedAt: serverTimestamp(),
+            }),
+            { merge: true }
+          );
         }
       });
 
@@ -905,14 +946,18 @@ class TaxonomyService {
       for (const seed of DEFAULT_TAXONOMIES_SEEDS) {
         const id = `${seed.type}_${seed.slug}`;
         const docRef = doc(db, TAXONOMIES_COLLECTION, id);
-        batch.set(docRef, {
-          ...seed,
-          id,
-          createdAt: now,
-          updatedAt: now,
-          serverCreatedAt: serverTimestamp(),
-          serverUpdatedAt: serverTimestamp(),
-        }, { merge: true });
+        batch.set(
+          docRef,
+          sanitizeForFirestore({
+            ...seed,
+            id,
+            createdAt: now,
+            updatedAt: now,
+            serverCreatedAt: serverTimestamp(),
+            serverUpdatedAt: serverTimestamp(),
+          }),
+          { merge: true }
+        );
         count++;
       }
 
