@@ -5,6 +5,7 @@ import { productService } from '../services/productService';
 import { useProducts } from '../hooks/queries/products';
 import { useCategories } from '../hooks/queries/categories';
 import { useBrands } from '../hooks/queries/brands';
+import { useTaxonomies } from '../hooks/queries/taxonomies';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -60,6 +61,8 @@ export const StoreCatalog: React.FC = () => {
   const { data: products = [], isLoading } = useProducts();
   const { data: categories = CATEGORIES } = useCategories();
   const { data: brandsData } = useBrands();
+  const { data: brandTaxonomies = [] } = useTaxonomies('brand');
+  const [brandsMarqueePaused, setBrandsMarqueePaused] = useState(false);
 
   // Dynamic Homepage On-Page SEO metadata & rich Organization / WebSite schemas
   const homepageSeo = useMemo(() => buildHomepageSeo(), []);
@@ -102,6 +105,50 @@ export const StoreCatalog: React.FC = () => {
     const term = brandSearchTerm.trim().toLowerCase();
     return availableBrands.filter(b => b.toLowerCase().includes(term));
   }, [availableBrands, brandSearchTerm]);
+
+  // Dynamic Featured Brands list for auto-slide marquee
+  const featuredBrandsList = useMemo(() => {
+    // 1. First get active brands with isFeatured === true from taxonomies
+    const explicitlyFeatured = (brandTaxonomies || [])
+      .filter((t) => t.type === 'brand' && t.isActive !== false && t.isFeatured)
+      .sort((a, b) => (a.displayOrder || 99) - (b.displayOrder || 99));
+
+    if (explicitlyFeatured.length > 0) {
+      return explicitlyFeatured;
+    }
+
+    // 2. Fallback to top Korean cosmeceutical brands if none yet toggled
+    const defaultFeaturedNames = [
+      'COSRX', 'Beauty of Joseon', 'Anua', 'SKIN1004', 
+      'SOME BY MI', 'AHC', 'rom&nd', 'The Ordinary', 
+      'Medicube', "I'm From", 'Torriden', 'Round Lab'
+    ];
+
+    return defaultFeaturedNames.map((name, idx) => {
+      const matched = (brandTaxonomies || []).find(
+        (t) => t.name.toLowerCase() === name.toLowerCase()
+      );
+      if (matched) return matched;
+      return {
+        id: `feat-brand-${idx}`,
+        type: 'brand' as const,
+        name,
+        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        displayOrder: idx + 1,
+        isActive: true,
+        isFeatured: true
+      };
+    });
+  }, [brandTaxonomies]);
+
+  // Duplicated array for seamless continuous marquee loop
+  const marqueeDisplayBrands = useMemo(() => {
+    if (featuredBrandsList.length === 0) return [];
+    if (featuredBrandsList.length < 8) {
+      return [...featuredBrandsList, ...featuredBrandsList, ...featuredBrandsList];
+    }
+    return [...featuredBrandsList, ...featuredBrandsList];
+  }, [featuredBrandsList]);
 
   // Shipping calculator state
   const [calcWeight, setCalcWeight] = useState<number | ''>(1);
@@ -422,8 +469,8 @@ export const StoreCatalog: React.FC = () => {
         <div className="absolute -top-24 -left-24 w-96 h-96 bg-pink-300/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-24 right-10 w-96 h-96 bg-purple-300/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 py-12 md:py-20 lg:py-24">
-          <div className="max-w-4xl space-y-7 text-center lg:text-left">
+        <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 py-10 md:py-16 lg:py-20">
+          <div className="max-w-4xl space-y-3 sm:space-y-4 text-center lg:text-left">
             {h.badgeText && (
               <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#E91E8C]/15 via-pink-500/10 to-purple-500/10 text-[#E91E8C] text-xs sm:text-sm font-black uppercase tracking-wider px-4 py-1.5 rounded-full border border-[#E91E8C]/30 shadow-xs backdrop-blur-md">
                 <Sparkles size={14} className="text-[#E91E8C] animate-pulse" />
@@ -431,19 +478,25 @@ export const StoreCatalog: React.FC = () => {
               </div>
             )}
 
-            <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-serif font-black text-slate-900 leading-[1.1] tracking-tight">
-              {h.titleLine1}{' '}
-              <span className="bg-gradient-to-r from-[#E91E8C] via-[#FF4B91] to-purple-600 bg-clip-text text-transparent underline decoration-pink-300 decoration-wavy decoration-2">
-                {h.titleHighlight}
-              </span>{' '}
-              {h.titleLine2}
-            </h1>
+            {(h.titleLine1 || h.titleHighlight || h.titleLine2) && (
+              <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-serif font-black text-slate-900 leading-[1.1] tracking-tight">
+                {h.titleLine1}{' '}
+                {h.titleHighlight && (
+                  <span className="bg-gradient-to-r from-[#E91E8C] via-[#FF4B91] to-purple-600 bg-clip-text text-transparent underline decoration-pink-300 decoration-wavy decoration-2">
+                    {h.titleHighlight}
+                  </span>
+                )}{' '}
+                {h.titleLine2}
+              </h1>
+            )}
 
-            <p className="text-slate-700 text-sm sm:text-base md:text-lg font-semibold leading-relaxed max-w-3xl mx-auto lg:mx-0">
-              {h.subtitle}
-            </p>
+            {h.subtitle && (
+              <p className="text-slate-700 text-sm sm:text-base md:text-lg font-semibold leading-relaxed max-w-3xl mx-auto lg:mx-0 !mt-2 sm:!mt-2.5">
+                {h.subtitle}
+              </p>
+            )}
 
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
+            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 !mt-4 sm:!mt-5">
               <Link
                 to={h.primaryButtonLink || '/shop'}
                 className="px-8 py-4 bg-gradient-to-r from-[#E91E8C] to-[#C2185B] hover:from-[#FF4B91] hover:to-[#E91E8C] text-white rounded-2xl text-xs sm:text-sm font-black transition-all shadow-xl shadow-[#E91E8C]/25 hover:shadow-pink-400/40 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2.5 cursor-pointer"
@@ -461,7 +514,7 @@ export const StoreCatalog: React.FC = () => {
             </div>
 
             {/* Premium Trust Cards Grid */}
-            <div className="pt-8 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-left border-t border-pink-200/60 mt-8">
+            <div className="pt-6 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-left border-t border-pink-200/60 mt-6 sm:mt-7">
               <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
                 <ShieldCheck size={20} className="text-[#E91E8C] mb-1.5" />
                 <h4 className="text-xs sm:text-sm font-black text-slate-900">100% Genuine</h4>
@@ -492,22 +545,171 @@ export const StoreCatalog: React.FC = () => {
     );
   };
 
-  // SECTION 2: FEATURE ICONS
+// Minimalist Brand Logo Wordmark renderer when custom logo image is not uploaded
+const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
+  const name = brandName.trim();
+  const lower = name.toLowerCase();
+
+  if (lower === 'cosrx') {
+    return (
+      <span className="font-sans font-black tracking-widest text-white text-base sm:text-xl md:text-2xl group-hover:text-pink-100 transition-colors">
+        COSRX
+      </span>
+    );
+  }
+  if (lower === 'beauty of joseon') {
+    return (
+      <span className="font-serif tracking-widest text-white text-xs sm:text-base md:text-lg font-bold uppercase group-hover:text-pink-100 transition-colors">
+        Beauty of Joseon
+      </span>
+    );
+  }
+  if (lower === 'anua') {
+    return (
+      <span className="font-sans font-extrabold tracking-tight text-white text-base sm:text-xl md:text-2xl lowercase group-hover:text-pink-100 transition-colors">
+        anua
+      </span>
+    );
+  }
+  if (lower === 'skin1004') {
+    return (
+      <span className="font-sans font-black tracking-wider text-white text-sm sm:text-lg md:text-xl group-hover:text-pink-100 transition-colors">
+        SKIN<span className="text-amber-300 font-black">1004</span>
+      </span>
+    );
+  }
+  if (lower === 'some by mi') {
+    return (
+      <span className="font-sans font-black tracking-wider text-white text-xs sm:text-base md:text-lg uppercase group-hover:text-pink-100 transition-colors">
+        SOME BY MI
+      </span>
+    );
+  }
+  if (lower === 'ahc') {
+    return (
+      <span className="font-serif font-black tracking-widest text-white text-base sm:text-xl md:text-2xl uppercase group-hover:text-pink-100 transition-colors">
+        A H C
+      </span>
+    );
+  }
+  if (lower === 'rom&nd' || lower === 'romand') {
+    return (
+      <span className="font-sans font-black tracking-tight text-white text-sm sm:text-lg md:text-xl lowercase group-hover:text-pink-100 transition-colors">
+        rom&nd
+      </span>
+    );
+  }
+  if (lower === 'the ordinary') {
+    return (
+      <span className="font-sans font-semibold tracking-tight text-white text-xs sm:text-base md:text-lg group-hover:text-pink-100 transition-colors">
+        The Ordinary.
+      </span>
+    );
+  }
+  if (lower === 'medicube') {
+    return (
+      <span className="font-sans font-bold tracking-tight text-white text-sm sm:text-lg md:text-xl lowercase group-hover:text-pink-100 transition-colors">
+        medicube
+      </span>
+    );
+  }
+  if (lower === "i'm from" || lower === 'im from') {
+    return (
+      <span className="font-serif italic font-bold tracking-wide text-white text-sm sm:text-lg md:text-xl group-hover:text-pink-100 transition-colors">
+        I'm from
+      </span>
+    );
+  }
+  if (lower === 'round lab') {
+    return (
+      <span className="font-sans font-black tracking-widest text-white text-xs sm:text-base md:text-lg uppercase group-hover:text-pink-100 transition-colors">
+        ROUND LAB
+      </span>
+    );
+  }
+  if (lower === 'torriden') {
+    return (
+      <span className="font-sans font-bold tracking-wide text-white text-sm sm:text-lg md:text-xl group-hover:text-pink-100 transition-colors">
+        Torriden
+      </span>
+    );
+  }
+  if (lower === 'laneige') {
+    return (
+      <span className="font-serif font-bold tracking-widest text-white text-xs sm:text-base md:text-lg uppercase group-hover:text-pink-100 transition-colors">
+        LANEIGE
+      </span>
+    );
+  }
+  if (lower === 'haruharu wonder') {
+    return (
+      <span className="font-sans font-black tracking-tight text-white text-xs sm:text-base md:text-lg group-hover:text-pink-100 transition-colors">
+        haruharu WONDER
+      </span>
+    );
+  }
+  if (lower === 'tirtir') {
+    return (
+      <span className="font-sans font-black tracking-widest text-white text-sm sm:text-lg md:text-xl uppercase group-hover:text-pink-100 transition-colors">
+        TIRTIR
+      </span>
+    );
+  }
+
+  return (
+    <span className="font-serif font-black tracking-wider text-white text-xs sm:text-base md:text-lg uppercase group-hover:text-pink-100 transition-colors whitespace-nowrap">
+      {name}
+    </span>
+  );
+};
+
+  // SECTION 2: FEATURED BRANDS AUTO-SLIDE LOGO MARQUEE (UNIFIED BRAND RIBBON)
   const renderFeatureIconsSection = () => {
     const fi = theme.featureIcons;
-    if (!fi || !fi.enabled) return null;
+    if (fi && fi.enabled === false) return null;
 
     return (
-      <div key="featureIcons" className="bg-white p-6 rounded-[28px] border border-pink-100 shadow-sm">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-          {fi.items.filter(i => i.enabled).map((item) => (
-            <div key={item.id} className="flex flex-col items-center text-center p-3 rounded-2xl hover:bg-pink-50/20 transition">
-              <div className={`w-12 h-12 rounded-2xl ${item.bgColor || 'bg-pink-50'} flex items-center justify-center mb-2 shadow-xs`}>
-                {renderFeatureIcon(item.iconName, item.iconColor || 'text-[#E91E8C]')}
-              </div>
-              <span className="text-xs font-extrabold text-slate-800 leading-tight">{item.title}</span>
-            </div>
-          ))}
+      <div 
+        key="featureIcons" 
+        className="w-full bg-gradient-to-r from-[#E91E8C] via-[#F02A92] to-[#C2185B] py-4 sm:py-5 md:py-6 px-3 sm:px-6 rounded-none shadow-md shadow-pink-500/20 relative overflow-hidden select-none border-b border-pink-400/30"
+      >
+        {/* Soft edge gradient fade masks matching brand ribbon color */}
+        <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-12 sm:w-28 bg-gradient-to-r from-[#E91E8C] via-[#E91E8C]/80 to-transparent z-10" />
+        <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 sm:w-28 bg-gradient-to-l from-[#C2185B] via-[#C2185B]/80 to-transparent z-10" />
+
+        {/* Auto Slide Marquee Strip of ONLY Brand Logos */}
+        <div 
+          className="relative w-full overflow-hidden"
+          onMouseEnter={() => setBrandsMarqueePaused(true)}
+          onMouseLeave={() => setBrandsMarqueePaused(false)}
+        >
+          <div 
+            className={`flex items-center gap-6 sm:gap-10 md:gap-12 ${
+              brandsMarqueePaused ? 'animate-marquee-paused' : 'animate-marquee-smooth'
+            }`}
+          >
+            {marqueeDisplayBrands.map((brand, idx) => (
+              <button
+                key={`${brand.id || brand.name}-${idx}`}
+                type="button"
+                onClick={() => navigate(`/shop?brand=${encodeURIComponent(brand.name)}`)}
+                title={brand.name}
+                aria-label={brand.name}
+                className="group flex items-center justify-center h-14 sm:h-16 md:h-18 px-6 sm:px-9 rounded-xl bg-transparent hover:bg-white/15 transition-all duration-300 cursor-pointer shrink-0 active:scale-95 border-0 shadow-none"
+              >
+                {brand.image ? (
+                  <img
+                    src={brand.image}
+                    alt={brand.name}
+                    className="max-h-10 sm:max-h-12 md:max-h-14 max-w-[150px] sm:max-w-[190px] md:max-w-[220px] object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.22)] opacity-95 group-hover:opacity-100 group-hover:scale-105 transition-all duration-300"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <BrandLogoWordmark brandName={brand.name} />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -1812,6 +2014,13 @@ export const StoreCatalog: React.FC = () => {
           return (
             <div key="hero-wrapper" className="w-full">
               {renderHeroSection()}
+            </div>
+          );
+        }
+        if (secKey === 'featureIcons') {
+          return (
+            <div key="featureIcons-wrapper" className="w-full -mt-10 md:-mt-12">
+              {renderFeatureIconsSection()}
             </div>
           );
         }

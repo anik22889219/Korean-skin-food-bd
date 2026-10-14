@@ -52,3 +52,24 @@ h1, h2, h3, h4, h5, h6, .font-heading {
     scrollbar-width: none;
   }
 }
+
+@keyframes marquee-scroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee-smooth {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll 32s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-smooth:hover,
+.animate-marquee-paused {
+  animation-play-state: paused !important;
+}

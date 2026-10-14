@@ -16,7 +16,7 @@ import { uploadFileToCloudinary } from '../services/cloudinaryService';
 
 const SECTION_LABELS: Record<SectionKey, { name: string; desc: string }> = {
   hero: { name: 'Hero Banner & Shipping Calculator', desc: 'Main title, background image, CTAs, and live shipping calculator card' },
-  featureIcons: { name: 'Feature Icons Bar', desc: 'Sourcing, listing, fast shipping, and fulfillment badge items' },
+  featureIcons: { name: 'Featured Brands Marquee & Badges (নির্বাচিত ব্র্যান্ডস মারকুই)', desc: 'Auto-sliding marquee of featured K-Beauty brands directly imported from Seoul' },
   founderStory: { name: "Founders' Story (A Legacy of Love & Light)", desc: 'Editorial story layout, founder photo, and quote' },
   botanicalEssentials: { name: 'Botanical Essentials Carousel', desc: 'Heritage favorites product showcase section' },
   qualityAssurance: { name: 'Quality Assurance (Global Standard)', desc: 'Warehouse inventory, direct logistics, and operations note' },
