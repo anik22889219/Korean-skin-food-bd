@@ -240,14 +240,22 @@ export const AdminMetaCatalog: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
-          <a
-            href={csvFeedUrl}
-            download="meta-catalog.csv"
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm"
+          <button
+            type="button"
+            onClick={() => {
+              if (products.length === 0) {
+                setError("No products available to export.");
+                return;
+              }
+              const csv = metaCatalogService.generateCsv(products);
+              metaCatalogService.downloadBlob(csv, "meta-catalog.csv", "text/csv;charset=utf-8;");
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
+            title="Download Meta Catalog CSV"
           >
             <Download className="w-3.5 h-3.5" />
             Download CSV
-          </a>
+          </button>
           <button
             onClick={handleTriggerSync}
             disabled={isSyncing}
@@ -363,6 +371,22 @@ export const AdminMetaCatalog: React.FC = () => {
               </div>
               <button
                 type="button"
+                onClick={() => {
+                  if (products.length === 0) {
+                    setError("No products available to export.");
+                    return;
+                  }
+                  const xml = metaCatalogService.generateXml(products, effectiveBaseUrl);
+                  metaCatalogService.downloadBlob(xml, "meta-catalog.xml", "application/xml;charset=utf-8;");
+                }}
+                className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 transition-colors shrink-0 cursor-pointer shadow-sm"
+                title="Download XML Feed"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-500" />
+                Download
+              </button>
+              <button
+                type="button"
                 onClick={() => copyToClipboard(xmlFeedUrl, 'xml')}
                 className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg inline-flex items-center gap-1.5 transition-colors shrink-0"
               >
@@ -400,6 +424,22 @@ export const AdminMetaCatalog: React.FC = () => {
               <div className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-700 truncate select-all">
                 {csvFeedUrl}
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (products.length === 0) {
+                    setError("No products available to export.");
+                    return;
+                  }
+                  const csv = metaCatalogService.generateCsv(products);
+                  metaCatalogService.downloadBlob(csv, "meta-catalog.csv", "text/csv;charset=utf-8;");
+                }}
+                className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium rounded-lg inline-flex items-center gap-1.5 transition-colors shrink-0 cursor-pointer shadow-sm"
+                title="Download CSV Feed"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-500" />
+                Download
+              </button>
               <button
                 type="button"
                 onClick={() => copyToClipboard(csvFeedUrl, 'csv')}
