@@ -7733,32 +7733,48 @@ app.post("/api/meta-catalog/sync", async (req, res) => {
           fullImageLink = `${baseUrl}${fullImageLink.startsWith("/") ? "" : "/"}${fullImageLink}`;
         }
 
-        // Price in minor currency units (e.g. 1 BDT = 100 poisha)
-        const effectivePrice = item.salePrice !== null ? item.salePrice : item.price;
-        const priceMinor = Math.round(effectivePrice * 100);
+        if (!fullImageLink) {
+          fullImageLink = `${baseUrl}/pwa-512x512.png`;
+        }
+
+        const regularPriceStr = `${(typeof item.price === 'number' ? item.price : 0).toFixed(2)} ${item.currency || 'BDT'}`;
+        const salePriceStr = (item.salePrice !== null && typeof item.salePrice === 'number' && item.salePrice > 0)
+          ? `${item.salePrice.toFixed(2)} ${item.currency || 'BDT'}`
+          : undefined;
+
+        const data: Record<string, any> = {
+          id: item.id,
+          retailer_id: item.id,
+          title: (item.title || "Korean Skincare Product").slice(0, 150),
+          description: (item.description || item.title || "Authentic Korean Skincare").slice(0, 4999),
+          availability: item.availability === "in stock" ? "in stock" : "out of stock",
+          condition: "new",
+          price: regularPriceStr,
+          link: item.link || `${baseUrl}/product/${encodeURIComponent(item.id)}`,
+          image_link: fullImageLink,
+          brand: item.brand || "Korean Skin Food BD",
+          google_product_category: item.googleProductCategory || "Health & Beauty > Personal Care > Cosmetics > Skin Care",
+          fb_product_category: item.fbProductCategory || "Health & Beauty > Personal Care > Cosmetics > Skin Care",
+          inventory: typeof item.inventory === 'number' ? item.inventory : 1
+        };
+
+        if (salePriceStr) {
+          data.sale_price = salePriceStr;
+        }
+        if (item.barcode) {
+          data.gtin = item.barcode;
+        }
 
         return {
           method: "UPDATE",
           retailer_id: item.id,
-          data: {
-            availability: item.availability,
-            brand: item.brand,
-            category: item.googleProductCategory,
-            description: item.description.slice(0, 4999),
-            image_url: fullImageLink,
-            name: item.title.slice(0, 150),
-            price: priceMinor,
-            currency: item.currency,
-            url: item.link,
-            condition: "new",
-            inventory: item.inventory,
-            retailer_id: item.id
-          }
+          data
         };
       });
 
       const batchPayload = {
         item_type: "PRODUCT_ITEM",
+        allow_upsert: true,
         requests
       };
 
