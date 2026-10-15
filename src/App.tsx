@@ -29,6 +29,7 @@ import { AdminThemeEditor } from './components/AdminThemeEditor';
 import { AdminOrders } from './components/AdminOrders';
 import { AdminDiscounts } from './components/AdminDiscounts';
 import { AdminSlackSettings } from './components/AdminSlackSettings';
+import { AdminMetaCatalog } from './components/AdminMetaCatalog';
 import { AdminAIAgents } from './components/AdminAIAgents';
 import { AdminWholesaleManagement } from './components/AdminWholesaleManagement';
 import { WholesaleCustomerDetailsPage } from './components/WholesaleCustomerDetailsPage';
@@ -228,6 +229,8 @@ export default function App() {
                   <Route path="testimonials" element={<AdminTestimonials />} />
                   <Route path="reviews" element={<AdminTestimonials />} />
                   <Route path="seo" element={<AdminSEO />} />
+                  <Route path="meta-catalog" element={<AdminMetaCatalog />} />
+                  <Route path="facebook-catalog" element={<AdminMetaCatalog />} />
                   <Route path="social" element={<AdminSocial />} />
                   <Route path="chat-leads" element={<AdminChatLeads />} />
                   <Route path="slack" element={<AdminSlackSettings />} />

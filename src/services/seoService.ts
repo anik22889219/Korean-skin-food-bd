@@ -14,7 +14,7 @@ export interface SeoMetadata {
 }
 
 export const SITE_NAME = 'Korean Skin Food Bangladesh';
-export const SITE_URL = typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfoodbd.com';
+export const SITE_URL = typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.web.app';
 export const DEFAULT_OG_IMAGE = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80';
 export const DEFAULT_DESCRIPTION = 'Top Authentic Korean Skincare Brand in Bangladesh. 100% Seoul-sourced cosmeceuticals with Google Business verified reviews and rapid delivery across Dhaka and Bangladesh.';
 

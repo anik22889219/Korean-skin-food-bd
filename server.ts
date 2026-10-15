@@ -7194,6 +7194,631 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
   }
 });
 
+// ==========================================
+// META CATALOG (FACEBOOK/INSTAGRAM COMMERCE)
+// ==========================================
+
+function escapeXmlString(str: any): string {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function stripHtmlMarkup(str: any): string {
+  if (!str) return "";
+  return String(str)
+    .replace(/<[^>]*>?/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeCsvField(val: any): string {
+  if (val === null || val === undefined) return '""';
+  const str = String(val).replace(/"/g, '""');
+  return `"${str}"`;
+}
+
+// Fetch all active products formatted for Meta Catalog
+async function getMetaCatalogProducts(req: express.Request) {
+  let products: any[] = [];
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, "products"));
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        products.push({
+          id: docSnap.id || data.id,
+          ...data
+        });
+      });
+    } catch (e) {
+      console.error("[Meta Catalog] Error loading products from Firestore:", e);
+    }
+  }
+
+  // Load configured settings
+  let settings: any = {
+    domainUrl: "https://koreanskinfood.web.app",
+    currency: "BDT",
+    defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
+    defaultBrand: "Korean Skin Food BD"
+  };
+  if (db) {
+    try {
+      const sSnap = await getDoc(doc(db, "settings", "meta_catalog"));
+      if (sSnap.exists()) {
+        settings = { ...settings, ...sSnap.data() };
+      }
+    } catch (e) {
+      console.warn("[Meta Catalog] Settings load warning:", e);
+    }
+  }
+
+  // Resolve base store URL (defaulting to https://koreanskinfood.web.app)
+  let baseUrl = (settings.domainUrl && settings.domainUrl.trim()) ? settings.domainUrl.trim() : "https://koreanskinfood.web.app";
+  baseUrl = baseUrl.replace(/\/+$/, "");
+
+  // Normalize products
+  const formattedItems = products.map((prod) => {
+    const id = String(prod.id || prod.barcode || `prod-${Math.random().toString(36).slice(2)}`).trim();
+    const title = prod.name || prod.nameBN || "Korean Skincare Product";
+    const rawDesc = prod.description || prod.descriptionBN || title;
+    const cleanDesc = stripHtmlMarkup(rawDesc);
+    const stockQty = typeof prod.stock === "number" ? prod.stock : (parseInt(prod.stock, 10) || 0);
+    const availability = stockQty > 0 ? "in stock" : "out of stock";
+    
+    // Pricing
+    const regularPrice = typeof prod.price === "number" ? prod.price : (parseFloat(prod.price) || 0);
+    const salePrice = typeof prod.discountPrice === "number" && prod.discountPrice > 0 && prod.discountPrice < regularPrice
+      ? prod.discountPrice
+      : (typeof prod.discountRetailPrice === "number" && prod.discountRetailPrice > 0 && prod.discountRetailPrice < regularPrice ? prod.discountRetailPrice : null);
+    
+    const brand = prod.brand || settings.defaultBrand || "Korean Skin Food BD";
+    const category = prod.category ? `Health & Beauty > Personal Care > Cosmetics > Skin Care > ${prod.category}` : settings.defaultCategory;
+    
+    // Main image
+    const mainImg = prod.image || (Array.isArray(prod.images) && prod.images.length > 0 ? prod.images[0] : "");
+    const additionalImages = Array.isArray(prod.images) ? prod.images.filter((img: string) => img && img !== mainImg) : [];
+
+    const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+    const barcode = prod.barcodeNormalized || prod.barcode || "";
+    const sku = prod.sku || id;
+
+    return {
+      id,
+      title,
+      description: cleanDesc,
+      availability,
+      condition: "new",
+      price: regularPrice,
+      salePrice,
+      currency: settings.currency || "BDT",
+      link,
+      imageLink: mainImg,
+      additionalImageLinks: additionalImages,
+      brand,
+      googleProductCategory: category,
+      fbProductCategory: category,
+      inventory: Math.max(0, stockQty),
+      barcode,
+      sku,
+      hasValidImage: !!mainImg && (mainImg.startsWith("http://") || mainImg.startsWith("https://") || mainImg.startsWith("/")),
+      hasValidPrice: regularPrice > 0
+    };
+  });
+
+  return { formattedItems, baseUrl, settings };
+}
+
+// 1. Live XML Data Feed for Meta Commerce Manager / Facebook Catalog (Scheduled Fetch)
+app.get([
+  "/api/meta-catalog.xml",
+  "/api/meta-catalog.rss",
+  "/api/feeds/meta-catalog.xml",
+  "/api/feeds/facebook-catalog.xml",
+  "/meta-catalog.xml",
+  "/facebook-catalog.xml"
+], async (req, res) => {
+  try {
+    const { formattedItems, baseUrl } = await getMetaCatalogProducts(req);
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">\n`;
+    xml += `  <channel>\n`;
+    xml += `    <title>Korean Skin Food BD - Meta Product Catalog</title>\n`;
+    xml += `    <link>${escapeXmlString(baseUrl)}</link>\n`;
+    xml += `    <description>Dynamic real-time product feed for Meta Commerce Manager, Facebook and Instagram Shopping</description>\n`;
+    xml += `    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>\n`;
+
+    for (const item of formattedItems) {
+      const priceStr = `${item.price.toFixed(2)} ${item.currency}`;
+      const salePriceStr = item.salePrice !== null ? `${item.salePrice.toFixed(2)} ${item.currency}` : null;
+      
+      // Ensure image link is absolute
+      let fullImageLink = item.imageLink;
+      if (fullImageLink && !fullImageLink.startsWith("http://") && !fullImageLink.startsWith("https://")) {
+        fullImageLink = `${baseUrl}${fullImageLink.startsWith("/") ? "" : "/"}${fullImageLink}`;
+      }
+
+      xml += `    <item>\n`;
+      xml += `      <g:id>${escapeXmlString(item.id)}</g:id>\n`;
+      xml += `      <g:title><![CDATA[${item.title}]]></g:title>\n`;
+      xml += `      <g:description><![CDATA[${item.description}]]></g:description>\n`;
+      xml += `      <g:link>${escapeXmlString(item.link)}</g:link>\n`;
+      if (fullImageLink) {
+        xml += `      <g:image_link>${escapeXmlString(fullImageLink)}</g:image_link>\n`;
+      }
+      for (const addImg of item.additionalImageLinks.slice(0, 5)) {
+        let fullAddImg = addImg;
+        if (fullAddImg && !fullAddImg.startsWith("http://") && !fullAddImg.startsWith("https://")) {
+          fullAddImg = `${baseUrl}${fullAddImg.startsWith("/") ? "" : "/"}${fullAddImg}`;
+        }
+        if (fullAddImg) {
+          xml += `      <g:additional_image_link>${escapeXmlString(fullAddImg)}</g:additional_image_link>\n`;
+        }
+      }
+      xml += `      <g:brand><![CDATA[${item.brand}]]></g:brand>\n`;
+      xml += `      <g:condition>${item.condition}</g:condition>\n`;
+      xml += `      <g:availability>${item.availability}</g:availability>\n`;
+      xml += `      <g:price>${escapeXmlString(priceStr)}</g:price>\n`;
+      if (salePriceStr) {
+        xml += `      <g:sale_price>${escapeXmlString(salePriceStr)}</g:sale_price>\n`;
+      }
+      xml += `      <g:google_product_category><![CDATA[${item.googleProductCategory}]]></g:google_product_category>\n`;
+      xml += `      <g:fb_product_category><![CDATA[${item.fbProductCategory}]]></g:fb_product_category>\n`;
+      xml += `      <g:inventory>${item.inventory}</g:inventory>\n`;
+      if (item.barcode) {
+        xml += `      <g:gtin>${escapeXmlString(item.barcode)}</g:gtin>\n`;
+        xml += `      <g:identifier_exists>yes</g:identifier_exists>\n`;
+      } else {
+        xml += `      <g:identifier_exists>no</g:identifier_exists>\n`;
+      }
+      if (item.sku) {
+        xml += `      <g:mpn>${escapeXmlString(item.sku)}</g:mpn>\n`;
+      }
+      xml += `      <g:custom_label_0>${item.availability === "in stock" ? "In Stock" : "Out of Stock"}</g:custom_label_0>\n`;
+      xml += `      <g:custom_label_1><![CDATA[${item.brand}]]></g:custom_label_1>\n`;
+      xml += `      <g:custom_label_2>Korean Skin Food BD</g:custom_label_2>\n`;
+      xml += `    </item>\n`;
+    }
+
+    xml += `  </channel>\n`;
+    xml += `</rss>`;
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=180, s-maxage=180");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.send(xml);
+  } catch (err: any) {
+    console.error("[Meta Catalog] Error generating XML feed:", err);
+    res.status(500).setHeader("Content-Type", "text/plain").send(`Error generating feed: ${err.message}`);
+  }
+});
+
+// 2. Live CSV Data Feed for Meta Commerce Manager (Strict Meta Commerce Manager Template Format)
+app.get([
+  "/api/meta-catalog.csv",
+  "/api/feeds/meta-catalog.csv",
+  "/meta-catalog.csv",
+  "/facebook-catalog.csv"
+], async (req, res) => {
+  try {
+    const { formattedItems, baseUrl } = await getMetaCatalogProducts(req);
+
+    // Official Meta Commerce Manager Template Header Specification
+    const headers = [
+      "id",
+      "title",
+      "description",
+      "availability",
+      "condition",
+      "link",
+      "image_link",
+      "brand",
+      "price",
+      "google_product_category",
+      "fb_product_category",
+      "quantity_to_sell_on_facebook",
+      "sale_price",
+      "sale_price_effective_date",
+      "item_group_id",
+      "gender",
+      "color",
+      "size",
+      "age_group",
+      "material",
+      "pattern",
+      "shipping",
+      "shipping_weight",
+      "offer_disclaimer",
+      "offer_disclaimer_url",
+      "video[0].url",
+      "video[0].tag[0]",
+      "gtin",
+      "product_tags[0]",
+      "product_tags[1]",
+      "style[0]"
+    ];
+
+    const rows = [headers.join(",")];
+
+    for (const item of formattedItems) {
+      let fullImageLink = item.imageLink;
+      if (fullImageLink && !fullImageLink.startsWith("http://") && !fullImageLink.startsWith("https://")) {
+        fullImageLink = `${baseUrl}${fullImageLink.startsWith("/") ? "" : "/"}${fullImageLink}`;
+      }
+
+      const row = [
+        escapeCsvField(item.id),
+        escapeCsvField(item.title.slice(0, 200)),
+        escapeCsvField(item.description.slice(0, 4999)),
+        escapeCsvField(item.availability),
+        escapeCsvField(item.condition),
+        escapeCsvField(item.link),
+        escapeCsvField(fullImageLink),
+        escapeCsvField(item.brand.slice(0, 100)),
+        escapeCsvField(`${item.price.toFixed(2)} ${item.currency}`),
+        escapeCsvField(item.googleProductCategory),
+        escapeCsvField(item.fbProductCategory),
+        escapeCsvField(item.inventory > 0 ? item.inventory : 0),
+        escapeCsvField(item.salePrice !== null ? `${item.salePrice.toFixed(2)} ${item.currency}` : ""),
+        escapeCsvField(""), // sale_price_effective_date
+        escapeCsvField(""), // item_group_id
+        escapeCsvField("unisex"), // gender
+        escapeCsvField(""), // color
+        escapeCsvField(item.sku || ""), // size / variant
+        escapeCsvField("adult"), // age_group
+        escapeCsvField(""), // material
+        escapeCsvField(""), // pattern
+        escapeCsvField("BD::Standard:60.00 BDT"), // shipping
+        escapeCsvField(""), // shipping_weight
+        escapeCsvField("100% Authentic Korean Product"), // offer_disclaimer
+        escapeCsvField(`${baseUrl}/about-us`), // offer_disclaimer_url
+        escapeCsvField(""), // video[0].url
+        escapeCsvField(""), // video[0].tag[0]
+        escapeCsvField(item.barcode || ""), // gtin
+        escapeCsvField(item.brand || "K-Beauty"), // product_tags[0]
+        escapeCsvField("Skincare"), // product_tags[1]
+        escapeCsvField("") // style[0]
+      ];
+      rows.push(row.join(","));
+    }
+
+    const csv = rows.join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'inline; filename="meta-catalog.csv"');
+    res.setHeader("Cache-Control", "public, max-age=180, s-maxage=180");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.send(csv);
+  } catch (err: any) {
+    console.error("[Meta Catalog] Error generating CSV feed:", err);
+    res.status(500).setHeader("Content-Type", "text/plain").send(`Error generating CSV: ${err.message}`);
+  }
+});
+
+// 3. Meta Catalog Preview & Quality Diagnostics for Admin UI
+app.get("/api/meta-catalog/preview", async (req, res) => {
+  try {
+    const { formattedItems, baseUrl, settings } = await getMetaCatalogProducts(req);
+
+    const total = formattedItems.length;
+    const inStock = formattedItems.filter((i) => i.availability === "in stock").length;
+    const outOfStock = total - inStock;
+    const missingImages = formattedItems.filter((i) => !i.hasValidImage).length;
+    const missingBarcodes = formattedItems.filter((i) => !i.barcode).length;
+    const readyForMeta = formattedItems.filter((i) => i.hasValidImage && i.hasValidPrice).length;
+
+    return res.json({
+      success: true,
+      baseUrl,
+      settings: {
+        catalogId: settings.catalogId || "",
+        hasAccessToken: !!settings.accessToken,
+        pixelId: settings.pixelId || "",
+        currency: settings.currency || "BDT",
+        domainUrl: settings.domainUrl || baseUrl,
+        defaultCategory: settings.defaultCategory || "Health & Beauty > Personal Care > Cosmetics > Skin Care",
+        lastSyncAt: settings.lastSyncAt || null,
+        lastSyncStatus: settings.lastSyncStatus || "idle",
+        lastSyncResult: settings.lastSyncResult || null
+      },
+      feedUrls: {
+        xml: `${baseUrl}/api/meta-catalog.xml`,
+        csv: `${baseUrl}/api/meta-catalog.csv`
+      },
+      summary: {
+        totalProducts: total,
+        inStockCount: inStock,
+        outOfStockCount: outOfStock,
+        missingImagesCount: missingImages,
+        missingBarcodesCount: missingBarcodes,
+        readyForMetaCount: readyForMeta,
+        healthPercentage: total > 0 ? Math.round((readyForMeta / total) * 100) : 100
+      },
+      products: formattedItems
+    });
+  } catch (err: any) {
+    console.error("[Meta Catalog] Error loading preview:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Get Meta Catalog Settings
+app.get("/api/meta-catalog/settings", async (req, res) => {
+  try {
+    let settings: any = {
+      catalogId: "",
+      hasAccessToken: false,
+      pixelId: "",
+      currency: "BDT",
+      domainUrl: "https://koreanskinfood.web.app",
+      defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
+      lastSyncAt: null,
+      lastSyncStatus: "idle",
+      lastSyncResult: null
+    };
+
+    if (db) {
+      const sSnap = await getDoc(doc(db, "settings", "meta_catalog"));
+      if (sSnap.exists()) {
+        const data = sSnap.data();
+        settings = {
+          ...settings,
+          ...data,
+          domainUrl: data.domainUrl || "https://koreanskinfood.web.app",
+          hasAccessToken: !!data.accessToken,
+          accessToken: undefined // Do not leak full token
+        };
+      }
+    }
+
+    return res.json({ success: true, settings });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Save Meta Catalog Settings
+app.post("/api/meta-catalog/settings", async (req, res) => {
+  try {
+    const { catalogId, accessToken, pixelId, currency, domainUrl, defaultCategory } = req.body;
+    
+    if (!db) {
+      return res.status(500).json({ success: false, error: "Database not connected" });
+    }
+
+    const cleanedDomain = String(domainUrl || "https://koreanskinfood.web.app").trim().replace(/\/+$/, "");
+
+    const payload: any = {
+      catalogId: String(catalogId || "").trim(),
+      pixelId: String(pixelId || "").trim(),
+      currency: String(currency || "BDT").trim().toUpperCase(),
+      domainUrl: cleanedDomain || "https://koreanskinfood.web.app",
+      defaultCategory: String(defaultCategory || "Health & Beauty > Personal Care > Cosmetics > Skin Care").trim(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (accessToken && String(accessToken).trim()) {
+      payload.accessToken = String(accessToken).trim();
+    }
+
+    await setDoc(doc(db, "settings", "meta_catalog"), payload, { merge: true });
+
+    return res.json({
+      success: true,
+      message: "Meta Catalog settings updated successfully"
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 6. Test Meta Graph API Connection
+app.post("/api/meta-catalog/test-connection", async (req, res) => {
+  try {
+    let catalogId = req.body?.catalogId;
+    let accessToken = req.body?.accessToken;
+
+    if (!catalogId || !accessToken) {
+      if (db) {
+        const sSnap = await getDoc(doc(db, "settings", "meta_catalog"));
+        if (sSnap.exists()) {
+          const data = sSnap.data();
+          catalogId = catalogId || data.catalogId;
+          accessToken = accessToken || data.accessToken;
+        }
+      }
+    }
+
+    if (!catalogId) {
+      return res.status(400).json({
+        success: false,
+        error: "Meta Catalog ID is missing. Please provide your Meta Catalog ID."
+      });
+    }
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: "Meta Access Token is missing. Please provide your Meta System User Access Token."
+      });
+    }
+
+    // Call Meta Graph API to inspect catalog details
+    const metaUrl = `https://graph.facebook.com/v19.0/${encodeURIComponent(catalogId)}?fields=id,name,product_count,vertical,business&access_token=${encodeURIComponent(accessToken)}`;
+    const response = await fetch(metaUrl);
+    const result: any = await response.json();
+
+    if (!response.ok || result.error) {
+      const errorMsg = result?.error?.message || `Meta Graph API returned status ${response.status}`;
+      return res.status(400).json({
+        success: false,
+        error: errorMsg,
+        metaError: result.error
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Connected successfully to Meta Catalog "${result.name || result.id}"!`,
+      catalog: {
+        id: result.id,
+        name: result.name || "Meta Product Catalog",
+        productCount: result.product_count ?? 0,
+        vertical: result.vertical || "commerce",
+        business: result.business?.name || "Connected Business"
+      }
+    });
+  } catch (err: any) {
+    console.error("[Meta Catalog] Test connection error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 7. Direct Meta Graph API Batch Items Sync (/items_batch)
+app.post("/api/meta-catalog/sync", async (req, res) => {
+  try {
+    let catalogId = req.body?.catalogId;
+    let accessToken = req.body?.accessToken;
+
+    if (!catalogId || !accessToken) {
+      if (db) {
+        const sSnap = await getDoc(doc(db, "settings", "meta_catalog"));
+        if (sSnap.exists()) {
+          const data = sSnap.data();
+          catalogId = catalogId || data.catalogId;
+          accessToken = accessToken || data.accessToken;
+        }
+      }
+    }
+
+    if (!catalogId || !accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: "Meta Catalog ID and Access Token must be configured in settings to use direct Graph API sync."
+      });
+    }
+
+    const { formattedItems, baseUrl } = await getMetaCatalogProducts(req);
+
+    if (formattedItems.length === 0) {
+      return res.json({
+        success: true,
+        message: "No products found to sync.",
+        processedCount: 0
+      });
+    }
+
+    // Prepare requests in batches of 400 (Meta allows max 499 per batch)
+    const BATCH_SIZE = 400;
+    const batches = [];
+    for (let i = 0; i < formattedItems.length; i += BATCH_SIZE) {
+      batches.push(formattedItems.slice(i, i + BATCH_SIZE));
+    }
+
+    let totalSynced = 0;
+    let totalErrors = 0;
+    const errorDetails: any[] = [];
+    const syncLogs: string[] = [];
+
+    for (let bIndex = 0; bIndex < batches.length; bIndex++) {
+      const batchItems = batches[bIndex];
+      const requests = batchItems.map((item) => {
+        let fullImageLink = item.imageLink;
+        if (fullImageLink && !fullImageLink.startsWith("http://") && !fullImageLink.startsWith("https://")) {
+          fullImageLink = `${baseUrl}${fullImageLink.startsWith("/") ? "" : "/"}${fullImageLink}`;
+        }
+
+        // Price in minor currency units (e.g. 1 BDT = 100 poisha)
+        const effectivePrice = item.salePrice !== null ? item.salePrice : item.price;
+        const priceMinor = Math.round(effectivePrice * 100);
+
+        return {
+          method: "UPDATE",
+          retailer_id: item.id,
+          data: {
+            availability: item.availability,
+            brand: item.brand,
+            category: item.googleProductCategory,
+            description: item.description.slice(0, 4999),
+            image_url: fullImageLink,
+            name: item.title.slice(0, 150),
+            price: priceMinor,
+            currency: item.currency,
+            url: item.link,
+            condition: "new",
+            inventory: item.inventory,
+            retailer_id: item.id
+          }
+        };
+      });
+
+      const batchPayload = {
+        item_type: "PRODUCT_ITEM",
+        requests
+      };
+
+      const metaEndpoint = `https://graph.facebook.com/v19.0/${encodeURIComponent(catalogId)}/items_batch?access_token=${encodeURIComponent(accessToken)}`;
+      const batchRes = await fetch(metaEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(batchPayload)
+      });
+
+      const batchResult: any = await batchRes.json();
+
+      if (!batchRes.ok || batchResult.error) {
+        totalErrors += batchItems.length;
+        const errMsg = batchResult?.error?.message || `Batch ${bIndex + 1} failed with status ${batchRes.status}`;
+        errorDetails.push({ batch: bIndex + 1, error: errMsg });
+        syncLogs.push(`Batch ${bIndex + 1} failed: ${errMsg}`);
+      } else {
+        const handles = batchResult.handles || [];
+        totalSynced += batchItems.length;
+        syncLogs.push(`Batch ${bIndex + 1} (${batchItems.length} items) pushed successfully to Meta Graph API. Handle: ${handles.join(", ") || "OK"}`);
+      }
+    }
+
+    const lastSyncStatus = totalErrors === 0 ? "success" : (totalSynced > 0 ? "partial" : "error");
+    const lastSyncAt = new Date().toISOString();
+    const lastSyncResult = {
+      totalProducts: formattedItems.length,
+      syncedCount: totalSynced,
+      errorCount: totalErrors,
+      errorDetails,
+      syncLogs
+    };
+
+    // Update settings with last sync result
+    if (db) {
+      try {
+        await setDoc(doc(db, "settings", "meta_catalog"), {
+          lastSyncAt,
+          lastSyncStatus,
+          lastSyncResult,
+          lastSyncCount: totalSynced
+        }, { merge: true });
+      } catch (e) {
+        console.warn("[Meta Catalog] Failed to save sync status:", e);
+      }
+    }
+
+    return res.json({
+      success: lastSyncStatus !== "error",
+      status: lastSyncStatus,
+      message: `Meta Catalog sync completed: ${totalSynced} products synced, ${totalErrors} errors.`,
+      result: lastSyncResult
+    });
+  } catch (err: any) {
+    console.error("[Meta Catalog] Batch sync error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
