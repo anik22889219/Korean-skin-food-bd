@@ -5121,7 +5121,7 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
     });
   }
 
-  const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID || "1181966473667367";
+  const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID || "1181966467366737";
   const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
   const testEventCode = process.env.META_TEST_EVENT_CODE;
 
@@ -7553,7 +7553,7 @@ app.get("/api/meta-catalog/settings", async (req, res) => {
     let settings: any = {
       catalogId: "",
       hasAccessToken: false,
-      pixelId: "",
+      pixelId: "1181966467366737",
       currency: "BDT",
       domainUrl: "https://koreanskinfood.web.app",
       defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
@@ -7569,6 +7569,7 @@ app.get("/api/meta-catalog/settings", async (req, res) => {
         settings = {
           ...settings,
           ...data,
+          pixelId: data.pixelId || "1181966467366737",
           domainUrl: data.domainUrl || "https://koreanskinfood.web.app",
           hasAccessToken: !!data.accessToken,
           accessToken: undefined // Do not leak full token
@@ -7595,7 +7596,7 @@ app.post("/api/meta-catalog/settings", async (req, res) => {
 
     const payload: any = {
       catalogId: String(catalogId || "").trim(),
-      pixelId: String(pixelId || "").trim(),
+      pixelId: String(pixelId || "1181966467366737").trim(),
       currency: String(currency || "BDT").trim().toUpperCase(),
       domainUrl: cleanedDomain || "https://koreanskinfood.web.app",
       defaultCategory: String(defaultCategory || "Health & Beauty > Personal Care > Cosmetics > Skin Care").trim(),

@@ -34,7 +34,7 @@ declare global {
 const metaEnv = (import.meta as any).env || {};
 const rawMetaPixelEnv = metaEnv.VITE_META_PIXEL_ID as string | undefined;
 const GA4_MEASUREMENT_ID = (metaEnv.VITE_GA4_MEASUREMENT_ID as string) || '';
-const META_PIXEL_ID = rawMetaPixelEnv || '1181966473667367';
+const META_PIXEL_ID = rawMetaPixelEnv || '1181966467366737';
 const metaPixelSource: 'env' | 'hardcoded-fallback' = rawMetaPixelEnv ? 'env' : 'hardcoded-fallback';
 const isGa4Configured = Boolean(
   GA4_MEASUREMENT_ID &&

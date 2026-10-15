@@ -26,7 +26,7 @@ export const AdminMetaCatalog: React.FC = () => {
   const [settings, setSettings] = useState<MetaCatalogSettings>({
     catalogId: '',
     hasAccessToken: false,
-    pixelId: '',
+    pixelId: '1181966467366737',
     currency: 'BDT',
     domainUrl: 'https://koreanskinfood.web.app',
     defaultCategory: 'Health & Beauty > Personal Care > Cosmetics > Skin Care',
@@ -39,7 +39,7 @@ export const AdminMetaCatalog: React.FC = () => {
   const [catalogIdInput, setCatalogIdInput] = useState<string>('');
   const [accessTokenInput, setAccessTokenInput] = useState<string>('');
   const [showToken, setShowToken] = useState<boolean>(false);
-  const [pixelIdInput, setPixelIdInput] = useState<string>('');
+  const [pixelIdInput, setPixelIdInput] = useState<string>('1181966467366737');
   const [domainUrlInput, setDomainUrlInput] = useState<string>('https://koreanskinfood.web.app');
   const [currencyInput, setCurrencyInput] = useState<string>('BDT');
 
@@ -72,7 +72,7 @@ export const AdminMetaCatalog: React.FC = () => {
       if (data.settings) {
         setSettings(data.settings);
         setCatalogIdInput(data.settings.catalogId || '');
-        setPixelIdInput(data.settings.pixelId || '');
+        setPixelIdInput(data.settings.pixelId || '1181966467366737');
         setDomainUrlInput(data.settings.domainUrl || data.baseUrl || '');
         setCurrencyInput(data.settings.currency || 'BDT');
       }
@@ -511,10 +511,10 @@ export const AdminMetaCatalog: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. 987654321012345"
+                  placeholder="e.g. 1181966467366737"
                   value={pixelIdInput}
                   onChange={(e) => setPixelIdInput(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 font-mono"
                 />
               </div>
             </div>
