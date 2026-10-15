@@ -24,15 +24,10 @@ jobs:
       - name: Build Project
         run: npm run build
 
-      - name: Deploy to Firebase Hosting (via Service Account)
+      - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
-        if: "${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' || secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0633897500 != '' }}"
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0633897500 }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
           channelId: live
           projectId: gen-lang-client-0633897500
-
-      - name: Deploy to Firebase Hosting (via CI Token Fallback)
-        if: "${{ (secrets.FIREBASE_SERVICE_ACCOUNT == '' && secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0633897500 == '') && secrets.FIREBASE_TOKEN != '' }}"
-        run: npx -y firebase-tools deploy --only hosting --project gen-lang-client-0633897500 --token "${{ secrets.FIREBASE_TOKEN }}"
