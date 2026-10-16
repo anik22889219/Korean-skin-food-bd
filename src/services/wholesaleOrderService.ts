@@ -39,6 +39,17 @@ export interface CreateAdminWholesaleOrderParams {
   businessName?: string;
   phone?: string;
   items: CreateWholesaleOrderItemInput[];
+  checkoutInfo?: {
+    checkoutType: 'COD' | 'PARCEL' | 'COD_DIRECT' | 'PARCEL_COURIER';
+    deliveryName?: string;
+    deliveryPhone?: string;
+    deliveryAddress?: string;
+    parcelId?: string;
+    velouriaId?: string;
+    codPrice?: number | string;
+    courier?: string;
+    orderNote?: string;
+  };
   shippingAddress: {
     deliveryName: string;
     deliveryPhone: string;
@@ -46,6 +57,9 @@ export interface CreateAdminWholesaleOrderParams {
     courier?: string;
     orderNote?: string;
   };
+  totalWholesaleCost?: number;
+  totalCODValue?: number;
+  totalProfit?: number;
   deliveryCharge?: number;
   discount?: number;
   paidAmount?: number;

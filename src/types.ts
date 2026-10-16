@@ -46,6 +46,8 @@ export interface Product {
   benefits?: string[];
   routineStep?: string;
   keyIngredients?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type TaxonomyDimensionType =

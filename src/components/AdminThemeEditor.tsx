@@ -638,11 +638,11 @@ export const AdminThemeEditor: React.FC = () => {
                   <div className="max-w-xs bg-slate-200/80 p-1.5 rounded-t-xl flex items-center gap-2 border-b border-slate-300 shadow-inner">
                     <div className="bg-white px-3 py-1.5 rounded-lg flex items-center gap-2 text-xs font-bold text-slate-800 shadow-sm max-w-full truncate">
                       <img
-                        src={globalTheme.faviconUrl || 'https://lh3.googleusercontent.com/aida-public/AB6AXuDV9JqR2f8TTBJG32wqldTxeJQRLC1xolU3UBXhjlG8xqiFFHmPa8s7VOmDWPNYjyf-t6OqEzaveZ7B4b0qSnfSfsjMLerSO2S0r_L5h7hWtHIb0PQcNOU9xzM5hr44aKCbKYO0mcXsLe818N0R-AA3Zj14exAmZCen73zfHV8MVDMbR9l4MQjyLLTF_Ar2OIbFnMMc-hSVV4yFDshte5KzLe5iLA2SY-A8gSFkM3MlXUpPyZu37-bDXliWJF5e0ujz-d6-bUCf01w'}
+                        src={globalTheme.faviconUrl || '/favicon-32x32.png'}
                         alt="Favicon preview"
                         className="w-4 h-4 rounded object-cover shrink-0"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src = 'https://lh3.googleusercontent.com/aida-public/AB6AXuDV9JqR2f8TTBJG32wqldTxeJQRLC1xolU3UBXhjlG8xqiFFHmPa8s7VOmDWPNYjyf-t6OqEzaveZ7B4b0qSnfSfsjMLerSO2S0r_L5h7hWtHIb0PQcNOU9xzM5hr44aKCbKYO0mcXsLe818N0R-AA3Zj14exAmZCen73zfHV8MVDMbR9l4MQjyLLTF_Ar2OIbFnMMc-hSVV4yFDshte5KzLe5iLA2SY-A8gSFkM3MlXUpPyZu37-bDXliWJF5e0ujz-d6-bUCf01w';
+                          (e.target as HTMLImageElement).src = '/favicon-32x32.png';
                         }}
                       />
                       <span className="truncate">{globalTheme.siteTitle || 'Korean Skin Food BD'}</span>

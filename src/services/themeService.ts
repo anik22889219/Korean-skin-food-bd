@@ -15,8 +15,8 @@ export const DEFAULT_SHOP_THEME: ShopThemeSettings = {
 };
 
 export const DEFAULT_GLOBAL_THEME: GlobalThemeSettings = {
-  faviconUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDV9JqR2f8TTBJG32wqldTxeJQRLC1xolU3UBXhjlG8xqiFFHmPa8s7VOmDWPNYjyf-t6OqEzaveZ7B4b0qSnfSfsjMLerSO2S0r_L5h7hWtHIb0PQcNOU9xzM5hr44aKCbKYO0mcXsLe818N0R-AA3Zj14exAmZCen73zfHV8MVDMbR9l4MQjyLLTF_Ar2OIbFnMMc-hSVV4yFDshte5KzLe5iLA2SY-A8gSFkM3MlXUpPyZu37-bDXliWJF5e0ujz-d6-bUCf01w',
-  logoUrl: '',
+  faviconUrl: 'https://res.cloudinary.com/dxvmfaxeh/image/upload/w_128,h_128,c_fit,f_png/v1785001202/korean_skin_food_logo_1_wblyz6.png',
+  logoUrl: 'https://res.cloudinary.com/dxvmfaxeh/image/upload/v1785001202/korean_skin_food_logo_1_wblyz6.png',
   logoText: 'Korean Skin Food BD',
   logoTagline: 'K-BEAUTY COSMECEUTICALS',
   primaryColor: '#E91E8C',
@@ -323,15 +323,32 @@ function loadGoogleFont(fontName: string) {
 export function applyGlobalThemeToDOM(globalTheme: GlobalThemeSettings) {
   if (typeof document === 'undefined') return;
 
-  // 1. Favicon
+  // 1. Favicon & Touch Icons
   if (globalTheme.faviconUrl) {
-    let faviconElem = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
-    if (!faviconElem) {
-      faviconElem = document.createElement('link');
+    const iconLinks = document.querySelectorAll<HTMLLinkElement>("link[rel*='icon']");
+    if (iconLinks.length > 0) {
+      iconLinks.forEach((link) => {
+        link.href = globalTheme.faviconUrl;
+        if (globalTheme.faviconUrl.endsWith('.ico')) {
+          link.type = 'image/x-icon';
+        } else if (globalTheme.faviconUrl.endsWith('.svg')) {
+          link.type = 'image/svg+xml';
+        } else {
+          link.type = 'image/png';
+        }
+      });
+    } else {
+      const faviconElem = document.createElement('link');
       faviconElem.rel = 'icon';
+      faviconElem.type = 'image/png';
+      faviconElem.href = globalTheme.faviconUrl;
       document.head.appendChild(faviconElem);
     }
-    faviconElem.href = globalTheme.faviconUrl;
+
+    const appleIcon = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon']");
+    if (appleIcon) {
+      appleIcon.href = globalTheme.faviconUrl;
+    }
   }
 
   // 2. Document Title

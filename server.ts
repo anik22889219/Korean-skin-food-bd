@@ -1602,12 +1602,20 @@ async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Res
   }
 
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
-    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr'];
     const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd') && (verifiedUser as any).emailVerified === true;
-    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : 'customer');
+    let userRole = isSuperAdminEmail ? 'super_admin' : 'customer';
 
+    try {
+      const userDocRef = doc(db, "users", verifiedUser.uid);
+      const userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        userRole = userSnap.data()?.role || userRole;
+      }
+    } catch (e) {
+      // Ignore permission errors if user doc doesn't exist or rules restrict
+    }
+
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr'];
     const isStaff = isSuperAdminEmail || staffRoles.includes(userRole);
     const requestedTargetId = (req.params?.wholesaleCustomerId || req.body?.wholesaleCustomerId || req.body?.userId || req.query?.wholesaleCustomerId) as string;
 
@@ -1624,12 +1632,19 @@ async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Res
 
     // If customer, ensure they are accessing only their own wholesale data
     if (requestedTargetId && requestedTargetId !== verifiedUser.uid) {
-      const custDocRef = doc(db, "wholesale_customers", requestedTargetId);
-      const custSnap = await getDoc(custDocRef);
-      if (!custSnap.exists() || custSnap.data()?.userId !== verifiedUser.uid) {
+      try {
+        const custDocRef = doc(db, "wholesale_customers", requestedTargetId);
+        const custSnap = await getDoc(custDocRef);
+        if (!custSnap.exists() || custSnap.data()?.userId !== verifiedUser.uid) {
+          return res.status(403).json({
+            success: false,
+            error: "Access Denied. You are not authorized to view or manage another wholesale account."
+          });
+        }
+      } catch (e) {
         return res.status(403).json({
           success: false,
-          error: "Access Denied. You are not authorized to view or manage another wholesale account."
+          error: "Access Denied. Wholesale account verification failed."
         });
       }
     }
@@ -6310,6 +6325,8 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
       // 3. Process items and calculate totals
       const processedItems: any[] = [];
       let totalWholesaleCost = 0;
+      let calculatedTotalCOD = 0;
+      let calculatedTotalProfit = 0;
       let totalUnits = 0;
 
       for (const item of items) {
@@ -6333,6 +6350,17 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
         const itemTotal = Math.round(unitPrice * itemQty * 100) / 100;
         totalWholesaleCost += itemTotal;
 
+        const codUnitPrice = (item.customCodPrice !== undefined && item.customCodPrice !== null && !isNaN(Number(item.customCodPrice)))
+          ? Number(item.customCodPrice)
+          : (item.CODUnitPrice !== undefined && item.CODUnitPrice !== null && !isNaN(Number(item.CODUnitPrice)))
+          ? Number(item.CODUnitPrice)
+          : (prod.retailPrice ?? prod.price ?? unitPrice);
+
+        const itemCodValue = Math.round(codUnitPrice * itemQty * 100) / 100;
+        const itemProfit = Math.round((codUnitPrice - unitPrice) * itemQty * 100) / 100;
+        calculatedTotalCOD += itemCodValue;
+        calculatedTotalProfit += itemProfit;
+
         processedItems.push({
           productId: prod.id,
           productName: prod.name || item.name || '',
@@ -6342,10 +6370,10 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
           quantity: itemQty,
           wholesaleTier: itemQty >= 50 ? 'tier50_plus' : 'tier1_49',
           wholesaleUnitPrice: unitPrice,
-          CODUnitPrice: item.customCodPrice ? Number(item.customCodPrice) : unitPrice,
+          CODUnitPrice: codUnitPrice,
           wholesaleCost: itemTotal,
-          CODValue: itemTotal,
-          profit: 0
+          CODValue: itemCodValue,
+          profit: itemProfit
         });
       }
 
@@ -6360,6 +6388,11 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
 
       const orderPaymentStatus = dueAmount === 0 && finalAmount > 0 ? 'paid' : (validPaidAmount > 0 ? 'partial' : 'unpaid');
 
+      const incomingCheckoutInfo = req.body.checkoutInfo || {};
+      const resolvedCheckoutType = incomingCheckoutInfo.checkoutType === 'PARCEL_COURIER' || incomingCheckoutInfo.checkoutType === 'PARCEL'
+        ? 'PARCEL'
+        : 'COD';
+
       const wholesaleOrderDoc = {
         id: orderId,
         orderNumber,
@@ -6367,21 +6400,27 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
         items: processedItems,
         totalUnits,
         totalWholesaleCost,
-        totalCODValue: finalAmount,
-        totalProfit: 0,
+        totalCODValue: incomingCheckoutInfo.codPrice !== undefined && incomingCheckoutInfo.codPrice !== null
+          ? Number(incomingCheckoutInfo.codPrice)
+          : calculatedTotalCOD,
+        totalProfit: calculatedTotalProfit,
         deliveryCharge: validDeliveryCharge,
         discount: validDiscount,
         finalAmount,
         paidAmount: validPaidAmount,
         dueAmount,
         checkoutInfo: {
-          checkoutType: 'COD',
-          deliveryName: shippingAddress?.deliveryName || customerDetails.customerName,
-          deliveryPhone: shippingAddress?.deliveryPhone || customerDetails.contactNumber,
-          deliveryAddress: shippingAddress?.deliveryAddress || wsCustData?.businessAddress || wsCustData?.location || '',
-          courier: shippingAddress?.courier || 'Steadfast',
-          orderNote: shippingAddress?.orderNote || notes || '',
-          codPrice: finalAmount
+          checkoutType: resolvedCheckoutType,
+          deliveryName: incomingCheckoutInfo.deliveryName || shippingAddress?.deliveryName || customerDetails.customerName,
+          deliveryPhone: incomingCheckoutInfo.deliveryPhone || shippingAddress?.deliveryPhone || customerDetails.contactNumber,
+          deliveryAddress: incomingCheckoutInfo.deliveryAddress || shippingAddress?.deliveryAddress || wsCustData?.businessAddress || wsCustData?.location || '',
+          courier: incomingCheckoutInfo.courier || shippingAddress?.courier || 'Steadfast',
+          parcelId: incomingCheckoutInfo.parcelId || '',
+          velouriaId: incomingCheckoutInfo.velouriaId || '',
+          orderNote: incomingCheckoutInfo.orderNote || shippingAddress?.orderNote || notes || '',
+          codPrice: incomingCheckoutInfo.codPrice !== undefined && incomingCheckoutInfo.codPrice !== null
+            ? Number(incomingCheckoutInfo.codPrice)
+            : calculatedTotalCOD
         },
         status: status || 'confirmed',
         paymentStatus: orderPaymentStatus,

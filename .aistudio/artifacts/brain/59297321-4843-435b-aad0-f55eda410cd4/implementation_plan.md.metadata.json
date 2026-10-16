@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for dynamic Meta Catalog (Facebook/Instagram Commerce Manager) setup with Meta Graph API direct sync, scheduled XML/CSV data feeds, and a full admin management dashboard.",
-  "updatedAt": "2026-10-15T10:57:42.012438809Z",
+  "summary": "Implementation plan to upgrade the Admin Wholesaler Order Creation form to match the Wholesale Checkout Page, featuring Type 1 COD Direct & Type 2 Parcel checkout modes, live wholesaler profit margin calculators, custom COD prices per unit, and product addition via instant search and POS barcode scanning.",
+  "updatedAt": "2026-10-15T19:04:56.483664719Z",
   "requestFeedback": true,
   "userFacing": true
 }
