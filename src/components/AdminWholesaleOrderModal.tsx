@@ -453,8 +453,9 @@ export function AdminWholesaleOrderModal({
   const isTotalLoss = totalProfit < 0;
 
   const grandTotal = useMemo(() => {
-    return Math.max(0, itemsSubtotal + Number(deliveryCharge || 0) - Number(discount || 0));
-  }, [itemsSubtotal, deliveryCharge, discount]);
+    const effectiveDelivery = checkoutType === 'PARCEL_COURIER' ? 0 : Number(deliveryCharge || 0);
+    return Math.max(0, itemsSubtotal + effectiveDelivery - Number(discount || 0));
+  }, [itemsSubtotal, deliveryCharge, discount, checkoutType]);
 
   const balanceDue = useMemo(() => {
     return Math.max(0, grandTotal - Number(paidAmount || 0));
@@ -512,10 +513,6 @@ export function AdminWholesaleOrderModal({
         setErrorMessage('Type 2 Parcel Booking requires a Velouria ID / Platform Code.');
         return;
       }
-      if (!parcelCustomerName.trim()) {
-        setErrorMessage('Type 2 Parcel Booking requires a Customer Name on Parcel.');
-        return;
-      }
     }
 
     setErrorMessage(null);
@@ -524,7 +521,7 @@ export function AdminWholesaleOrderModal({
     try {
       const activeDeliveryName = checkoutType === 'COD_DIRECT' 
         ? deliveryName.trim() 
-        : parcelCustomerName.trim();
+        : (parcelCustomerName.trim() || selectedCustomer.name || 'Wholesale Customer');
       const activeDeliveryPhone = checkoutType === 'COD_DIRECT' 
         ? deliveryPhone.trim() 
         : (selectedCustomer.phone || '');
@@ -578,7 +575,7 @@ export function AdminWholesaleOrderModal({
         totalWholesaleCost: itemsSubtotal,
         totalCODValue: totalCodValue,
         totalProfit: totalProfit,
-        deliveryCharge: Number(deliveryCharge || 0),
+        deliveryCharge: checkoutType === 'PARCEL_COURIER' ? 0 : Number(deliveryCharge || 0),
         discount: Number(discount || 0),
         paidAmount: Number(paidAmount || 0),
         paymentMethod,
@@ -1188,7 +1185,10 @@ export function AdminWholesaleOrderModal({
                 {/* Type 2 Button */}
                 <button
                   type="button"
-                  onClick={() => setCheckoutType('PARCEL_COURIER')}
+                  onClick={() => {
+                    setCheckoutType('PARCEL_COURIER');
+                    setDeliveryCharge(0);
+                  }}
                   className={`p-3.5 rounded-2xl border-2 text-left transition cursor-pointer relative ${
                     checkoutType === 'PARCEL_COURIER'
                       ? 'bg-purple-50/50 border-purple-600 ring-2 ring-purple-500/20 shadow-2xs'
@@ -1321,13 +1321,13 @@ export function AdminWholesaleOrderModal({
                     </div>
                     <div>
                       <label className="block text-slate-700 font-bold mb-1">
-                        Customer Name on Parcel <span className="text-rose-500">*</span>
+                        Customer Name on Parcel <span className="text-slate-400 font-normal">(optional)</span>
                       </label>
                       <input
                         type="text"
                         value={parcelCustomerName}
                         onChange={(e) => setParcelCustomerName(e.target.value)}
-                        placeholder="e.g. Farhana Yasmin"
+                        placeholder="e.g. Farhana Yasmin (optional)"
                         className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-300 font-medium text-slate-900 outline-none focus:bg-white focus:border-purple-600"
                       />
                     </div>
@@ -1385,17 +1385,30 @@ export function AdminWholesaleOrderModal({
 
               {/* Delivery, Discount, & Grand Total Calculation */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3 text-xs">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-slate-600 font-bold block mb-1">Delivery Charge (৳)</label>
-                    <input
-                      type="number"
-                      value={deliveryCharge}
-                      min="0"
-                      onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 outline-none focus:bg-white focus:border-[#E91E8C]"
-                    />
+                {checkoutType === 'COD_DIRECT' ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-600 font-bold block mb-1">Delivery Charge (৳)</label>
+                      <input
+                        type="number"
+                        value={deliveryCharge}
+                        min="0"
+                        onChange={(e) => setDeliveryCharge(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 outline-none focus:bg-white focus:border-[#E91E8C]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-600 font-bold block mb-1">Adjustment / Discount (৳)</label>
+                      <input
+                        type="number"
+                        value={discount}
+                        min="0"
+                        onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 outline-none focus:bg-white focus:border-[#E91E8C]"
+                      />
+                    </div>
                   </div>
+                ) : (
                   <div>
                     <label className="text-slate-600 font-bold block mb-1">Adjustment / Discount (৳)</label>
                     <input
@@ -1403,10 +1416,11 @@ export function AdminWholesaleOrderModal({
                       value={discount}
                       min="0"
                       onChange={(e) => setDiscount(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 outline-none focus:bg-white focus:border-[#E91E8C]"
+                      placeholder="e.g. 0"
+                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 outline-none focus:bg-white focus:border-purple-600"
                     />
                   </div>
-                </div>
+                )}
 
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                   <span className="font-extrabold text-slate-800 text-sm">Wholesale Grand Total:</span>

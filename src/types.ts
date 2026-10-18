@@ -326,6 +326,7 @@ export interface WholesaleOrder {
   totalCODValue: number;
   totalProfit: number;
   deliveryCharge: number;
+  discount?: number;
   finalAmount: number;
   paidAmount: number;
   dueAmount: number;
@@ -341,6 +342,7 @@ export interface WholesaleOrder {
   cancelledBy?: string;
   idempotencyKey?: string;
   orderSource?: 'wholesale_portal' | 'wholesale_web' | 'POS' | string;
+  createdBy?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
