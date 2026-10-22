@@ -36,6 +36,7 @@ export interface CreateWholesaleOrderItemInput {
 
 export interface CreateAdminWholesaleOrderParams {
   customerId: string;
+  orderDate?: string;
   customerName?: string;
   businessName?: string;
   phone?: string;
@@ -137,7 +138,21 @@ export const wholesaleOrderService = {
     // 2. Direct Authenticated Client Transaction (Full Security Rules Compliant)
     const cleanCustomerId = params.customerId.trim();
     const wsCustomerRef = doc(db, 'wholesale_customers', cleanCustomerId);
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    let orderDateIso = nowIso;
+    if (params.orderDate && typeof params.orderDate === 'string' && params.orderDate.trim()) {
+      try {
+        const timeStr = now.toTimeString().split(' ')[0] || '12:00:00';
+        const parsed = new Date(`${params.orderDate.trim()}T${timeStr}`);
+        if (!isNaN(parsed.getTime())) {
+          orderDateIso = parsed.toISOString();
+        }
+      } catch {
+        orderDateIso = nowIso;
+      }
+    }
+    const orderDateStr = params.orderDate?.trim() || nowIso.split('T')[0];
     const orderNumber = `WSO-${Date.now().toString().slice(-6)}`;
     const orderId = `ws-ord-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
@@ -292,7 +307,8 @@ export const wholesaleOrderService = {
         orderSource: 'admin_dashboard',
         createdBy: String(params.createdBy || 'Super Admin'),
         notes: params.notes ? String(params.notes).trim() : '',
-        createdAt: nowIso,
+        orderDate: orderDateStr,
+        createdAt: orderDateIso,
         updatedAt: nowIso
       };
 
@@ -332,9 +348,10 @@ export const wholesaleOrderService = {
           createdBy: String(params.createdBy || 'Super Admin'),
           orderId: orderId,
           orderNumber: orderNumber,
+          paymentDate: orderDateStr,
           previousDue: Number(wsCustData?.totalDue || 0),
           remainingDue: Math.max(0, Number(wsCustData?.totalDue || 0) + dueAmount),
-          createdAt: nowIso
+          createdAt: orderDateIso
         });
       }
 
@@ -370,8 +387,8 @@ export const wholesaleOrderService = {
           customer: customerDetails.customerName,
           userId: cleanCustomerId,
           performedBy: String(params.createdBy || 'Super Admin'),
-          createdAt: nowIso,
-          timestamp: nowIso
+          createdAt: orderDateIso,
+          timestamp: orderDateIso
         });
 
         // Stock movement
@@ -392,8 +409,8 @@ export const wholesaleOrderService = {
           reason: `Super Admin Wholesale Order #${orderNumber}`,
           customer: customerDetails.customerName,
           userId: cleanCustomerId,
-          createdAt: nowIso,
-          timestamp: nowIso
+          createdAt: orderDateIso,
+          timestamp: orderDateIso
         });
       }
 

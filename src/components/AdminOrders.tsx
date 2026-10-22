@@ -1012,6 +1012,9 @@ export const AdminOrders: React.FC = () => {
                   <div className="space-y-2 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono font-black text-rose-600 text-base">#{order.id}</span>
+                      <span className="text-xs text-slate-500 font-mono font-medium">
+                        · {new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
                       <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 font-bold text-xs uppercase rounded-full border border-amber-200">
                         {order.status.toUpperCase()}
                       </span>

@@ -95,6 +95,9 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
           <div className="text-[12px] font-bold text-white mt-1 font-mono">
             #{order.id}
           </div>
+          <div className="text-[11px] text-[#FBEAF0] font-medium font-mono mt-0.5">
+            {new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </div>
         </div>
       </div>
 

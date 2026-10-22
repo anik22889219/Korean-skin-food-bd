@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan to upgrade the Admin Wholesaler Order Creation form to match the Wholesale Checkout Page, featuring Type 1 COD Direct & Type 2 Parcel checkout modes, live wholesaler profit margin calculators, custom COD prices per unit, and product addition via instant search and POS barcode scanning.",
-  "updatedAt": "2026-10-15T19:04:56.483664719Z",
+  "summary": "Comprehensive architectural plan to add custom order date selection to the Admin Wholesale Order Modal, synchronizing the chosen date across Wholesale Order History, Customer Ledger, Order Fulfillment Hub, Business Banking, and Financial Reports.",
+  "updatedAt": "2026-10-20T13:21:56.733233573Z",
   "requestFeedback": true,
   "userFacing": true
 }

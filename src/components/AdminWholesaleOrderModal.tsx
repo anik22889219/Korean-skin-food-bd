@@ -18,6 +18,7 @@ import {
   Minus,
   Trash2,
   Building2,
+  Calendar,
   User,
   Phone,
   MapPin,
@@ -60,6 +61,16 @@ interface AdminWholesaleOrderModalProps {
   onOrderCreated?: (order: WholesaleOrder) => void;
 }
 
+function getTodayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+function getYesterdayDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
 export function AdminWholesaleOrderModal({
   isOpen,
   onClose,
@@ -70,6 +81,7 @@ export function AdminWholesaleOrderModal({
   const [allCustomers, setAllCustomers] = useState<WholesaleCustomer[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<WholesaleCustomer | null>(null);
+  const [orderDate, setOrderDate] = useState<string>(getTodayDate());
 
   // Customer search state
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
@@ -165,6 +177,7 @@ export function AdminWholesaleOrderModal({
     }
 
     // Reset Form
+    setOrderDate(getTodayDate());
     setOrderItems([]);
     setCheckoutType('COD_DIRECT');
     setParcelId('');
@@ -533,6 +546,7 @@ export function AdminWholesaleOrderModal({
 
       const params: CreateAdminWholesaleOrderParams = {
         customerId: selectedCustomer.id,
+        orderDate: orderDate.trim() || undefined,
         customerName: selectedCustomer.name,
         businessName: selectedCustomer.businessName || selectedCustomer.pageName,
         phone: selectedCustomer.phone,
@@ -656,6 +670,12 @@ export function AdminWholesaleOrderModal({
                 <span className="font-extrabold text-slate-900">{createdOrder.customer?.customerName || selectedCustomer?.name}</span>
               </div>
               <div className="flex justify-between items-center text-slate-600">
+                <span>Order Date:</span>
+                <span className="font-mono font-extrabold text-slate-900">
+                  {createdOrder.orderDate || new Date(createdOrder.createdAt).toLocaleDateString('en-GB')}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600">
                 <span>Checkout Mode:</span>
                 <span className="font-extrabold text-[#E91E8C]">
                   {createdOrder.checkoutInfo?.checkoutType === 'PARCEL' ? 'Type 2: Parcel / Courier' : 'Type 1: COD Direct'}
@@ -695,6 +715,7 @@ export function AdminWholesaleOrderModal({
                   setCreatedOrder(null);
                   setOrderItems([]);
                   setPaidAmount(0);
+                  setOrderDate(getTodayDate());
                 }}
                 className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-[#E91E8C] bg-pink-50 hover:bg-pink-100 rounded-xl border border-pink-200 transition cursor-pointer"
               >
@@ -836,6 +857,56 @@ export function AdminWholesaleOrderModal({
                   )}
                 </div>
               )}
+
+              {/* Order Date Selection */}
+              <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Calendar size={16} className="text-[#E91E8C] shrink-0" />
+                  <div>
+                    <label htmlFor="wholesale-order-date" className="text-xs font-bold text-slate-800">
+                      Order Date
+                    </label>
+                    <span className="text-[11px] text-slate-500 ml-2 hidden sm:inline">
+                      Defaults to today. Change to backdate this transaction in ledgers and reports.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="inline-flex items-center rounded-lg bg-slate-200/70 p-0.5 text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setOrderDate(getTodayDate())}
+                      className={`px-2.5 py-1 rounded-md transition cursor-pointer text-[11px] font-bold ${
+                        orderDate === getTodayDate()
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrderDate(getYesterdayDate())}
+                      className={`px-2.5 py-1 rounded-md transition cursor-pointer text-[11px] font-bold ${
+                        orderDate === getYesterdayDate()
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Yesterday
+                    </button>
+                  </div>
+
+                  <input
+                    id="wholesale-order-date"
+                    type="date"
+                    value={orderDate}
+                    onChange={(e) => setOrderDate(e.target.value)}
+                    className="px-3 py-1 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 outline-none focus:border-[#E91E8C] transition"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* STEP 2: Product Entry (Instant Search + POS Barcode Scanner) */}

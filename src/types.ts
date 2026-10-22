@@ -319,6 +319,7 @@ export type WholesaleOrderCheckoutInfo = WholesaleOrderCheckoutInfoCOD | Wholesa
 export interface WholesaleOrder {
   id: string;
   orderNumber: string;
+  orderDate?: string;
   customer: WholesaleOrderCustomer;
   items: WholesaleOrderProduct[];
   totalUnits: number;
@@ -928,6 +929,8 @@ export interface WholesalePayment {
   id: string;
   wholesaleCustomerId: string;
   orderId?: string;
+  orderNumber?: string;
+  paymentDate?: string;
   previousDue?: number;
   remainingDue?: number;
   amount: number;

@@ -381,8 +381,9 @@ export function WholesaleCustomerDetailsPage() {
                       <td className="p-4 font-mono font-bold text-indigo-600 text-sm">
                         {order.orderNumber || order.id.slice(0, 8)}
                       </td>
-                      <td className="p-4 text-xs font-semibold text-slate-600 whitespace-nowrap">
-                        {new Date(order.createdAt).toLocaleDateString()} {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <td className="p-4 text-xs font-semibold text-slate-600 whitespace-nowrap font-mono tabular-nums">
+                        <div>{new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                        <div className="text-[11px] text-slate-400 font-normal">{new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                       </td>
                       <td className="p-4">
                         <div className="font-bold text-slate-900 text-sm">{firstProdName}{moreCount}</div>
