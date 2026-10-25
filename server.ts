@@ -6370,15 +6370,24 @@ app.get("/api/wholesale/orders", verifyStaffOrWholesaleAuth, async (req, res) =>
     }
 
     if (targetUserId) {
-      orders = orders.filter((o) => (o.customer?.userId === targetUserId || o.userId === targetUserId));
+      orders = orders.filter((o) => (
+        o.customer?.userId === targetUserId ||
+        o.customer?.wholesaleCustomerId === targetUserId ||
+        o.userId === targetUserId ||
+        o.customerId === targetUserId
+      ));
     }
 
     if (status) {
       orders = orders.filter((o) => o.status === String(status).trim());
     }
 
-    // Client-side sort by createdAt descending
-    orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    // Client-side sort by commercial orderDate / createdAt descending
+    orders.sort((a, b) => {
+      const timeA = new Date(a.orderDate ? (a.orderDate.includes('T') ? a.orderDate : `${a.orderDate}T12:00:00Z`) : (a.createdAt || 0)).getTime();
+      const timeB = new Date(b.orderDate ? (b.orderDate.includes('T') ? b.orderDate : `${b.orderDate}T12:00:00Z`) : (b.createdAt || 0)).getTime();
+      return timeB - timeA;
+    });
 
     return res.json({
       success: true,
@@ -6408,6 +6417,7 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
 
   const {
     customerId,
+    orderDate,
     customerName,
     businessName,
     phone,
@@ -6434,7 +6444,24 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
   }
 
   try {
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    let orderDateIso = nowIso;
+    if (orderDate && typeof orderDate === 'string' && orderDate.trim()) {
+      try {
+        const timeStr = now.toTimeString().split(' ')[0] || '12:00:00';
+        const parsed = new Date(`${orderDate.trim()}T${timeStr}`);
+        if (!isNaN(parsed.getTime())) {
+          orderDateIso = parsed.toISOString();
+        }
+      } catch {
+        orderDateIso = nowIso;
+      }
+    }
+    const orderDateStr = (orderDate && typeof orderDate === 'string' && orderDate.trim())
+      ? orderDate.trim()
+      : nowIso.split('T')[0];
+
     const wsCustomerRef = doc(db, 'wholesale_customers', cleanCustomerId);
     const wsCustSnap = await getDoc(wsCustomerRef);
     const wsCustData = wsCustSnap.exists() ? wsCustSnap.data() : null;
@@ -6593,7 +6620,8 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
         orderSource: 'admin_dashboard',
         createdBy: String(createdBy || 'Super Admin'),
         notes: notes ? String(notes).trim() : '',
-        createdAt: nowIso,
+        orderDate: orderDateStr,
+        createdAt: orderDateIso,
         updatedAt: nowIso
       };
 
@@ -6634,9 +6662,10 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
           createdBy: String(createdBy || 'Super Admin'),
           orderId: orderId,
           orderNumber: orderNumber,
+          paymentDate: orderDateStr,
           previousDue: Number(wsCustData?.totalDue || 0),
           remainingDue: Math.max(0, Number(wsCustData?.totalDue || 0) + dueAmount),
-          createdAt: nowIso
+          createdAt: orderDateIso
         });
       }
 
@@ -6672,8 +6701,8 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
           customer: customerDetails.customerName,
           userId: cleanCustomerId,
           performedBy: String(createdBy || 'Super Admin'),
-          createdAt: nowIso,
-          timestamp: nowIso
+          createdAt: orderDateIso,
+          timestamp: orderDateIso
         });
 
         // Stock movement
@@ -6694,8 +6723,8 @@ app.post("/api/wholesale/orders/admin-create", verifyFinanceAuth, async (req, re
           reason: `Super Admin Wholesale Order #${orderNumber}`,
           customer: customerDetails.customerName,
           userId: cleanCustomerId,
-          createdAt: nowIso,
-          timestamp: nowIso
+          createdAt: orderDateIso,
+          timestamp: orderDateIso
         });
       }
 

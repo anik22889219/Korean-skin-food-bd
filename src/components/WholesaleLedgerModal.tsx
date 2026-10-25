@@ -249,8 +249,8 @@ export function WholesaleLedgerModal({ wholesaleCustomerId, onClose }: Props) {
                       <tbody className="divide-y divide-slate-100">
                         {payments.map(payment => (
                           <tr key={payment.id} className="hover:bg-slate-50 transition">
-                            <td className="p-4 whitespace-nowrap text-sm text-slate-600 font-medium">
-                              {new Date(payment.createdAt).toLocaleDateString('en-GB', { 
+                            <td className="p-4 whitespace-nowrap text-sm text-slate-600 font-medium font-mono tabular-nums">
+                              {new Date(payment.paymentDate ? (payment.paymentDate.includes('T') ? payment.paymentDate : `${payment.paymentDate}T12:00:00Z`) : payment.createdAt).toLocaleDateString('en-GB', { 
                                 day: '2-digit', month: 'short', year: 'numeric', 
                                 hour: '2-digit', minute: '2-digit' 
                               })}

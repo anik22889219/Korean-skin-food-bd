@@ -48,6 +48,8 @@ import { CreatorLeaderboardPage } from './components/CreatorLeaderboardPage';
 import { BecomeCreatorPage } from './components/BecomeCreatorPage';
 import { AboutUs } from './components/AboutUs';
 import { ContactUs } from './components/ContactUs';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
+import { TermsOfService } from './components/TermsOfService';
 import PosRegister from './components/PosRegister';
 import PosScan from './components/PosScan';
 import { productService } from './services/productService';
@@ -175,6 +177,10 @@ export default function App() {
                   <Route path="creator/apply" element={<BecomeCreatorPage />} />
                   <Route path="about-us" element={<AboutUs />} />
                   <Route path="contact-us" element={<ContactUs />} />
+                  <Route path="privacy-policy" element={<PrivacyPolicy />} />
+                  <Route path="privacy" element={<Navigate to="/privacy-policy" replace />} />
+                  <Route path="terms-of-service" element={<TermsOfService />} />
+                  <Route path="terms" element={<Navigate to="/terms-of-service" replace />} />
                   <Route path="product/:id" element={<ProductDetail />} />
                   <Route path="login" element={<Login />} />
                   <Route path="wholesale/checkout" element={<WholesaleCheckoutPage />} />

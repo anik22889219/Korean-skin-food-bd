@@ -768,15 +768,44 @@ export const wholesaleOrderService = {
     // Direct Firestore fallback
     try {
       const ordersCol = collection(db, 'wholesale_orders');
-      let q = query(ordersCol, orderBy('createdAt', 'desc'));
-      if (userId) {
-        q = query(ordersCol, where('customer.userId', '==', userId), orderBy('createdAt', 'desc'));
+      let snap;
+      try {
+        let q = query(ordersCol, orderBy('createdAt', 'desc'));
+        if (userId) {
+          q = query(ordersCol, where('customer.userId', '==', userId), orderBy('createdAt', 'desc'));
+        }
+        snap = await getDocs(q);
+      } catch (indexErr) {
+        // Fallback without composite index: query without orderBy or query collection and filter
+        if (userId) {
+          try {
+            const qSimple = query(ordersCol, where('customer.userId', '==', userId));
+            snap = await getDocs(qSimple);
+          } catch {
+            const qAll = query(ordersCol);
+            snap = await getDocs(qAll);
+          }
+        } else {
+          const qAll = query(ordersCol);
+          snap = await getDocs(qAll);
+        }
       }
-      const snap = await getDocs(q);
+
       const orders: WholesaleOrder[] = [];
       snap.forEach(docSnap => {
-        orders.push({ id: docSnap.id, ...docSnap.data() } as WholesaleOrder);
+        const raw = { id: docSnap.id, ...docSnap.data() } as WholesaleOrder;
+        if (!userId || raw.customer?.userId === userId || raw.customer?.wholesaleCustomerId === userId || (raw as any).userId === userId) {
+          orders.push(raw);
+        }
       });
+
+      // Sort by commercial order date / createdAt descending
+      orders.sort((a, b) => {
+        const timeA = new Date(a.orderDate ? (a.orderDate.includes('T') ? a.orderDate : `${a.orderDate}T12:00:00Z`) : (a.createdAt || 0)).getTime();
+        const timeB = new Date(b.orderDate ? (b.orderDate.includes('T') ? b.orderDate : `${b.orderDate}T12:00:00Z`) : (b.createdAt || 0)).getTime();
+        return timeB - timeA;
+      });
+
       return orders;
     } catch (firestoreErr) {
       console.error('[WholesaleOrderService] Firestore query error:', firestoreErr);

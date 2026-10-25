@@ -201,6 +201,16 @@ export const Footer: React.FC = () => {
                 </a>
               </li>
               <li>
+                <Link to="/privacy-policy" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
+                  <span className="text-[#E91E8C]">›</span> Privacy Policy
+                </Link>
+              </li>
+              <li>
+                <Link to="/terms-of-service" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
+                  <span className="text-[#E91E8C]">›</span> Terms of Service
+                </Link>
+              </li>
+              <li>
                 <Link to="/profile" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
                   <span className="text-[#E91E8C]">›</span> My Account & Orders
                 </Link>
@@ -289,6 +299,19 @@ export const Footer: React.FC = () => {
             <p className="text-[10px] text-gray-400 mt-0.5">
               100% Original imported Cosmeceuticals straight from Seoul for skin care enthusiasts in Bangladesh.
             </p>
+            <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 font-semibold justify-center md:justify-start">
+              <Link to="/privacy-policy" className="hover:text-[#E91E8C] transition-colors underline underline-offset-2">
+                Privacy Policy
+              </Link>
+              <span className="text-gray-300">•</span>
+              <Link to="/terms-of-service" className="hover:text-[#E91E8C] transition-colors underline underline-offset-2">
+                Terms of Service
+              </Link>
+              <span className="text-gray-300">•</span>
+              <Link to="/contact-us" className="hover:text-[#E91E8C] transition-colors">
+                Support &amp; Returns
+              </Link>
+            </div>
           </div>
 
           <div className="flex flex-wrap justify-center md:justify-end gap-3 text-[10px] text-gray-500 font-bold">

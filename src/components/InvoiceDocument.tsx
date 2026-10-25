@@ -96,7 +96,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
             #{order.id}
           </div>
           <div className="text-[11px] text-[#FBEAF0] font-medium font-mono mt-0.5">
-            {new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+            {new Date(order.orderDate ? (order.orderDate.includes('T') ? order.orderDate : `${order.orderDate}T12:00:00Z`) : order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </div>
         </div>
       </div>
