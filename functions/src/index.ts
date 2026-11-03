@@ -3,10 +3,30 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI as PostHogGoogleGenAI } from "@posthog/ai/gemini";
+import { PostHog } from "posthog-node";
+import { randomUUID } from "crypto";
+import { createPostHogFunctionLogExporter, flushPostHogFunctionLogs } from "./posthogLogs";
 
 // Initialize Firebase Admin
 initializeApp();
 const db = getFirestore();
+
+const posthogKey = process.env.POSTHOG_KEY;
+const posthogHost = process.env.POSTHOG_HOST;
+if ((!posthogKey || !posthogHost) && process.env.NODE_ENV !== "production") {
+  const missingVariable = !posthogKey ? "POSTHOG_KEY" : "POSTHOG_HOST";
+  console.error(`${missingVariable} variable required by PostHog is missing or un-configured, this causes events to be silently missed. This error stops appearing once ${missingVariable} is configured`);
+}
+const posthog = posthogKey && posthogHost
+  ? new PostHog(posthogKey, {
+      host: posthogHost,
+      privacyMode: false,
+      flushAt: 1,
+      flushInterval: 0
+    })
+  : null;
+const posthogLogExporter = createPostHogFunctionLogExporter(posthogKey, posthogHost);
 
 interface CartItem {
   productId: string;
@@ -225,7 +245,10 @@ export const generateProductContent = onCall({
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai: any = posthog
+      ? new PostHogGoogleGenAI({ apiKey, posthog })
+      : new GoogleGenAI({ apiKey });
+    const traceId = randomUUID();
     
     const prompt = `You are an elite Digital Marketer, SEO Specialist, and Copywriter for K-Beauty.
 Analyze the following Korean cosmetic product:
@@ -253,7 +276,12 @@ Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts o
       contents: prompt,
       config: {
         responseMimeType: "application/json"
-      }
+      },
+      ...(posthog ? {
+        posthogTraceId: traceId,
+        ...(request.auth?.uid ? { posthogDistinctId: request.auth.uid } : {}),
+        posthogProperties: { $ai_session_id: `firebase-functions-${process.pid}` }
+      } : {})
     });
 
     const rawText = response.text || "{}";
@@ -274,6 +302,12 @@ Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts o
       }
     });
 
+    posthogLogExporter?.logger.emit({
+      severityText: "INFO",
+      body: "ai_content_generation_completed",
+      attributes: { workflow: "product_content_generation" },
+    });
+
     return {
       success: true,
       runId,
@@ -291,6 +325,15 @@ Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts o
     });
     
     throw new HttpsError("internal", err.message || "Failed to generate AI marketing content.");
+  } finally {
+    await flushPostHogFunctionLogs(posthogLogExporter);
+    if (posthog) {
+      try {
+        await posthog.flush();
+      } catch (flushError) {
+        console.warn("PostHog flush failed after product content generation:", flushError);
+      }
+    }
   }
 });
 
@@ -366,7 +409,10 @@ export const pricingSuggestion = onSchedule({
     }));
 
     // Call Gemini to get suggestions
-    const ai = new GoogleGenAI({ apiKey });
+    const ai: any = posthog
+      ? new PostHogGoogleGenAI({ apiKey, posthog })
+      : new GoogleGenAI({ apiKey });
+    const traceId = randomUUID();
     const prompt = `You are a professional retail and e-commerce pricing optimization engine for Korean skin food products.
 The following products had exactly zero sales in the last 30 days:
 ${JSON.stringify(listForAi, null, 2)}
@@ -388,7 +434,11 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
       contents: prompt,
       config: {
         responseMimeType: "application/json"
-      }
+      },
+      ...(posthog ? {
+        posthogTraceId: traceId,
+        posthogProperties: { $ai_session_id: `firebase-functions-${process.pid}` }
+      } : {})
     });
 
     const cleanJson = (response.text || "[]").replace(/```json/g, "").replace(/```/g, "").trim();
@@ -406,6 +456,11 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
       }
     });
 
+    posthogLogExporter?.logger.emit({
+      severityText: "INFO",
+      body: "pricing_suggestions_completed",
+      attributes: { suggestion_count: suggestions.length, zero_sales_product_count: zeroSalesProducts.length },
+    });
     console.log(`[Pricing Optimizer] Scheduled execution complete. logged run ID: ${runId}`);
   } catch (err: any) {
     console.error("Pricing Optimizer schedule failure:", err);
@@ -417,6 +472,15 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
       summary: `Failed pricing analysis: ${err.message}`,
       output: { error: err.stack || err.message }
     });
+  } finally {
+    await flushPostHogFunctionLogs(posthogLogExporter);
+    if (posthog) {
+      try {
+        await posthog.flush();
+      } catch (flushError) {
+        console.warn("PostHog flush failed after pricing suggestion:", flushError);
+      }
+    }
   }
 });
 

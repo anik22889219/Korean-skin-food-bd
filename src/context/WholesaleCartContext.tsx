@@ -12,6 +12,7 @@ import { isValidPhoneNumber } from '../services/wholesaleService';
 import { wholesaleOrderService } from '../services/wholesaleOrderService';
 import { auth } from '../services/firebase';
 import { useAuth } from './AuthContext';
+import posthog, { isPostHogConfigured } from '../lib/posthog';
 
 interface WholesaleCartContextType {
   cart: WholesaleCartItem[];
@@ -129,6 +130,14 @@ export const WholesaleCartProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addToWholesaleCart = (product: Product, quantity: number = 1) => {
     const validQty = Math.max(1, Number(quantity) || 1);
+    if (isPostHogConfigured) {
+      posthog.capture('wholesale_cart_item_added', {
+        product_id: product.id,
+        product_category: product.category,
+        quantity: validQty,
+        unit_price: getWholesalePrice(product, validQty),
+      });
+    }
     setCart((prev) => {
       const existingIdx = prev.findIndex((item) => item.product.id === product.id);
       if (existingIdx !== -1) {
@@ -376,6 +385,15 @@ export const WholesaleCartProvider: React.FC<{ children: React.ReactNode }> = ({
       const createdOrder = await wholesaleOrderService.createWholesaleOrder(fullOrderPayload);
 
       console.log('[WholesaleCart] Wholesale order successfully persisted to database:', createdOrder);
+      if (isPostHogConfigured) {
+        posthog.capture('wholesale_order_placed', {
+          checkout_type: isCod ? 'cod_direct' : 'parcel_courier',
+          item_count: cart.length,
+          total_quantity: totalUnits,
+          wholesale_subtotal: wholesaleSubtotal,
+          total_cod_value: totalCodValue,
+        });
+      }
       setSubmittedOrderSummary(createdOrder);
       setSubmitSuccess(true);
       clearWholesaleCart();
