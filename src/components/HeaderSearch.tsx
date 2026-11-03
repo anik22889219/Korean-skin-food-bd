@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { analytics } from '../services/analyticsService';
 import { getRetailPrice, getRetailOriginalPrice, hasRetailDiscount } from '../utils/pricing';
+import posthog, { isPostHogConfigured } from '../lib/posthog';
 
 interface HeaderSearchProps {
   products: Product[];
@@ -55,6 +56,14 @@ export const HeaderSearch: React.FC<HeaderSearchProps> = ({
   const handleSelectProduct = (product: Product) => {
     if (searchTerm.trim()) {
       analytics.trackSearch(searchTerm.trim());
+      if (isPostHogConfigured) {
+        posthog.capture('product_search_result_selected', {
+          product_id: product.id,
+          product_category: product.category,
+          product_brand: product.brand,
+          result_count: matchingProducts.length,
+        });
+      }
     }
     setIsOpen(false);
     setSearchTerm('');

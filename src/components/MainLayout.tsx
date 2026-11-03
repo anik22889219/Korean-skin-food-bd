@@ -23,6 +23,7 @@ import { Product } from '../types';
 import { GlobalThemeSettings } from '../types/theme';
 import { analytics } from '../services/analyticsService';
 import { getProductUnitPrice } from '../utils/pricing';
+import posthog, { isPostHogConfigured } from '../lib/posthog';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -1025,7 +1026,15 @@ export const MainLayout: React.FC = () => {
                   </div>
                   <button 
                     onClick={() => {
-                      analytics.trackBeginCheckout(cart, calculateCartSubtotal());
+                      const subtotal = calculateCartSubtotal();
+                      analytics.trackBeginCheckout(cart, subtotal);
+                      if (isPostHogConfigured) {
+                        posthog.capture('retail_checkout_started', {
+                          item_count: cart.length,
+                          total_quantity: cart.reduce((total, item) => total + item.quantity, 0),
+                          subtotal,
+                        });
+                      }
                       setCheckoutStep('details');
                     }}
                     className="w-full py-3 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-sm flex items-center justify-center gap-1.5"

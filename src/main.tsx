@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import './lib/posthog';
 import './index.css';
 
 // Register Service Worker for offline POS and PWA support

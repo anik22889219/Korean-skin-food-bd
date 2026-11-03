@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   User, 
   GoogleAuthProvider, 
@@ -9,6 +9,7 @@ import {
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../services/firebase';
 import { UserProfile, CreatorProfile, CreatorStatus } from '../types';
+import posthog, { isPostHogConfigured } from '../lib/posthog';
 
 interface AuthContextType {
   user: User | null;
@@ -31,6 +32,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [creatorProfile, setCreatorProfile] = useState<CreatorProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const identifiedUserId = useRef<string | null>(null);
+
+  const identifyPostHogUser = (currentUser: User) => {
+    if (!isPostHogConfigured || identifiedUserId.current === currentUser.uid) return;
+
+    if (identifiedUserId.current) {
+      posthog.reset();
+    }
+
+    posthog.identify(currentUser.uid, {
+      ...(currentUser.email ? { email: currentUser.email } : {}),
+      ...(currentUser.displayName ? { name: currentUser.displayName } : {}),
+    });
+    identifiedUserId.current = currentUser.uid;
+  };
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
@@ -49,6 +65,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       try {
         if (currentUser) {
+          identifyPostHogUser(currentUser);
+
           setUser(currentUser);
           
           const userDocRef = doc(db, 'users', currentUser.uid);
@@ -104,6 +122,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
 
         } else {
+          if (isPostHogConfigured && identifiedUserId.current) {
+            posthog.reset();
+          }
+          identifiedUserId.current = null;
           setUser(null);
           setProfile(null);
           setCreatorProfile(null);
@@ -126,7 +148,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      if (isPostHogConfigured) {
+        identifyPostHogUser(result.user);
+        posthog.capture('google_sign_in_completed');
+        posthog.logger.info('google_sign_in_completed', { auth_provider: 'google' });
+      }
     } catch (error) {
       console.error('[AuthContext] Google sign-in error:', error);
       throw error;
