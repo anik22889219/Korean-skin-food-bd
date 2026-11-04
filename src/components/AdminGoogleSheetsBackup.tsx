@@ -4,6 +4,8 @@ import {
   Database, ShieldAlert, Terminal, ExternalLink, Settings, Check, Copy, Layers, ArrowUpRight, Save, Link2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { db } from '../services/firebase';
+import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface CollectionStatus {
   name: string;
