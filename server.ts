@@ -13,6 +13,7 @@ import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
 import { createPostHogLogExporter } from "./src/services/posthogServerLogs";
 import backupRouter from "./backupApi";
+import backupRouter from "./backupApi";
 
 dotenv.config();
 
@@ -177,6 +178,9 @@ try {
 } catch (error) {
   console.error("Failed to initialize Firebase on Server:", error);
 }
+
+// Secure Google Sheets backup export API (Firebase Admin SDK / ADC)
+app.use("/api/backup", backupRouter);
 
 // Secure Google Sheets backup export API (Firebase Admin SDK / ADC)
 app.use("/api/backup", backupRouter);
