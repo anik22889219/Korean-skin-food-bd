@@ -97,8 +97,8 @@ router.get("/export", async (req, res) => {
     const records = snapshot.docs
       .filter(doc => mode === "full" || (doc.updateTime && doc.updateTime.toDate() > since!))
       .map(doc => ({
-        id: doc.id,
         ...cleanForExport(doc.data()),
+        id: doc.id,
         _backupUpdatedAt: doc.updateTime?.toDate().toISOString() || null
       }));
 
