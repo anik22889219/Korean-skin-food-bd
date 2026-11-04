@@ -46,8 +46,6 @@ export interface Product {
   benefits?: string[];
   routineStep?: string;
   keyIngredients?: string[];
-  createdAt?: string;
-  updatedAt?: string;
 }
 
 export type TaxonomyDimensionType =
@@ -269,7 +267,7 @@ export interface WholesaleCheckoutFormState {
   parcelForm: WholesaleParcelFormData;
 }
 
-export type WholesaleOrderStatus = 'pending' | 'confirmed' | 'processing' | 'ready' | 'shipped' | 'delivered' | 'cancelled';
+export type WholesaleOrderStatus = 'pending' | 'confirmed' | 'processing' | 'ready' | 'delivered' | 'cancelled';
 export type WholesaleOrderPaymentStatus = 'unpaid' | 'partial' | 'paid';
 
 export interface WholesaleOrderCustomer {
@@ -319,7 +317,6 @@ export type WholesaleOrderCheckoutInfo = WholesaleOrderCheckoutInfoCOD | Wholesa
 export interface WholesaleOrder {
   id: string;
   orderNumber: string;
-  orderDate?: string;
   customer: WholesaleOrderCustomer;
   items: WholesaleOrderProduct[];
   totalUnits: number;
@@ -327,7 +324,6 @@ export interface WholesaleOrder {
   totalCODValue: number;
   totalProfit: number;
   deliveryCharge: number;
-  discount?: number;
   finalAmount: number;
   paidAmount: number;
   dueAmount: number;
@@ -343,7 +339,6 @@ export interface WholesaleOrder {
   cancelledBy?: string;
   idempotencyKey?: string;
   orderSource?: 'wholesale_portal' | 'wholesale_web' | 'POS' | string;
-  createdBy?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -351,8 +346,6 @@ export interface WholesaleOrder {
 
 export interface Order {
   id: string;
-  orderNumber?: string;
-  orderDate?: string;
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
@@ -404,52 +397,6 @@ export interface Order {
     purchaseTrackedAt?: string;
   };
 }
-
-export interface WholesaleOrderBatchItem {
-  productId: string;
-  productName: string;
-  totalQuantity: number;
-  barcode?: string;
-  unitPrice?: number;
-  totalValue: number;
-  image?: string;
-}
-
-export interface WholesaleOrderBatch {
-  id: string;
-  groupBy: 'customer' | 'date';
-  groupKey: string;
-  groupTitle: string;
-  customerDetails?: {
-    customerName: string;
-    customerPhone: string;
-    customerEmail?: string;
-    businessAddress?: string;
-    customer_uid?: string;
-  };
-  date?: string;
-  orderIds: string[];
-  orders: Order[];
-  totalOrders: number;
-  totalUnits: number;
-  totalAmount: number;
-  totalPaid: number;
-  totalDue: number;
-  consolidatedItems: WholesaleOrderBatchItem[];
-  statusSummary: {
-    pending: number;
-    packing: number;
-    processing: number;
-    shipped: number;
-    delivered: number;
-    cancelled: number;
-  };
-  isFullyDispatched: boolean;
-  courierConsignments: string[];
-  notes?: string;
-  createdAt: string;
-}
-
 
 export interface StockMovement {
   id: string;
@@ -977,8 +924,6 @@ export interface WholesalePayment {
   id: string;
   wholesaleCustomerId: string;
   orderId?: string;
-  orderNumber?: string;
-  paymentDate?: string;
   previousDue?: number;
   remainingDue?: number;
   amount: number;

@@ -16,18 +16,18 @@ service cloud.firestore {
     }
 
     function isEmailVerified() {
-      return isSignedIn() && request.auth.token != null && (request.auth.token.email_verified == true || request.auth.token.email in ['koreanskinfood.bd@gmail.com', 'admin@koreanskinfood.bd']);
+      return isSignedIn() && request.auth.token != null && request.auth.token.email_verified == true;
     }
 
     function isSuperAdminEmail() {
-      return isSignedIn() && request.auth.token != null && request.auth.token.email in ['koreanskinfood.bd@gmail.com', 'admin@koreanskinfood.bd'];
+      return isEmailVerified() && request.auth.token.email in ['koreanskinfood.bd@gmail.com', 'admin@koreanskinfood.bd'];
     }
 
     // Helper to check if user has a verified staff role (super_admin, admin, inventory_manager, hr, customer_support)
     function isStaff() {
       return isSignedIn() && (
         isSuperAdminEmail() ||
-        (request.auth.token.email in ['inventory@koreanskinfood.bd']) ||
+        (isEmailVerified() && request.auth.token.email in ['inventory@koreanskinfood.bd']) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in [
            'admin', 'inventory_manager', 'super_admin', 'hr', 'customer_support'
@@ -176,11 +176,7 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if true;
-      allow update: if isStaff() || (
-        isSignedIn() && 
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'updated_at', 'updatedAt'])
-      );
-      allow create, delete: if isStaff();
+      allow write: if isStaff();
     }
 
     match /taxonomies/{taxonomyId} {
@@ -247,14 +243,10 @@ service cloud.firestore {
     // ==========================================
 
     match /inventory_logs/{logId} {
-      allow read: if isStaff() || (isSignedIn() && resource != null && resource.data.userId == request.auth.uid);
-      allow create: if isStaff() || (isSignedIn() && request.resource.data.userId == request.auth.uid);
-      allow update, delete: if isStaff();
+      allow read, write: if isStaff();
     }
     match /stock_movements/{movementId} {
-      allow read: if isStaff() || (isSignedIn() && resource != null && resource.data.userId == request.auth.uid);
-      allow create: if isStaff() || (isSignedIn() && request.resource.data.userId == request.auth.uid);
-      allow update, delete: if isStaff();
+      allow read, write: if isStaff();
     }
     match /stock_receipts/{receiptId} {
       allow read, write: if isStaff();
@@ -333,25 +325,17 @@ service cloud.firestore {
           (resource != null && (resource.data.userId == request.auth.uid || resource.data.id == request.auth.uid))
         )
       );
-      allow write: if isStaff() || (
-        isSignedIn() && (
-          request.auth.uid == customerId || 
-          (resource != null && (resource.data.userId == request.auth.uid || resource.data.id == request.auth.uid)) ||
-          (request.resource != null && (request.resource.data.userId == request.auth.uid || request.resource.data.id == request.auth.uid))
-        )
-      );
+      allow write: if isStaff();
     }
 
     match /wholesale_payments/{paymentId} {
-      allow read: if isStaff() || isAdminOrSuperAdmin() || (
-        isSignedIn() && (
-          resource == null ||
+      allow read: if isAdminOrSuperAdmin() || (
+        isSignedIn() && resource != null && (
           resource.data.wholesaleCustomerId == request.auth.uid || 
-          resource.data.userId == request.auth.uid ||
-          (resource.data.customer != null && resource.data.customer.userId == request.auth.uid)
+          resource.data.userId == request.auth.uid
         )
       );
-      allow write: if isStaff() || isAdminOrSuperAdmin();
+      allow write: if isAdminOrSuperAdmin();
     }
 
     match /wholesale_orders/{orderId} {
@@ -360,16 +344,10 @@ service cloud.firestore {
           resource == null || 
           resource.data.userId == request.auth.uid || 
           resource.data.customerId == request.auth.uid ||
-          (resource.data.customer != null && resource.data.customer.userId == request.auth.uid) ||
           resource.data.wholesaleCustomerId == request.auth.uid
         )
       );
-      allow create: if isStaff() || (
-        isSignedIn() && (
-          request.resource.data.userId == request.auth.uid ||
-          (request.resource.data.customer != null && request.resource.data.customer.userId == request.auth.uid)
-        )
-      );
+      allow create: if isStaff() || (isSignedIn() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isStaff();
     }
 

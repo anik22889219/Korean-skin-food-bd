@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Package,
   CheckCircle,
-  CheckCircle2,
   XCircle,
   AlertTriangle,
   QrCode,
@@ -37,20 +36,15 @@ import {
   Send,
   Loader2,
   Ban,
-  X,
-  Boxes,
-  ChevronDown,
-  ChevronUp
+  X
 } from 'lucide-react';
-import { Order, OrderItem, Product, StockMovement, WholesaleOrderBatch, OrderStatus } from '../types';
+import { Order, OrderItem, Product, StockMovement } from '../types';
 import { posService } from '../services/posService';
 import { productService } from '../services/productService';
 import { useProducts } from '../hooks/queries/products';
 import InvoiceDocument from './InvoiceDocument';
 import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 import { createSteadfastConsignment } from '../services/steadfastService';
-import { batchWholesaleOrders, dispatchBatchOrders, formatBatchDate } from '../utils/wholesaleBatching';
-import { BatchDispatchManifestModal } from './BatchDispatchManifestModal';
 import { 
   findProductByScannedCode, 
   scanBarcodeFromImageFile, 
@@ -79,7 +73,7 @@ function playScanBeep() {
 }
 
 export const AdminOrders: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'movements' | 'batch-dispatch'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'all' | 'movements'>('pending');
   const [orders, setOrders] = useState<Order[]>([]);
   const { data: products = [] } = useProducts();
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -88,19 +82,6 @@ export const AdminOrders: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<'ALL' | 'WEBSITE' | 'POS' | 'WHOLESALE'>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-
-  // Wholesale Batch Dispatch State
-  const [batchGroupBy, setBatchGroupBy] = useState<'customer' | 'date'>('customer');
-  const [batchSearchQuery, setBatchSearchQuery] = useState('');
-  const [batchStatusFilter, setBatchStatusFilter] = useState<'ALL' | 'NEEDS_DISPATCH' | 'DISPATCHED' | 'DELIVERED'>('ALL');
-  const [selectedBatchForManifest, setSelectedBatchForManifest] = useState<WholesaleOrderBatch | null>(null);
-  const [selectedBatchForDispatch, setSelectedBatchForDispatch] = useState<WholesaleOrderBatch | null>(null);
-  const [expandedBatchIds, setExpandedBatchIds] = useState<string[]>([]);
-  const [isBatchDispatching, setIsBatchDispatching] = useState<boolean>(false);
-  const [batchCourierProvider, setBatchCourierProvider] = useState<string>('steadfast');
-  const [batchTrackingInput, setBatchTrackingInput] = useState<string>('');
-  const [batchTargetStatus, setBatchTargetStatus] = useState<OrderStatus>('shipped');
-  const [batchDispatchNotes, setBatchDispatchNotes] = useState<string>('');
 
   // Active Fulfillment Order state
   const [activeFulfillmentOrder, setActiveFulfillmentOrder] = useState<Order | null>(null);
@@ -481,91 +462,6 @@ export const AdminOrders: React.FC = () => {
     return matchesSearch && matchesSource && matchesStatus;
   });
 
-  // Wholesale Batch Dispatch Computations
-  const wholesaleBatches = useMemo(() => {
-    return batchWholesaleOrders(orders, batchGroupBy, {
-      searchQuery: batchSearchQuery,
-      statusFilter: batchStatusFilter
-    });
-  }, [orders, batchGroupBy, batchSearchQuery, batchStatusFilter]);
-
-  const pendingWholesaleCount = useMemo(() => {
-    return orders.filter(o =>
-      o.order_source === 'WHOLESALE' &&
-      o.status !== 'cancelled' &&
-      o.status !== 'delivered' &&
-      o.status !== 'shipped' &&
-      !o.courier
-    ).length;
-  }, [orders]);
-
-  const wholesaleBatchStats = useMemo(() => {
-    const wsOrders = orders.filter(o => o.order_source === 'WHOLESALE' && o.status !== 'cancelled');
-    const totalOrders = wsOrders.length;
-    const totalUnits = wsOrders.reduce((sum, o) => sum + (o.items || []).reduce((isum, it) => isum + (it.quantity || 1), 0), 0);
-    const totalDue = wsOrders.reduce((sum, o) => sum + (o.dueAmount || 0), 0);
-    const totalAmount = wsOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-    return {
-      totalBatches: wholesaleBatches.length,
-      totalOrders,
-      totalUnits,
-      totalDue,
-      totalAmount,
-      pendingDispatch: pendingWholesaleCount
-    };
-  }, [orders, wholesaleBatches, pendingWholesaleCount]);
-
-  const toggleBatchAccordion = (batchId: string) => {
-    setExpandedBatchIds(prev =>
-      prev.includes(batchId) ? prev.filter(id => id !== batchId) : [...prev, batchId]
-    );
-  };
-
-  const handleOpenDispatchModal = (batch: WholesaleOrderBatch) => {
-    setSelectedBatchForDispatch(batch);
-    setBatchCourierProvider('steadfast');
-    setBatchTargetStatus('shipped');
-    setBatchDispatchNotes('');
-    const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const cleanKey = batch.groupKey.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase();
-    setBatchTrackingInput(`BATCH-${cleanKey || 'WS'}-${dateTag}`);
-  };
-
-  const handleExecuteBatchDispatch = async () => {
-    if (!selectedBatchForDispatch) return;
-    setIsBatchDispatching(true);
-    try {
-      const res = await dispatchBatchOrders(selectedBatchForDispatch, {
-        courierProvider: batchCourierProvider,
-        trackingCode: batchTrackingInput,
-        targetStatus: batchTargetStatus,
-        notes: batchDispatchNotes,
-        dispatchedBy: 'Admin Staff'
-      });
-
-      if (res.success) {
-        setOrders([...posService.getOrders()]);
-        setActionFeedback({
-          type: 'success',
-          text: res.message
-        });
-        setSelectedBatchForDispatch(null);
-      } else {
-        setActionFeedback({
-          type: 'error',
-          text: res.message || 'Failed to dispatch batch orders.'
-        });
-      }
-    } catch (err: any) {
-      setActionFeedback({
-        type: 'error',
-        text: err?.message || 'Error processing batch dispatch.'
-      });
-    } finally {
-      setIsBatchDispatching(false);
-    }
-  };
-
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       {/* Top Header */}
@@ -609,23 +505,6 @@ export const AdminOrders: React.FC = () => {
           >
             <Layers className="w-4 h-4" />
             All Orders ({orders.length})
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('batch-dispatch'); setActiveFulfillmentOrder(null); }}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
-              activeTab === 'batch-dispatch'
-                ? 'bg-purple-700 text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-            }`}
-          >
-            <Boxes className="w-4 h-4" />
-            Wholesale Batch Dispatch
-            {pendingWholesaleCount > 0 && (
-              <span className="ml-1.5 px-2 py-0.5 text-xs font-bold bg-amber-400 text-purple-950 rounded-full shadow-2xs">
-                {pendingWholesaleCount}
-              </span>
-            )}
           </button>
 
           <button
@@ -1133,9 +1012,6 @@ export const AdminOrders: React.FC = () => {
                   <div className="space-y-2 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono font-black text-rose-600 text-base">#{order.id}</span>
-                      <span className="text-xs text-slate-500 font-mono font-medium">
-                        · {new Date(order.orderDate ? (order.orderDate.includes('T') ? order.orderDate : `${order.orderDate}T12:00:00Z`) : order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </span>
                       <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 font-bold text-xs uppercase rounded-full border border-amber-200">
                         {order.status.toUpperCase()}
                       </span>
@@ -1319,7 +1195,7 @@ export const AdminOrders: React.FC = () => {
                       <div className="font-bold text-slate-900 text-sm">{order.customerName}</div>
                       <div className="text-xs text-slate-500 font-medium">{order.customerPhone}</div>
                       <div className="text-[10px] text-slate-400 font-medium pt-0.5">
-                        {new Date(order.orderDate ? (order.orderDate.includes('T') ? order.orderDate : `${order.orderDate}T12:00:00Z`) : order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        {new Date(order.createdAt).toLocaleString()}
                       </div>
                     </div>
 
@@ -1500,402 +1376,6 @@ export const AdminOrders: React.FC = () => {
               ))
             )}
           </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 4: WHOLESALE BATCH DISPATCH & CONSOLIDATED PICKING */}
-      {/* ========================================================================= */}
-      {activeTab === 'batch-dispatch' && !activeFulfillmentOrder && (
-        <div className="space-y-6">
-          {/* Header & Grouping Selector */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h2 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
-                <Boxes className="w-5 h-5 text-purple-700" />
-                Wholesale Batch Dispatch & Consolidated Picking
-              </h2>
-              <p className="text-slate-500 text-xs mt-0.5">
-                Group wholesale orders by customer or commercial date for single-click courier tracking assignment, picking lists, and printable dispatch manifests.
-              </p>
-            </div>
-
-            {/* Group By Toggle */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
-              <button
-                onClick={() => setBatchGroupBy('customer')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  batchGroupBy === 'customer'
-                    ? 'bg-purple-700 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <User className="w-3.5 h-3.5" />
-                By Wholesale Partner
-              </button>
-              <button
-                onClick={() => setBatchGroupBy('date')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  batchGroupBy === 'date'
-                    ? 'bg-purple-700 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                By Order Date
-              </button>
-            </div>
-          </div>
-
-          {/* KPI Summary Row */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Batches</div>
-              <div className="text-2xl font-black text-slate-900 font-mono tabular-nums mt-1">
-                {wholesaleBatchStats.totalBatches}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">
-                Grouped {batchGroupBy === 'customer' ? 'by partner' : 'by date'}
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="text-[11px] font-bold text-amber-600 uppercase tracking-wider">Needs Dispatch</div>
-              <div className="text-2xl font-black text-amber-600 font-mono tabular-nums mt-1">
-                {wholesaleBatchStats.pendingDispatch}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Orders awaiting courier</div>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="text-[11px] font-bold text-purple-600 uppercase tracking-wider">Total Units</div>
-              <div className="text-2xl font-black text-purple-900 font-mono tabular-nums mt-1">
-                {wholesaleBatchStats.totalUnits}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Consolidated wholesale stock</div>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Batch Value</div>
-              <div className="text-2xl font-black text-slate-900 font-mono tabular-nums mt-1">
-                ৳{wholesaleBatchStats.totalAmount.toLocaleString()}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">{wholesaleBatchStats.totalOrders} active orders</div>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs col-span-2 lg:col-span-1">
-              <div className="text-[11px] font-bold text-rose-600 uppercase tracking-wider">COD / Due to Collect</div>
-              <div className="text-2xl font-black text-rose-600 font-mono tabular-nums mt-1">
-                ৳{wholesaleBatchStats.totalDue.toLocaleString()}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">Outstanding collection</div>
-            </div>
-          </div>
-
-          {/* Search & Filter Bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="relative w-full md:w-96">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-              <input
-                type="text"
-                placeholder={batchGroupBy === 'customer' ? "Search customer name, phone, order #, SKU..." : "Search date, order #, customer, SKU..."}
-                value={batchSearchQuery}
-                onChange={(e) => setBatchSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:border-purple-600 font-medium"
-              />
-            </div>
-
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-                <Filter className="w-3.5 h-3.5" />
-                Dispatch Status:
-                <select
-                  value={batchStatusFilter}
-                  onChange={(e: any) => setBatchStatusFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-hidden"
-                >
-                  <option value="ALL">All Batches</option>
-                  <option value="NEEDS_DISPATCH">Needs Dispatch (Pending / Packing)</option>
-                  <option value="DISPATCHED">Dispatched / In Transit</option>
-                  <option value="DELIVERED">Fully Delivered</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Batches Cards List */}
-          {wholesaleBatches.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 space-y-3">
-              <Boxes className="w-12 h-12 text-slate-300 mx-auto" />
-              <h3 className="text-base font-bold text-slate-800">No Wholesale Order Batches Found</h3>
-              <p className="text-slate-500 text-xs max-w-md mx-auto">
-                No wholesale orders match your current filter criteria. You can clear filters or switch grouping modes.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {wholesaleBatches.map((batch) => {
-                const isExpanded = expandedBatchIds.includes(batch.id);
-                const hasPendingOrders = batch.statusSummary.pending > 0 || batch.statusSummary.packing > 0;
-                
-                return (
-                  <div
-                    key={batch.id}
-                    className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:border-purple-300 transition-all overflow-hidden"
-                  >
-                    {/* Card Top Section */}
-                    <div className="p-5 space-y-4">
-                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                        <div className="space-y-1.5 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-xs font-bold px-2.5 py-0.5 bg-purple-50 text-purple-800 border border-purple-200 rounded-md">
-                              {batch.id}
-                            </span>
-                            <span className="font-bold text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md">
-                              {batch.totalOrders} {batch.totalOrders === 1 ? 'Order' : 'Orders'}
-                            </span>
-                            <span className="font-bold text-xs px-2 py-0.5 bg-purple-100 text-purple-800 rounded-md">
-                              {batch.totalUnits} Units
-                            </span>
-
-                            {batch.isFullyDispatched ? (
-                              <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs uppercase rounded-md flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Fully Dispatched
-                              </span>
-                            ) : hasPendingOrders ? (
-                              <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs uppercase rounded-md flex items-center gap-1">
-                                <Truck className="w-3 h-3 text-amber-600" /> Needs Dispatch ({batch.statusSummary.pending + batch.statusSummary.packing})
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-0.5 bg-blue-100 text-blue-800 border border-blue-200 font-bold text-xs uppercase rounded-md flex items-center gap-1">
-                                <Truck className="w-3 h-3 text-blue-600" /> Partially Dispatched
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {batch.groupBy === 'customer' ? (
-                              <User className="w-4 h-4 text-purple-600 shrink-0" />
-                            ) : (
-                              <Calendar className="w-4 h-4 text-purple-600 shrink-0" />
-                            )}
-                            <h3 className="text-base font-extrabold text-slate-900">
-                              {batch.groupTitle}
-                            </h3>
-                          </div>
-
-                          {batch.groupBy === 'customer' && batch.customerDetails && (
-                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                              {batch.customerDetails.customerPhone && (
-                                <span className="flex items-center gap-1 font-mono">
-                                  <Phone className="w-3 h-3 text-slate-400" /> {batch.customerDetails.customerPhone}
-                                </span>
-                              )}
-                              {batch.customerDetails.businessAddress && (
-                                <span className="flex items-center gap-1 truncate max-w-sm">
-                                  <MapPin className="w-3 h-3 text-slate-400 shrink-0" /> {batch.customerDetails.businessAddress}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Financial summary metrics */}
-                        <div className="flex items-center gap-4 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100 text-right shrink-0">
-                          <div>
-                            <div className="text-[10px] font-bold text-slate-400 uppercase">Batch Total</div>
-                            <div className="font-extrabold text-slate-900 font-mono tabular-nums text-sm">
-                              ৳{batch.totalAmount.toLocaleString()}
-                            </div>
-                          </div>
-                          <div className="h-7 w-px bg-slate-200" />
-                          <div>
-                            <div className="text-[10px] font-bold text-rose-500 uppercase">COD / Due</div>
-                            <div className="font-black text-rose-600 font-mono tabular-nums text-sm">
-                              ৳{batch.totalDue.toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Consolidated Picking Items Strip */}
-                      <div className="space-y-1.5 pt-1 border-t border-slate-100">
-                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                          <span>Consolidated Picking Summary ({batch.consolidatedItems.length} Products):</span>
-                          <span className="font-mono text-purple-700">{batch.totalUnits} Total Units</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {batch.consolidatedItems.slice(0, 4).map((it, idx) => (
-                            <span
-                              key={it.productId || idx}
-                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded-lg font-medium flex items-center gap-1.5 border border-slate-200/60"
-                            >
-                              <span className="font-semibold truncate max-w-[150px]">{it.productName}</span>
-                              <strong className="text-purple-700 font-mono">x{it.totalQuantity}</strong>
-                            </span>
-                          ))}
-                          {batch.consolidatedItems.length > 4 && (
-                            <span className="px-2.5 py-1 bg-purple-50 text-purple-700 text-xs rounded-lg font-bold border border-purple-200">
-                              +{batch.consolidatedItems.length - 4} more SKUs
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Tracking / Couriers Bar if any */}
-                      {batch.courierConsignments.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-                          <span className="text-[10px] font-bold uppercase text-slate-400">Assigned Tracking:</span>
-                          {batch.courierConsignments.map((cn, cIdx) => (
-                            <span
-                              key={cIdx}
-                              className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-mono font-bold text-[11px] flex items-center gap-1"
-                            >
-                              <Truck className="w-3 h-3 text-emerald-600" />
-                              {cn}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Card Action Buttons */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleOpenDispatchModal(batch)}
-                            className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs rounded-xl transition-all shadow-xs flex items-center gap-1.5"
-                          >
-                            <Truck className="w-3.5 h-3.5" />
-                            Dispatch Batch ({batch.totalOrders})
-                          </button>
-
-                          <button
-                            onClick={() => setSelectedBatchForManifest(batch)}
-                            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-all flex items-center gap-1.5 shadow-2xs"
-                          >
-                            <Printer className="w-3.5 h-3.5 text-slate-600" />
-                            Print Manifest & Picking List
-                          </button>
-                        </div>
-
-                        <button
-                          onClick={() => toggleBatchAccordion(batch.id)}
-                          className="px-3 py-1.5 text-slate-600 hover:text-slate-900 font-bold text-xs flex items-center gap-1 transition-all rounded-lg hover:bg-slate-100"
-                        >
-                          {isExpanded ? (
-                            <>
-                              Hide Orders <ChevronUp className="w-4 h-4" />
-                            </>
-                          ) : (
-                            <>
-                              View All {batch.totalOrders} Orders <ChevronDown className="w-4 h-4" />
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Expandable Orders Sub-List */}
-                    {isExpanded && (
-                      <div className="bg-slate-50/80 border-t border-slate-200 p-4 space-y-3">
-                        <div className="text-xs font-bold uppercase text-slate-500 tracking-wider">
-                          Orders Included in Batch:
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs bg-white rounded-xl border border-slate-200 overflow-hidden">
-                            <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 uppercase text-[10px]">
-                              <tr>
-                                <th className="py-2.5 px-3">Order #</th>
-                                <th className="py-2.5 px-3">Date</th>
-                                <th className="py-2.5 px-3">Customer / Delivery</th>
-                                <th className="py-2.5 px-3">Items</th>
-                                <th className="py-2.5 px-3 text-right">Amount</th>
-                                <th className="py-2.5 px-3 text-right">COD / Due</th>
-                                <th className="py-2.5 px-3">Courier</th>
-                                <th className="py-2.5 px-3 text-center">Status</th>
-                                <th className="py-2.5 px-3 text-right">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 font-medium">
-                              {batch.orders.map((ord) => {
-                                const unitCount = (ord.items || []).reduce((s, it) => s + (it.quantity || 1), 0);
-                                return (
-                                  <tr key={ord.id} className="hover:bg-slate-50/60 transition-all">
-                                    <td className="py-2 px-3 font-mono font-bold text-purple-700">
-                                      #{ord.orderNumber || ord.id}
-                                    </td>
-                                    <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">
-                                      {formatBatchDate(ord.orderDate || ord.createdAt)}
-                                    </td>
-                                    <td className="py-2 px-3 text-slate-800">
-                                      <div className="font-bold">{ord.customerName}</div>
-                                      <div className="text-[10px] text-slate-500">{ord.customerPhone}</div>
-                                    </td>
-                                    <td className="py-2 px-3 text-slate-600">
-                                      {unitCount} units ({ord.items?.length || 0} SKUs)
-                                    </td>
-                                    <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
-                                      ৳{ord.totalAmount.toLocaleString()}
-                                    </td>
-                                    <td className="py-2 px-3 text-right font-mono font-black text-rose-600">
-                                      ৳{(ord.dueAmount || 0).toLocaleString()}
-                                    </td>
-                                    <td className="py-2 px-3">
-                                      {ord.courier ? (
-                                        <span className="font-mono text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                                          {ord.courier.consignmentId || ord.courier.trackingCode}
-                                        </span>
-                                      ) : (
-                                        <span className="text-[11px] text-slate-400 italic">Unassigned</span>
-                                      )}
-                                    </td>
-                                    <td className="py-2 px-3 text-center">
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                                        ord.status === 'delivered'
-                                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                          : ord.status === 'shipped'
-                                          ? 'bg-blue-100 text-blue-800 border-blue-200'
-                                          : ord.status === 'packing'
-                                          ? 'bg-amber-100 text-amber-800 border-amber-200'
-                                          : 'bg-slate-100 text-slate-700 border-slate-200'
-                                      }`}>
-                                        {ord.status}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 px-3 text-right">
-                                      <div className="flex items-center justify-end gap-1.5">
-                                        <button
-                                          onClick={() => setInvoiceModalOrder(ord)}
-                                          className="p-1 hover:bg-slate-100 text-purple-700 rounded transition-all font-semibold"
-                                          title="View Invoice"
-                                        >
-                                          <FileText className="w-3.5 h-3.5" />
-                                        </button>
-                                        {!ord.courier && ord.status !== 'cancelled' && (
-                                          <button
-                                            disabled={isSteadfastLoading}
-                                            onClick={() => handleSendToSteadfast(ord)}
-                                            className="p-1 hover:bg-purple-100 text-purple-800 rounded transition-all"
-                                            title="Send to Steadfast"
-                                          >
-                                            <Truck className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
@@ -2235,161 +1715,6 @@ export const AdminOrders: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL: BATCH DISPATCH ASSIGNMENT */}
-      {/* ========================================================================= */}
-      {selectedBatchForDispatch && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-purple-100 border border-purple-200 flex items-center justify-center text-purple-700">
-                  <Truck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-slate-900 text-base sm:text-lg">
-                    Batch Courier Dispatch
-                  </h3>
-                  <p className="text-xs text-slate-500 font-mono">
-                    {selectedBatchForDispatch.id} • {selectedBatchForDispatch.totalOrders} Orders
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedBatchForDispatch(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg p-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Batch Overview summary */}
-            <div className="bg-purple-50/60 rounded-xl p-3.5 border border-purple-200 space-y-2 text-xs">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Recipient / Title:</span>
-                <span className="font-bold text-purple-950">{selectedBatchForDispatch.groupTitle}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Orders Count:</span>
-                <span className="font-mono font-bold text-slate-800">{selectedBatchForDispatch.totalOrders} orders</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Total Physical Units:</span>
-                <span className="font-mono font-bold text-purple-800">{selectedBatchForDispatch.totalUnits} items</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Total COD to Collect:</span>
-                <span className="font-mono font-black text-rose-600">৳{selectedBatchForDispatch.totalDue.toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* Dispatch Form Inputs */}
-            <div className="space-y-4 text-xs font-semibold text-slate-700">
-              <div>
-                <label className="block text-slate-700 mb-1 font-bold">
-                  Courier Service Provider
-                </label>
-                <select
-                  value={batchCourierProvider}
-                  onChange={(e) => setBatchCourierProvider(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden font-medium"
-                >
-                  <option value="steadfast">Steadfast Courier (API Verified)</option>
-                  <option value="pathao">Pathao Courier</option>
-                  <option value="redx">RedX Logistics</option>
-                  <option value="paperfly">Paperfly</option>
-                  <option value="in_house">In-House Fleet / Company Van</option>
-                  <option value="direct_cargo">Direct Cargo / Transport Agency</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 mb-1 font-bold">
-                  Tracking / Consignment Prefix / Code
-                </label>
-                <input
-                  type="text"
-                  value={batchTrackingInput}
-                  onChange={(e) => setBatchTrackingInput(e.target.value)}
-                  placeholder="e.g. BATCH-DHAKA-20261023 or CN-12345"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden font-mono text-xs font-bold"
-                />
-                <p className="text-[11px] text-slate-400 font-normal mt-1">
-                  Each order in this batch will be assigned this tracking reference with its sequence suffix.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 mb-1 font-bold">
-                  Update Fulfillment Status To
-                </label>
-                <select
-                  value={batchTargetStatus}
-                  onChange={(e: any) => setBatchTargetStatus(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden font-medium"
-                >
-                  <option value="shipped">Shipped (Handed Over / In Transit)</option>
-                  <option value="delivered">Delivered (Direct Handover Completed)</option>
-                  <option value="packing">Packing (Warehouse Staging)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 mb-1 font-bold">
-                  Dispatch Notes (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={batchDispatchNotes}
-                  onChange={(e) => setBatchDispatchNotes(e.target.value)}
-                  placeholder="e.g. 2 cartons sent via Sundarban Courier Chalan #5421"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden font-medium"
-                />
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200">
-              <button
-                type="button"
-                onClick={() => setSelectedBatchForDispatch(null)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isBatchDispatching}
-                onClick={handleExecuteBatchDispatch}
-                className="px-5 py-2 bg-purple-700 hover:bg-purple-800 text-white font-extrabold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 disabled:opacity-50"
-              >
-                {isBatchDispatching ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Dispatching Orders...
-                  </>
-                ) : (
-                  <>
-                    <Truck className="w-4 h-4" />
-                    Confirm & Dispatch All {selectedBatchForDispatch.totalOrders} Orders
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL: PRINTABLE BATCH DISPATCH & PACKING MANIFEST */}
-      {/* ========================================================================= */}
-      {selectedBatchForManifest && (
-        <BatchDispatchManifestModal
-          batch={selectedBatchForManifest}
-          onClose={() => setSelectedBatchForManifest(null)}
-        />
       )}
     </div>
   );

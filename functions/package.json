@@ -10,12 +10,11 @@
   "engines": {
     "node": "18"
   },
-  "type": "module",
   "main": "lib/index.js",
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "firebase-admin": "^11.8.0",
-    "firebase-functions": "^4.3.1"
+    "firebase-functions": "^4.3.1",
+    "@google/genai": "^2.4.0"
   },
   "devDependencies": {
     "typescript": "^5.8.2"

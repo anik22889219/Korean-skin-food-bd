@@ -227,7 +227,7 @@ class FcmPushService {
         const body = payload.notification?.body || payload.data?.body || '';
         this.showLocalNotification(title, {
           body,
-          icon: '/pwa-192x192.png',
+          icon: '/favicon.ico',
           data: payload.data
         });
       }
@@ -248,8 +248,8 @@ class FcmPushService {
       if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
         navigator.serviceWorker.ready.then((reg) => {
           reg.showNotification(title, {
-            icon: '/pwa-192x192.png',
-            badge: '/favicon-32x32.png',
+            icon: '/favicon.ico',
+            badge: '/favicon.ico',
             ...options
           });
         });
@@ -257,7 +257,7 @@ class FcmPushService {
       }
 
       new Notification(title, {
-        icon: '/pwa-192x192.png',
+        icon: '/favicon.ico',
         ...options
       });
       return true;

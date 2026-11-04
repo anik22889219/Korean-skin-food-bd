@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { 
   FileSpreadsheet, RefreshCw, Play, CheckCircle2, AlertCircle, Clock, 
   Database, ShieldAlert, Terminal, ExternalLink, Settings, Check, Copy, Layers, ArrowUpRight, Save, Link2
@@ -547,19 +547,19 @@ function executeBackupFetch(type, endpoint) {
                 onClick={() => setShowAppsScriptModal(false)}
                 className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-700 font-bold transition"
               >
-                ✕
+                âœ•
               </button>
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-2">
                 <p className="font-bold flex items-center gap-2">
-                  <span>ℹ️</span> Deployment Instructions:
+                  <span>â„¹ï¸</span> Deployment Instructions:
                 </p>
                 <ol className="list-decimal list-inside space-y-1 text-xs">
                   <li>Open <a href="https://script.new" target="_blank" rel="noreferrer" className="underline text-blue-600 font-semibold inline-flex items-center gap-1">script.new <ArrowUpRight className="w-3 h-3" /></a> to create a new Apps Script project.</li>
                   <li>Paste the code below into <code className="bg-blue-100 px-1 rounded">Code.gs</code>.</li>
-                  <li>In Project Settings (⚙️), add Script Properties: <code className="bg-blue-100 px-1 rounded">SPREADSHEET_ID</code> and <code className="bg-blue-100 px-1 rounded">BACKUP_API_KEY</code>.</li>
+                  <li>In Project Settings (âš™ï¸), add Script Properties: <code className="bg-blue-100 px-1 rounded">SPREADSHEET_ID</code> and <code className="bg-blue-100 px-1 rounded">BACKUP_API_KEY</code>.</li>
                   <li>Run <code className="bg-blue-100 px-1 rounded">setupBackupEnvironment()</code> and <code className="bg-blue-100 px-1 rounded">installBackupTriggers()</code> once to activate daily full backups and 15-minute incremental syncs.</li>
                 </ol>
               </div>

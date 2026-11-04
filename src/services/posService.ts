@@ -233,8 +233,6 @@ export function mapWholesaleOrderToOrder(ws: any): Order {
 
   return {
     id: ws.id || ws.orderNumber,
-    orderNumber: ws.orderNumber || ws.id,
-    orderDate: ws.orderDate || (ws.createdAt ? ws.createdAt.split('T')[0] : ''),
     customerName,
     customerPhone,
     customerEmail,

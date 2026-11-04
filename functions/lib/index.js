@@ -1,20 +1,23 @@
-import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { onSchedule } from "firebase-functions/v2/scheduler";
-import { initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import { GoogleGenAI } from "@google/genai";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.trackMetaCapiEvent = exports.triggerMetaAdsSync = exports.syncMetaAds = exports.pricingSuggestion = exports.generateProductContent = exports.inventoryWatch = exports.placeOrder = void 0;
+const https_1 = require("firebase-functions/v2/https");
+const scheduler_1 = require("firebase-functions/v2/scheduler");
+const app_1 = require("firebase-admin/app");
+const firestore_1 = require("firebase-admin/firestore");
+const genai_1 = require("@google/genai");
 // Initialize Firebase Admin
-initializeApp();
-const db = getFirestore();
+(0, app_1.initializeApp)();
+const db = (0, firestore_1.getFirestore)();
 /**
  * 1. placeOrder — an onCall function that takes cart items + customer info,
  * runs a Firestore transaction to verify stock, decrement it, and create
  * an order document. Throws clear errors if any item is out of stock.
  */
-export const placeOrder = onCall(async (request) => {
+exports.placeOrder = (0, https_1.onCall)(async (request) => {
     const data = request.data;
     if (!data || !data.items || data.items.length === 0) {
-        throw new HttpsError("invalid-argument", "Cart cannot be empty.");
+        throw new https_1.HttpsError("invalid-argument", "Cart cannot be empty.");
     }
     const orderId = "ORD-" + Math.floor(100000 + Math.random() * 900000);
     const deliveryCharge = data.deliveryArea === "outside" ? 120 : 60;
@@ -32,12 +35,12 @@ export const placeOrder = onCall(async (request) => {
                 const productRef = db.collection("products").doc(item.productId);
                 const productDoc = await transaction.get(productRef);
                 if (!productDoc.exists) {
-                    throw new HttpsError("not-found", `Product "${item.name}" (ID: ${item.productId}) does not exist.`);
+                    throw new https_1.HttpsError("not-found", `Product "${item.name}" (ID: ${item.productId}) does not exist.`);
                 }
                 const productData = productDoc.data();
                 const currentStock = productData?.stock ?? 0;
                 if (currentStock < item.quantity) {
-                    throw new HttpsError("failed-precondition", `Insufficient stock for "${item.name}". Requested: ${item.quantity}, Available: ${currentStock}`);
+                    throw new https_1.HttpsError("failed-precondition", `Insufficient stock for "${item.name}". Requested: ${item.quantity}, Available: ${currentStock}`);
                 }
                 productRefsAndData.push({
                     ref: productRef,
@@ -87,10 +90,10 @@ export const placeOrder = onCall(async (request) => {
     }
     catch (error) {
         console.error("placeOrder transaction failed:", error);
-        if (error instanceof HttpsError) {
+        if (error instanceof https_1.HttpsError) {
             throw error;
         }
-        throw new HttpsError("internal", error.message || "Checkout transaction aborted.");
+        throw new https_1.HttpsError("internal", error.message || "Checkout transaction aborted.");
     }
 });
 /**
@@ -98,7 +101,7 @@ export const placeOrder = onCall(async (request) => {
  * with stock <= 10, logs the results to an ai_agent_runs collection, and
  * is structured so a WhatsApp/notification step can be added later.
  */
-export const inventoryWatch = onSchedule("0 0 * * *", async (event) => {
+exports.inventoryWatch = (0, scheduler_1.onSchedule)("0 0 * * *", async (event) => {
     const runId = "run-inv-" + Date.now();
     const timestamp = new Date().toISOString();
     try {
@@ -156,19 +159,19 @@ export const inventoryWatch = onSchedule("0 0 * * *", async (event) => {
  * product description, keywords, and JSON-LD schema for a given product,
  * and logs the result to ai_agent_runs.
  */
-export const generateProductContent = onCall({
+exports.generateProductContent = (0, https_1.onCall)({
     secrets: ["GEMINI_API_KEY"]
 }, async (request) => {
     const productId = request.data.productId;
     if (!productId) {
-        throw new HttpsError("invalid-argument", "Product ID is required.");
+        throw new https_1.HttpsError("invalid-argument", "Product ID is required.");
     }
     const runId = "run-gen-" + Date.now();
     const timestamp = new Date().toISOString();
     // Fetch product data from firestore
     const productDoc = await db.collection("products").doc(productId).get();
     if (!productDoc.exists) {
-        throw new HttpsError("not-found", `Product with ID ${productId} not found.`);
+        throw new https_1.HttpsError("not-found", `Product with ID ${productId} not found.`);
     }
     const p = productDoc.data();
     const name = p?.name || "Unknown Product";
@@ -178,10 +181,10 @@ export const generateProductContent = onCall({
     // Initialize Gemini safely using secret key
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-        throw new HttpsError("failed-precondition", "GEMINI_API_KEY secret is not configured in Firebase Functions.");
+        throw new https_1.HttpsError("failed-precondition", "GEMINI_API_KEY secret is not configured in Firebase Functions.");
     }
     try {
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new genai_1.GoogleGenAI({ apiKey });
         const prompt = `You are an elite Digital Marketer, SEO Specialist, and Copywriter for K-Beauty.
 Analyze the following Korean cosmetic product:
 Product Name: ${name}
@@ -241,7 +244,7 @@ Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts o
             summary: `Failed for ${name}: ${err.message}`,
             output: { error: err.stack || err.message }
         });
-        throw new HttpsError("internal", err.message || "Failed to generate AI marketing content.");
+        throw new https_1.HttpsError("internal", err.message || "Failed to generate AI marketing content.");
     }
 });
 /**
@@ -250,7 +253,7 @@ Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts o
  * uses Gemini to suggest a discount percentage with reasoning, logging
  * the result to ai_agent_runs.
  */
-export const pricingSuggestion = onSchedule({
+exports.pricingSuggestion = (0, scheduler_1.onSchedule)({
     schedule: "0 0 * * 0", // Every Sunday
     secrets: ["GEMINI_API_KEY"]
 }, async (event) => {
@@ -308,7 +311,7 @@ export const pricingSuggestion = onSchedule({
             category: p.category
         }));
         // Call Gemini to get suggestions
-        const ai = new GoogleGenAI({ apiKey });
+        const ai = new genai_1.GoogleGenAI({ apiKey });
         const prompt = `You are a professional retail and e-commerce pricing optimization engine for Korean skin food products.
 The following products had exactly zero sales in the last 30 days:
 ${JSON.stringify(listForAi, null, 2)}
@@ -363,7 +366,7 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
  * campaign insights from the Meta Marketing API (Graph API v19) using the
  * META_ACCESS_TOKEN secret, aggregates the data, and writes to ad_performance/{date}.
  */
-export const syncMetaAds = onSchedule({
+exports.syncMetaAds = (0, scheduler_1.onSchedule)({
     schedule: "0 1 * * *", // Runs daily at 1:00 AM
     secrets: ["META_ACCESS_TOKEN"]
 }, async (event) => {
@@ -508,7 +511,7 @@ export const syncMetaAds = onSchedule({
  * 6. triggerMetaAdsSync — an onCall function to manually sync or seed ad performance
  * data for the past 30 days so the admin dashboard is instantly functional.
  */
-export const triggerMetaAdsSync = onCall({
+exports.triggerMetaAdsSync = (0, https_1.onCall)({
     secrets: ["META_ACCESS_TOKEN"]
 }, async (request) => {
     const timestamp = new Date().toISOString();
@@ -626,7 +629,7 @@ export const triggerMetaAdsSync = onCall({
  * 7. trackMetaCapiEvent — onCall function for server-side Meta Conversions API
  * dispatching from Firebase Functions with persistent Firestore idempotency.
  */
-export const trackMetaCapiEvent = onCall({
+exports.trackMetaCapiEvent = (0, https_1.onCall)({
     secrets: ["META_CAPI_ACCESS_TOKEN", "META_ACCESS_TOKEN"]
 }, async (request) => {
     const data = request.data || {};

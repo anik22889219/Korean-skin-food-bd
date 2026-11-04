@@ -177,7 +177,7 @@ export const metaCatalogService = {
     const defaultSettings: MetaCatalogSettings = {
       catalogId: "",
       hasAccessToken: false,
-      pixelId: "1181966467366737",
+      pixelId: "",
       currency: "BDT",
       domainUrl: typeof window !== 'undefined' ? window.location.origin : "https://koreanskinfood.web.app",
       defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
@@ -195,7 +195,6 @@ export const metaCatalogService = {
           return {
             ...defaultSettings,
             ...data,
-            pixelId: data.pixelId || "1181966467366737",
             hasAccessToken: !!data.accessToken,
             accessToken: data.accessToken || undefined
           };

@@ -1,4 +1,4 @@
-import express from "express";
+﻿import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -139,7 +139,7 @@ const receiver = slackService.getReceiver();
 if (receiver) {
   app.use("/slack/events", receiver.router);
   app.use("/api/slack/events", receiver.router);
-  console.log("⚡ Slack Bolt Receiver endpoint mounted at /slack/events and /api/slack/events");
+  console.log("âš¡ Slack Bolt Receiver endpoint mounted at /slack/events and /api/slack/events");
 }
 
 // Initialize Firebase client on server-side
@@ -397,7 +397,7 @@ const DEFAULT_GOOGLE_BUSINESS_DATA = {
       text: 'Undoubtedly the best and most trustworthy place for genuine Korean skincare in Dhaka! I bought the COSRX Snail Mucin and Beauty of Joseon Relief Sun Rice + Probiotics. Both barcode scans proved 100% original imported from Seoul. Skin barrier is finally healed within 2 weeks!',
       likesCount: 28,
       reply: {
-        text: 'Thank you so much, Nusrat! We are thrilled your skin barrier is glowing. 100% authentic cosmeceuticals straight from Seoul is our lifetime promise! 🌸',
+        text: 'Thank you so much, Nusrat! We are thrilled your skin barrier is glowing. 100% authentic cosmeceuticals straight from Seoul is our lifetime promise! ðŸŒ¸',
         replyDate: '2 days ago'
       }
     },
@@ -431,7 +431,7 @@ const DEFAULT_GOOGLE_BUSINESS_DATA = {
       text: 'I have been ordering from Korean Skin Food for over 2 years now. In a market flooded with counterfeits, this shop is a true sanctuary for K-beauty lovers. Their packaging with bubble wrap and batch authentication QR is unmatched. Highly recommend!',
       likesCount: 42,
       reply: {
-        text: 'Sadia apu, your continued trust means the world to our team! Thank you for walking this glowing botanical journey with us. ✨',
+        text: 'Sadia apu, your continued trust means the world to our team! Thank you for walking this glowing botanical journey with us. âœ¨',
         replyDate: '13 days ago'
       }
     },
@@ -475,7 +475,7 @@ const DEFAULT_GOOGLE_BUSINESS_DATA = {
       isVerifiedCustomer: true,
       isLocalGuide: true,
       productPurchased: 'Haruharu WONDER Black Rice Hyaluronic Toner',
-      text: 'Super gentle on sensitive skin. Zero artificial fragrances. Korean Skin Food is my default go-to store in Bangladesh. The Google Business reviews were totally accurate—10/10 experience!',
+      text: 'Super gentle on sensitive skin. Zero artificial fragrances. Korean Skin Food is my default go-to store in Bangladesh. The Google Business reviews were totally accurateâ€”10/10 experience!',
       likesCount: 22
     }
   ],
@@ -3222,7 +3222,7 @@ app.post("/api/finance/collect-due", verifyFinanceAuth, async (req, res) => {
         type: isWholesale ? "WHOLESALE_PAYMENT" : "POS_DUE_COLLECTION",
         method,
         amount: paymentToApply,
-        note: note || `Due collection of ৳${paymentToApply} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId}`,
+        note: note || `Due collection of à§³${paymentToApply} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId}`,
         receivedBy,
         receivedAt: nowIso,
         source: isWholesale ? "WHOLESALE" : source,
@@ -3239,7 +3239,7 @@ app.post("/api/finance/collect-due", verifyFinanceAuth, async (req, res) => {
         amount: paymentToApply,
         date: nowIso.split("T")[0],
         accountCode: effectiveAccount,
-        description: `Due Collection ৳${paymentToApply} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId} (${method})`,
+        description: `Due Collection à§³${paymentToApply} for ${isWholesale ? 'Wholesale ' : ''}Order #${orderId} (${method})`,
         performedBy: receivedBy,
         referenceType: isWholesale ? "WHOLESALE_ORDER" : "ORDER",
         referenceId: orderId,
@@ -3320,7 +3320,7 @@ app.post("/api/finance/collect-due", verifyFinanceAuth, async (req, res) => {
     res.json({
       success: true,
       ...result,
-      message: result.isDuplicate ? "Duplicate request safely handled" : `Collected ৳${amount} for Order #${orderId}`
+      message: result.isDuplicate ? "Duplicate request safely handled" : `Collected à§³${amount} for Order #${orderId}`
     });
   } catch (error: any) {
     console.error("collect-due transaction failed:", error);
@@ -3354,7 +3354,7 @@ app.post("/api/finance/transfer", verifyFinanceAuth, async (req, res) => {
     date: nowIso.split("T")[0],
     accountCode: fromAccount,
     targetAccountCode: toAccount,
-    description: description || `Wallet Transfer: ${fromAccount} → ${toAccount}`,
+    description: description || `Wallet Transfer: ${fromAccount} â†’ ${toAccount}`,
     performedBy,
     referenceType: "TRANSFER",
     referenceId: txId,
@@ -3363,7 +3363,7 @@ app.post("/api/finance/transfer", verifyFinanceAuth, async (req, res) => {
 
   try {
     await setDoc(doc(db, "financial_transactions", txId), tx);
-    res.json({ success: true, transaction: tx, message: `Transferred ৳${amount} from ${fromAccount} to ${toAccount}` });
+    res.json({ success: true, transaction: tx, message: `Transferred à§³${amount} from ${fromAccount} to ${toAccount}` });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to record transfer" });
   }
@@ -3801,13 +3801,13 @@ app.post("/api/gemini/translate-name", async (req, res) => {
 
   const getPhoneticFallback = (str: string) => {
     let fallback = str;
-    if (str.toLowerCase().includes("cosrx")) fallback = "কসআরএক্স " + str.replace(/cosrx/gi, "").trim();
-    else if (str.toLowerCase().includes("beauty of joseon")) fallback = "বিউটি অব জোসিয়ন " + str.replace(/beauty of joseon/gi, "").trim();
-    else if (str.toLowerCase().includes("anua")) fallback = "আনুয়া " + str.replace(/anua/gi, "").trim();
-    else if (str.toLowerCase().includes("skin1004")) fallback = "স্কিন১০০৪ " + str.replace(/skin1004/gi, "").trim();
-    else if (str.toLowerCase().includes("laneige")) fallback = "লেনেইজ " + str.replace(/laneige/gi, "").trim();
-    else if (str.toLowerCase().includes("some by mi")) fallback = "সাম বাই মি " + str.replace(/some by mi/gi, "").trim();
-    else if (str.toLowerCase().includes("round lab")) fallback = "রাউন্ড ল্যাব " + str.replace(/round lab/gi, "").trim();
+    if (str.toLowerCase().includes("cosrx")) fallback = "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ " + str.replace(/cosrx/gi, "").trim();
+    else if (str.toLowerCase().includes("beauty of joseon")) fallback = "à¦¬à¦¿à¦‰à¦Ÿà¦¿ à¦…à¦¬ à¦œà§‹à¦¸à¦¿à¦¯à¦¼à¦¨ " + str.replace(/beauty of joseon/gi, "").trim();
+    else if (str.toLowerCase().includes("anua")) fallback = "à¦†à¦¨à§à¦¯à¦¼à¦¾ " + str.replace(/anua/gi, "").trim();
+    else if (str.toLowerCase().includes("skin1004")) fallback = "à¦¸à§à¦•à¦¿à¦¨à§§à§¦à§¦à§ª " + str.replace(/skin1004/gi, "").trim();
+    else if (str.toLowerCase().includes("laneige")) fallback = "à¦²à§‡à¦¨à§‡à¦‡à¦œ " + str.replace(/laneige/gi, "").trim();
+    else if (str.toLowerCase().includes("some by mi")) fallback = "à¦¸à¦¾à¦® à¦¬à¦¾à¦‡ à¦®à¦¿ " + str.replace(/some by mi/gi, "").trim();
+    else if (str.toLowerCase().includes("round lab")) fallback = "à¦°à¦¾à¦‰à¦¨à§à¦¡ à¦²à§à¦¯à¦¾à¦¬ " + str.replace(/round lab/gi, "").trim();
     return fallback;
   };
 
@@ -3938,44 +3938,44 @@ app.post("/api/gemini/identify-barcode", async (req, res) => {
   // 1. Check known database / catalog map for instant Korean barcode identification
   const knownBarcodeDb: { [key: string]: any } = {
     // COSRX
-    "8809598450123": { name: "Cosrx Advance Essence 96", nameBN: "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স", brand: "COSRX", category: "Serum & Essence", ml: "100ml", price: 1850, description: "Highly concentrated essence with 96% snail secretion filtrate to deeply hydrate, soothe redness, and restore skin elasticity.", imageUrl: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60" },
-    "8809598450147": { name: "Cosrx All In One Snail Cream 92", nameBN: "কসআরএক্স অল ইন ওয়ান স্নেল ক্রিম ৯২", brand: "COSRX", category: "Cream & Moisturizer", ml: "100g", price: 1950, description: "Nourishing cream enriched with 92% snail mucin to build a moisture barrier, plump skin, and soothe irritation.", imageUrl: "https://images.unsplash.com/photo-1556228724-4da53f1283c7?w=600&auto=format&fit=crop&q=60" },
-    "8809598450284": { name: "Cosrx Salicylic Acid Daily Gentle Cleanser", nameBN: "কসআরএক্স স্যালিসিলিক এসিড ডেইলি জেন্টল ক্লিনজার", brand: "COSRX", category: "Cleanser", ml: "150ml", price: 1250, description: "Gentle foam cleanser with BHA to gently exfoliate dead skin cells, remove excess sebum, and prevent breakouts.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
-    "8809598450017": { name: "Cosrx Low PH Good Morning Gel Cleanser", nameBN: "কসআরএক্স লো পিএইচ গুড মর্নিং জেল ক্লিনজার", brand: "COSRX", category: "Cleanser", ml: "150ml", price: 1150, description: "Mildly acidic daily gel cleanser with tea tree oil and natural BHA to refine skin texture, clear pores, and balance pH levels.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
-    "8809598450321": { name: "COSRX Over Night Spa Mask", nameBN: "কসআরএক্স ওভার নাইট স্পা মাস্ক", brand: "COSRX", category: "Mask & Pack", ml: "60ml", price: 1750, description: "Ultimate nourishing overnight spa mask to deeply moisturize skin while you sleep.", imageUrl: "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=600&auto=format&fit=crop&q=60" },
+    "8809598450123": { name: "Cosrx Advance Essence 96", nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦à¦¡à¦­à¦¾à¦¨à§à¦¸à¦¡ à¦¸à§à¦¨à§‡à¦² à§¯à§¬ à¦®à¦¿à¦‰à¦¸à¦¿à¦¨ à¦ªà¦¾à¦“à§Ÿà¦¾à¦° à¦à¦¸à§‡à¦¨à§à¦¸", brand: "COSRX", category: "Serum & Essence", ml: "100ml", price: 1850, description: "Highly concentrated essence with 96% snail secretion filtrate to deeply hydrate, soothe redness, and restore skin elasticity.", imageUrl: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60" },
+    "8809598450147": { name: "Cosrx All In One Snail Cream 92", nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦…à¦² à¦‡à¦¨ à¦“à¦¯à¦¼à¦¾à¦¨ à¦¸à§à¦¨à§‡à¦² à¦•à§à¦°à¦¿à¦® à§¯à§¨", brand: "COSRX", category: "Cream & Moisturizer", ml: "100g", price: 1950, description: "Nourishing cream enriched with 92% snail mucin to build a moisture barrier, plump skin, and soothe irritation.", imageUrl: "https://images.unsplash.com/photo-1556228724-4da53f1283c7?w=600&auto=format&fit=crop&q=60" },
+    "8809598450284": { name: "Cosrx Salicylic Acid Daily Gentle Cleanser", nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦¸à§à¦¯à¦¾à¦²à¦¿à¦¸à¦¿à¦²à¦¿à¦• à¦à¦¸à¦¿à¦¡ à¦¡à§‡à¦‡à¦²à¦¿ à¦œà§‡à¦¨à§à¦Ÿà¦² à¦•à§à¦²à¦¿à¦¨à¦œà¦¾à¦°", brand: "COSRX", category: "Cleanser", ml: "150ml", price: 1250, description: "Gentle foam cleanser with BHA to gently exfoliate dead skin cells, remove excess sebum, and prevent breakouts.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809598450017": { name: "Cosrx Low PH Good Morning Gel Cleanser", nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦²à§‹ à¦ªà¦¿à¦à¦‡à¦š à¦—à§à¦¡ à¦®à¦°à§à¦¨à¦¿à¦‚ à¦œà§‡à¦² à¦•à§à¦²à¦¿à¦¨à¦œà¦¾à¦°", brand: "COSRX", category: "Cleanser", ml: "150ml", price: 1150, description: "Mildly acidic daily gel cleanser with tea tree oil and natural BHA to refine skin texture, clear pores, and balance pH levels.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809598450321": { name: "COSRX Over Night Spa Mask", nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦“à¦­à¦¾à¦° à¦¨à¦¾à¦‡à¦Ÿ à¦¸à§à¦ªà¦¾ à¦®à¦¾à¦¸à§à¦•", brand: "COSRX", category: "Mask & Pack", ml: "60ml", price: 1750, description: "Ultimate nourishing overnight spa mask to deeply moisturize skin while you sleep.", imageUrl: "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=600&auto=format&fit=crop&q=60" },
 
     // Felicia
-    "880980010101": { name: "Felicia Cleansing Foam Camellia Collagen", nameBN: "ফেলিসিয়া ক্লিনজিং ফোম কেমেলিয়া কোলাজেন", brand: "Felicia", category: "Cleanser", ml: "150ml", price: 850, description: "Rich collagen cleansing foam infused with camellia extract for soft, hydrated skin.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
-    "880980010102": { name: "Felicia Heartleaf & Madecassoside", nameBN: "ফেলিসিয়া হার্টলিফ ও মেডেকাসোসাইড সিরাম", brand: "Felicia", category: "Serum & Essence", ml: "50ml", price: 1250, description: "Soothing serum with heartleaf and madecassoside to calm irritated and acne-prone skin.", imageUrl: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60" },
-    "880980010103": { name: "Felicia Snail & Ceramide Cleansing Foam", nameBN: "ফেলিসিয়া স্নেল ও সিরামাইড ক্লিনজিং ফোম", brand: "Felicia", category: "Cleanser", ml: "150ml", price: 850, description: "Gentle cleansing foam with snail filtrate and ceramides to protect the skin barrier.", imageUrl: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60" },
-    "880980010104": { name: "Felicia Retinol & Hyaluronic Acid", nameBN: "ফেলিসিয়া রেটিনল ও হায়ালুরোনিক অ্যাসিড সিরাম", brand: "Felicia", category: "Serum & Essence", ml: "50ml", price: 1350, description: "Anti-aging serum combining retinol and hyaluronic acid for smooth, firm skin.", imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" },
-    "880980010105": { name: "Felicia Natural Silk Fit Moisturizing Suncream B5", nameBN: "ফেলিসিয়া ন্যাচারাল সিল্ক ফিট ময়েশ্চারাইজিং সানক্রিম B5", brand: "Felicia", category: "Sunscreen", ml: "50ml", price: 1150, description: "Moisturizing sunscreen with Vitamin B5 providing broad spectrum SPF50+ protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+    "880980010101": { name: "Felicia Cleansing Foam Camellia Collagen", nameBN: "à¦«à§‡à¦²à¦¿à¦¸à¦¿à¦¯à¦¼à¦¾ à¦•à§à¦²à¦¿à¦¨à¦œà¦¿à¦‚ à¦«à§‹à¦® à¦•à§‡à¦®à§‡à¦²à¦¿à¦¯à¦¼à¦¾ à¦•à§‹à¦²à¦¾à¦œà§‡à¦¨", brand: "Felicia", category: "Cleanser", ml: "150ml", price: 850, description: "Rich collagen cleansing foam infused with camellia extract for soft, hydrated skin.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "880980010102": { name: "Felicia Heartleaf & Madecassoside", nameBN: "à¦«à§‡à¦²à¦¿à¦¸à¦¿à¦¯à¦¼à¦¾ à¦¹à¦¾à¦°à§à¦Ÿà¦²à¦¿à¦« à¦“ à¦®à§‡à¦¡à§‡à¦•à¦¾à¦¸à§‹à¦¸à¦¾à¦‡à¦¡ à¦¸à¦¿à¦°à¦¾à¦®", brand: "Felicia", category: "Serum & Essence", ml: "50ml", price: 1250, description: "Soothing serum with heartleaf and madecassoside to calm irritated and acne-prone skin.", imageUrl: "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60" },
+    "880980010103": { name: "Felicia Snail & Ceramide Cleansing Foam", nameBN: "à¦«à§‡à¦²à¦¿à¦¸à¦¿à¦¯à¦¼à¦¾ à¦¸à§à¦¨à§‡à¦² à¦“ à¦¸à¦¿à¦°à¦¾à¦®à¦¾à¦‡à¦¡ à¦•à§à¦²à¦¿à¦¨à¦œà¦¿à¦‚ à¦«à§‹à¦®", brand: "Felicia", category: "Cleanser", ml: "150ml", price: 850, description: "Gentle cleansing foam with snail filtrate and ceramides to protect the skin barrier.", imageUrl: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60" },
+    "880980010104": { name: "Felicia Retinol & Hyaluronic Acid", nameBN: "à¦«à§‡à¦²à¦¿à¦¸à¦¿à¦¯à¦¼à¦¾ à¦°à§‡à¦Ÿà¦¿à¦¨à¦² à¦“ à¦¹à¦¾à¦¯à¦¼à¦¾à¦²à§à¦°à§‹à¦¨à¦¿à¦• à¦…à§à¦¯à¦¾à¦¸à¦¿à¦¡ à¦¸à¦¿à¦°à¦¾à¦®", brand: "Felicia", category: "Serum & Essence", ml: "50ml", price: 1350, description: "Anti-aging serum combining retinol and hyaluronic acid for smooth, firm skin.", imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" },
+    "880980010105": { name: "Felicia Natural Silk Fit Moisturizing Suncream B5", nameBN: "à¦«à§‡à¦²à¦¿à¦¸à¦¿à¦¯à¦¼à¦¾ à¦¨à§à¦¯à¦¾à¦šà¦¾à¦°à¦¾à¦² à¦¸à¦¿à¦²à§à¦• à¦«à¦¿à¦Ÿ à¦®à§Ÿà§‡à¦¶à§à¦šà¦¾à¦°à¦¾à¦‡à¦œà¦¿à¦‚ à¦¸à¦¾à¦¨à¦•à§à¦°à¦¿à¦® B5", brand: "Felicia", category: "Sunscreen", ml: "50ml", price: 1150, description: "Moisturizing sunscreen with Vitamin B5 providing broad spectrum SPF50+ protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
 
     // Atomy
-    "880920020101": { name: "Atomy Peeling Gel", nameBN: "এটমি পিলিং জেল", brand: "Atomy", category: "Exfoliator", ml: "120ml", price: 1150, description: "Gentle peeling gel to smooth skin texture and clear dead skin cells without irritation.", imageUrl: "https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=600&auto=format&fit=crop&q=60" },
+    "880920020101": { name: "Atomy Peeling Gel", nameBN: "à¦à¦Ÿà¦®à¦¿ à¦ªà¦¿à¦²à¦¿à¦‚ à¦œà§‡à¦²", brand: "Atomy", category: "Exfoliator", ml: "120ml", price: 1150, description: "Gentle peeling gel to smooth skin texture and clear dead skin cells without irritation.", imageUrl: "https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=600&auto=format&fit=crop&q=60" },
 
     // Dabo
-    "880930030101": { name: "Dabo Rice Foam Cleanser", nameBN: "ডাবো রাইস ফোম ক্লিনজার", brand: "Dabo", category: "Cleanser", ml: "180ml", price: 750, description: "Brightening foam cleanser enriched with natural rice extract for glowing skin.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "880930030101": { name: "Dabo Rice Foam Cleanser", nameBN: "à¦¡à¦¾à¦¬à§‹ à¦°à¦¾à¦‡à¦¸ à¦«à§‹à¦® à¦•à§à¦²à¦¿à¦¨à¦œà¦¾à¦°", brand: "Dabo", category: "Cleanser", ml: "180ml", price: 750, description: "Brightening foam cleanser enriched with natural rice extract for glowing skin.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
 
     // SKIN1004
-    "8809530040101": { name: "SKIN1004 Madagascar Centella Tone Brightening Capsule Ampoule 30ml", nameBN: "স্কিন১০০৪ মাদাগাস্কার সেন্টেলা টোন ব্রাইটনিং অ্যাম্পুল ৩০মি.লি.", brand: "SKIN1004", category: "Serum & Essence", ml: "30ml", price: 1350, description: "Brightening ampoule with encapsulated Madecassoside and Centella Asiatica to tone skin.", imageUrl: "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=600&auto=format&fit=crop&q=60" },
-    "8809530040104": { name: "SKIN1004 Madagascar Centella Hyalu-Cica Water Fit Sun Serum 50ml", nameBN: "স্কিন১০০৪ মাদাগাস্কার সেন্টেলা হায়ালু-সিকা ওয়াটার ফিট সান সিরাম ৫০মি.লি.", brand: "SKIN1004", category: "Sunscreen", ml: "50ml", price: 1650, description: "Hydrating sun serum with Hyaluronic Acid and Centella Asiatica for lightweight UV protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+    "8809530040101": { name: "SKIN1004 Madagascar Centella Tone Brightening Capsule Ampoule 30ml", nameBN: "à¦¸à§à¦•à¦¿à¦¨à§§à§¦à§¦à§ª à¦®à¦¾à¦¦à¦¾à¦—à¦¾à¦¸à§à¦•à¦¾à¦° à¦¸à§‡à¦¨à§à¦Ÿà§‡à¦²à¦¾ à¦Ÿà§‹à¦¨ à¦¬à§à¦°à¦¾à¦‡à¦Ÿà¦¨à¦¿à¦‚ à¦…à§à¦¯à¦¾à¦®à§à¦ªà§à¦² à§©à§¦à¦®à¦¿.à¦²à¦¿.", brand: "SKIN1004", category: "Serum & Essence", ml: "30ml", price: 1350, description: "Brightening ampoule with encapsulated Madecassoside and Centella Asiatica to tone skin.", imageUrl: "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=600&auto=format&fit=crop&q=60" },
+    "8809530040104": { name: "SKIN1004 Madagascar Centella Hyalu-Cica Water Fit Sun Serum 50ml", nameBN: "à¦¸à§à¦•à¦¿à¦¨à§§à§¦à§¦à§ª à¦®à¦¾à¦¦à¦¾à¦—à¦¾à¦¸à§à¦•à¦¾à¦° à¦¸à§‡à¦¨à§à¦Ÿà§‡à¦²à¦¾ à¦¹à¦¾à¦¯à¦¼à¦¾à¦²à§-à¦¸à¦¿à¦•à¦¾ à¦“à¦¯à¦¼à¦¾à¦Ÿà¦¾à¦° à¦«à¦¿à¦Ÿ à¦¸à¦¾à¦¨ à¦¸à¦¿à¦°à¦¾à¦® à§«à§¦à¦®à¦¿.à¦²à¦¿.", brand: "SKIN1004", category: "Sunscreen", ml: "50ml", price: 1650, description: "Hydrating sun serum with Hyaluronic Acid and Centella Asiatica for lightweight UV protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
 
     // Lebelage
-    "880940040101": { name: "Lebelage Natural Toneup Suncream", nameBN: "লেবেলেজ ন্যাচারাল টোনআপ সানক্রিম", brand: "Lebelage", category: "Sunscreen", ml: "70ml", price: 750, description: "Tone-up sunscreen providing natural tone enhancement and SPF protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+    "880940040101": { name: "Lebelage Natural Toneup Suncream", nameBN: "à¦²à§‡à¦¬à§‡à¦²à§‡à¦œ à¦¨à§à¦¯à¦¾à¦šà¦¾à¦°à¦¾à¦² à¦Ÿà§‹à¦¨à¦†à¦ª à¦¸à¦¾à¦¨à¦•à§à¦°à¦¿à¦®", brand: "Lebelage", category: "Sunscreen", ml: "70ml", price: 750, description: "Tone-up sunscreen providing natural tone enhancement and SPF protection.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
 
     // Beauty of Joseon
-    "8809653240101": { name: "Beauty of Joseon Relief Sun Aqua-Fresh Rice + B5 50ml", nameBN: "বিউটি অব জোসিয়ন রিলিফ সান অ্যাকুয়া-ফ্রেশ রাইস + B5 ৫০মি.লি.", brand: "Beauty of Joseon", category: "Sunscreen", ml: "50ml", price: 1650, description: "Aqua-fresh organic sunscreen with rice seed water and panthenol for soothing hydration.", imageUrl: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60" },
+    "8809653240101": { name: "Beauty of Joseon Relief Sun Aqua-Fresh Rice + B5 50ml", nameBN: "à¦¬à¦¿à¦‰à¦Ÿà¦¿ à¦…à¦¬ à¦œà§‹à¦¸à¦¿à¦¯à¦¼à¦¨ à¦°à¦¿à¦²à¦¿à¦« à¦¸à¦¾à¦¨ à¦…à§à¦¯à¦¾à¦•à§à¦¯à¦¼à¦¾-à¦«à§à¦°à§‡à¦¶ à¦°à¦¾à¦‡à¦¸ + B5 à§«à§¦à¦®à¦¿.à¦²à¦¿.", brand: "Beauty of Joseon", category: "Sunscreen", ml: "50ml", price: 1650, description: "Aqua-fresh organic sunscreen with rice seed water and panthenol for soothing hydration.", imageUrl: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60" },
 
     // Anua
-    "8809756120101": { name: "Anua Heartleaf Pore Control Cleansing Oil 20ml", nameBN: "আনুয়া হার্টলিফ পোর কন্ট্রোল ক্লিনজিং অয়েল ২০মি.লি.", brand: "Anua", category: "Cleanser", ml: "20ml", price: 550, description: "Pore clearing cleansing oil formulated with Heartleaf extract to melt away makeup and blackheads.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
-    "8809756120106": { name: "Anua Heartleaf Pore Control Cleansing Oil 200ml", nameBN: "আনুয়া হার্টলিফ পোর কন্ট্রোল ক্লিনজিং অয়েল ২০০মি.লি.", brand: "Anua", category: "Cleanser", ml: "200ml", price: 2100, description: "Deep cleansing oil infused with Heartleaf extract for clear, refreshed pores.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809756120101": { name: "Anua Heartleaf Pore Control Cleansing Oil 20ml", nameBN: "à¦†à¦¨à§à¦¯à¦¼à¦¾ à¦¹à¦¾à¦°à§à¦Ÿà¦²à¦¿à¦« à¦ªà§‹à¦° à¦•à¦¨à§à¦Ÿà§à¦°à§‹à¦² à¦•à§à¦²à¦¿à¦¨à¦œà¦¿à¦‚ à¦…à¦¯à¦¼à§‡à¦² à§¨à§¦à¦®à¦¿.à¦²à¦¿.", brand: "Anua", category: "Cleanser", ml: "20ml", price: 550, description: "Pore clearing cleansing oil formulated with Heartleaf extract to melt away makeup and blackheads.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
+    "8809756120106": { name: "Anua Heartleaf Pore Control Cleansing Oil 200ml", nameBN: "à¦†à¦¨à§à¦¯à¦¼à¦¾ à¦¹à¦¾à¦°à§à¦Ÿà¦²à¦¿à¦« à¦ªà§‹à¦° à¦•à¦¨à§à¦Ÿà§à¦°à§‹à¦² à¦•à§à¦²à¦¿à¦¨à¦œà¦¿à¦‚ à¦…à¦¯à¦¼à§‡à¦² à§¨à§¦à§¦à¦®à¦¿.à¦²à¦¿.", brand: "Anua", category: "Cleanser", ml: "200ml", price: 2100, description: "Deep cleansing oil infused with Heartleaf extract for clear, refreshed pores.", imageUrl: "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop&q=60" },
 
     // MISSHA
-    "880950050101": { name: "MISSHA Cotton Sun All Around Safe Block SPF50+ PA++++", nameBN: "মিশা কটন সান অল এরাউন্ড সেফ ব্লক", brand: "MISSHA", category: "Sunscreen", ml: "50ml", price: 1250, description: "Matte finish daily sun block that controls oil and protects skin.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
+    "880950050101": { name: "MISSHA Cotton Sun All Around Safe Block SPF50+ PA++++", nameBN: "à¦®à¦¿à¦¶à¦¾ à¦•à¦Ÿà¦¨ à¦¸à¦¾à¦¨ à¦…à¦² à¦à¦°à¦¾à¦‰à¦¨à§à¦¡ à¦¸à§‡à¦« à¦¬à§à¦²à¦•", brand: "MISSHA", category: "Sunscreen", ml: "50ml", price: 1250, description: "Matte finish daily sun block that controls oil and protects skin.", imageUrl: "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60" },
 
     // The Ordinary
-    "769915190101": { name: "The Ordinary Serum", nameBN: "দি অর্ডিনারি সিরাম", brand: "The Ordinary", category: "Serum & Essence", ml: "30ml", price: 1250, description: "Targeted facial serum for clear, glowing skin.", imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" }
+    "769915190101": { name: "The Ordinary Serum", nameBN: "à¦¦à¦¿ à¦…à¦°à§à¦¡à¦¿à¦¨à¦¾à¦°à¦¿ à¦¸à¦¿à¦°à¦¾à¦®", brand: "The Ordinary", category: "Serum & Essence", ml: "30ml", price: 1250, description: "Targeted facial serum for clear, glowing skin.", imageUrl: "https://images.unsplash.com/photo-1608248597481-496100c8c836?w=600&auto=format&fit=crop&q=60" }
   };
 
   if (knownBarcodeDb[cleanBarcode]) {
@@ -4061,7 +4061,7 @@ Note: Barcodes starting with "880" are South Korean skincare and cosmetic items.
 
 Provide:
 1. Exact official English Product Name (e.g. "COSRX Advanced Snail 96 Mucin Power Essence")
-2. Natural Bengali/Bangla translation or transliteration of the product name (e.g. "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স")
+2. Natural Bengali/Bangla translation or transliteration of the product name (e.g. "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦à¦¡à¦­à¦¾à¦¨à§à¦¸à¦¡ à¦¸à§à¦¨à§‡à¦² à§¯à§¬ à¦®à¦¿à¦‰à¦¸à¦¿à¦¨ à¦ªà¦¾à¦“à§Ÿà¦¾à¦° à¦à¦¸à§‡à¦¨à§à¦¸")
 3. Brand Name (e.g. "COSRX", "Beauty of Joseon", "Anua", "Skin1004", "Laneige", "Some By Mi", "Round Lab", etc.)
 4. Category (Must be one of: "Cleanser", "Toner", "Serum & Essence", "Cream & Moisturizer", "Sunscreen", "Lip Care", "Eye Care", "Mask & Pack", "Exfoliator")
 5. Size/Volume (e.g. "100ml", "50ml", "150ml")
@@ -4101,7 +4101,7 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
     barcode: cleanBarcode,
     barcodeNormalized: cleanBarcode,
     name: `Authentic Korean Skincare Item (${cleanBarcode})`,
-    nameBN: `অথেনটিক কোরিয়ান স্কিনকেয়ার আইটেম (${cleanBarcode})`,
+    nameBN: `à¦…à¦¥à§‡à¦¨à¦Ÿà¦¿à¦• à¦•à§‹à¦°à¦¿à§Ÿà¦¾à¦¨ à¦¸à§à¦•à¦¿à¦¨à¦•à§‡à¦¯à¦¼à¦¾à¦° à¦†à¦‡à¦Ÿà§‡à¦® (${cleanBarcode})`,
     brand: "Korean Skincare",
     category: "Serum & Essence",
     ml: "100ml",
@@ -4122,13 +4122,13 @@ app.post("/api/gemini/analyze-image", async (req, res) => {
   if (!ai) {
     return res.json({
       name: "COSRX Advanced Snail 96 Mucin Power Essence",
-      nameBN: "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স",
+      nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦à¦¡à¦­à¦¾à¦¨à§à¦¸à¦¡ à¦¸à§à¦¨à§‡à¦² à§¯à§¬ à¦®à¦¿à¦‰à¦¸à¦¿à¦¨ à¦ªà¦¾à¦“à§Ÿà¦¾à¦° à¦à¦¸à§‡à¦¨à§à¦¸",
       brand: "COSRX",
       category: "Serum & Essence",
       ml: "100ml",
       price: 1850,
       description: "Authentic K-Beauty skincare product formulated with 96% snail mucin to deeply hydrate, repair skin barriers, and boost natural skin radiance.",
-      descriptionBN: "আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।",
+      descriptionBN: "à¦†à¦®à¦¦à¦¾à¦¨à¦¿à¦•à§ƒà¦¤ à¦†à¦¸à¦² à¦•à§‹à¦°à¦¿à¦¯à¦¼à¦¾à¦¨ à¦¸à§à¦•à¦¿à¦¨à¦•à§‡à¦¯à¦¼à¦¾à¦° à¦ªà§à¦°à§‹à¦¡à¦¾à¦•à§à¦Ÿ à¦¯à¦¾ à¦†à¦ªà¦¨à¦¾à¦° à¦¤à§à¦¬à¦•à§‡à¦° à¦—à¦­à§€à¦° à¦†à¦°à§à¦¦à§à¦°à¦¤à¦¾ à¦“ à¦—à§à¦²à§‹ à¦ªà§à¦°à¦¦à¦¾à¦¨ à¦•à¦°à§‡à¥¤",
       seoTitle: "COSRX Advanced Snail 96 Mucin Power Essence 100ml | Korean Skin Food BD",
       metaDescription: "Buy authentic COSRX Advanced Snail 96 Mucin Power Essence in Bangladesh at the best price. 100% genuine with Cash on Delivery nationwide.",
       keywords: "K-Beauty, skincare, Bangladesh, authentic cosmetics, COSRX, snail essence",
@@ -4190,7 +4190,7 @@ Analyze this skincare product photo carefully. Inspect the packaging bottle, tub
 
 Extract and generate the following comprehensive product details:
 1. "name": The exact official English Product Name (e.g. "COSRX Advanced Snail 96 Mucin Power Essence", "Beauty of Joseon Relief Sun: Rice + Probiotics SPF50+", "Anua Heartleaf 77% Soothing Toner", "Skin1004 Madagascar Centella Ampoule", etc.)
-2. "nameBN": Natural Bengali/Bangla transliteration/translation of the product name (e.g. "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স")
+2. "nameBN": Natural Bengali/Bangla transliteration/translation of the product name (e.g. "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦à¦¡à¦­à¦¾à¦¨à§à¦¸à¦¡ à¦¸à§à¦¨à§‡à¦² à§¯à§¬ à¦®à¦¿à¦‰à¦¸à¦¿à¦¨ à¦ªà¦¾à¦“à§Ÿà¦¾à¦° à¦à¦¸à§‡à¦¨à§à¦¸")
 3. "brand": The brand name (e.g. "COSRX", "Beauty of Joseon", "Anua", "SKIN1004", "Laneige", "Some By Mi", "Round Lab", etc.)
 4. "category": Must be one of: "Cleanser", "Toner", "Serum & Essence", "Cream & Moisturizer", "Sunscreen", "Lip Care", "Eye Care", "Mask & Pack", "Exfoliator"
 5. "ml": Size/Volume with unit (e.g. "100ml", "50ml", "150ml", "20g")
@@ -4226,7 +4226,7 @@ Analyze these text clues derived from a product image file name: "${cleanClues}"
 
 Extract and generate the following details:
 1. "name": The exact official English Product Name (e.g. "COSRX Advanced Snail 96 Mucin Power Essence", "Beauty of Joseon Relief Sun: Rice + Probiotics SPF50+", "Anua Heartleaf 77% Soothing Toner", "Skin1004 Madagascar Centella Ampoule", etc.)
-2. "nameBN": Natural Bengali/Bangla transliteration/translation of the product name (e.g. "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স")
+2. "nameBN": Natural Bengali/Bangla transliteration/translation of the product name (e.g. "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦à¦¡à¦­à¦¾à¦¨à§à¦¸à¦¡ à¦¸à§à¦¨à§‡à¦² à§¯à§¬ à¦®à¦¿à¦‰à¦¸à¦¿à¦¨ à¦ªà¦¾à¦“à§Ÿà¦¾à¦° à¦à¦¸à§‡à¦¨à§à¦¸")
 3. "brand": Guess the most likely skincare brand (e.g. "COSRX", "Beauty of Joseon", "Anua", "SKIN1004", "Laneige", "Some By Mi", "Round Lab", etc.)
 4. "category": Must be one of: "Cleanser", "Toner", "Serum & Essence", "Cream & Moisturizer", "Sunscreen", "Lip Care", "Eye Care", "Mask & Pack", "Exfoliator"
 5. "ml": Size/Volume (e.g. "50ml", "100ml", "150ml")
@@ -4280,7 +4280,7 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
         ml: mlMatch ? mlMatch[1] : "100ml",
         price: priceMatch ? Number(priceMatch[1]) : 1850,
         description: descMatch ? descMatch[1] : "Premium authentic skincare imported directly from Korea for radiant skin.",
-        descriptionBN: descBnMatch ? descBnMatch[1] : "আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।",
+        descriptionBN: descBnMatch ? descBnMatch[1] : "à¦†à¦®à¦¦à¦¾à¦¨à¦¿à¦•à§ƒà¦¤ à¦†à¦¸à¦² à¦•à§‹à¦°à¦¿à¦¯à¦¼à¦¾à¦¨ à¦¸à§à¦•à¦¿à¦¨à¦•à§‡à¦¯à¦¼à¦¾à¦° à¦ªà§à¦°à§‹à¦¡à¦¾à¦•à§à¦Ÿ à¦¯à¦¾ à¦†à¦ªà¦¨à¦¾à¦° à¦¤à§à¦¬à¦•à§‡à¦° à¦—à¦­à§€à¦° à¦†à¦°à§à¦¦à§à¦°à¦¤à¦¾ à¦“ à¦—à§à¦²à§‹ à¦ªà§à¦°à¦¦à¦¾à¦¨ à¦•à¦°à§‡à¥¤",
         seoTitle: seoTitleMatch ? seoTitleMatch[1] : "Authentic K-Beauty Skincare | Korean Skin Food BD",
         metaDescription: metaDescMatch ? metaDescMatch[1] : "Buy authentic Korean skincare products at the best prices in Bangladesh. Cash on delivery nationwide.",
         keywords: keywordsMatch ? keywordsMatch[1] : "K-Beauty, skincare, Bangladesh, authentic cosmetics",
@@ -4294,13 +4294,13 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
     // Absolute fallback so the API call always completes successfully and populates high-fidelity details
     res.json({
       name: "COSRX Advanced Snail 96 Mucin Power Essence",
-      nameBN: "কসআরএক্স এডভান্সড স্নেল ৯৬ মিউসিন পাওয়ার এসেন্স",
+      nameBN: "à¦•à¦¸à¦†à¦°à¦à¦•à§à¦¸ à¦à¦¡à¦­à¦¾à¦¨à§à¦¸à¦¡ à¦¸à§à¦¨à§‡à¦² à§¯à§¬ à¦®à¦¿à¦‰à¦¸à¦¿à¦¨ à¦ªà¦¾à¦“à§Ÿà¦¾à¦° à¦à¦¸à§‡à¦¨à§à¦¸",
       brand: "COSRX",
       category: "Serum & Essence",
       ml: "100ml",
       price: 1850,
       description: "Authentic K-Beauty skincare product formulated with 96% snail mucin to deeply hydrate, repair skin barriers, and boost natural skin radiance.",
-      descriptionBN: "আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।",
+      descriptionBN: "à¦†à¦®à¦¦à¦¾à¦¨à¦¿à¦•à§ƒà¦¤ à¦†à¦¸à¦² à¦•à§‹à¦°à¦¿à¦¯à¦¼à¦¾à¦¨ à¦¸à§à¦•à¦¿à¦¨à¦•à§‡à¦¯à¦¼à¦¾à¦° à¦ªà§à¦°à§‹à¦¡à¦¾à¦•à§à¦Ÿ à¦¯à¦¾ à¦†à¦ªà¦¨à¦¾à¦° à¦¤à§à¦¬à¦•à§‡à¦° à¦—à¦­à§€à¦° à¦†à¦°à§à¦¦à§à¦°à¦¤à¦¾ à¦“ à¦—à§à¦²à§‹ à¦ªà§à¦°à¦¦à¦¾à¦¨ à¦•à¦°à§‡à¥¤",
       seoTitle: "COSRX Advanced Snail 96 Mucin Power Essence 100ml | Korean Skin Food BD",
       metaDescription: "Buy authentic COSRX Advanced Snail 96 Mucin Power Essence in Bangladesh at the best price. Cash on Delivery. Order online!",
       keywords: "K-Beauty, skincare, Bangladesh, authentic cosmetics, COSRX",
@@ -4772,7 +4772,7 @@ app.post("/api/gemini/generate-marketing", async (req, res) => {
   // If Gemini is not set up, return simulated yet high-fidelity localized results
   if (!ai) {
     const defaultSeo = `Buy authentic ${name} in Bangladesh. Imported directly from Korea. Best price for ${category} by ${brand} at Korean Skin Food BD. Free consultation and cash on delivery!`;
-    const defaultSocial = `✨ Glow with confidence! 🌸 The trending ${name} by ${brand} is now available at Korean Skin Food BD for only ৳${price || '1,500'}. Achieve beautiful, glassy Korean skin today! Standard cash on delivery available across Bangladesh. 🇧🇩 Orders yours now! #KBeautyBD #KoreanSkinFood #SkincareDhaka`;
+    const defaultSocial = `âœ¨ Glow with confidence! ðŸŒ¸ The trending ${name} by ${brand} is now available at Korean Skin Food BD for only à§³${price || '1,500'}. Achieve beautiful, glassy Korean skin today! Standard cash on delivery available across Bangladesh. ðŸ‡§ðŸ‡© Orders yours now! #KBeautyBD #KoreanSkinFood #SkincareDhaka`;
     return res.json({ seo: defaultSeo, social: defaultSocial });
   }
 
@@ -4782,10 +4782,10 @@ Generate a high-converting SEO meta description (maximum 150 characters) and an 
 Product Name: ${name}
 Brand: ${brand}
 Category: ${category}
-Price: ৳${price}
+Price: à§³${price}
 Description: ${description}
 
-The audience is in Bangladesh, and they value 100% authentic imported Korean skincare products. Prices are in BDT (৳) and shipping is via Cash on Delivery. Keep the tone friendly, professional, premium, and persuasive.
+The audience is in Bangladesh, and they value 100% authentic imported Korean skincare products. Prices are in BDT (à§³) and shipping is via Cash on Delivery. Keep the tone friendly, professional, premium, and persuasive.
 
 Return the result as a strict JSON object with exactly two keys: "seo" and "social". Do not include any markdown formatting or backticks around the JSON.`;
 
@@ -4805,7 +4805,7 @@ Return the result as a strict JSON object with exactly two keys: "seo" and "soci
     console.log("[Gemini Marketing] Fallback template active:", error?.message || error);
     res.json({ 
       seo: `Order ${name} by ${brand} at Korean Skin Food BD with cash on delivery across Bangladesh!`,
-      social: `🌸 ${name} by ${brand} is now available at Korean Skin Food BD! Price: ৳${price || '1,500'} with cash on delivery. Order yours today!`
+      social: `ðŸŒ¸ ${name} by ${brand} is now available at Korean Skin Food BD! Price: à§³${price || '1,500'} with cash on delivery. Order yours today!`
     });
   }
 });
@@ -4878,19 +4878,19 @@ app.post("/api/chatbot", async (req, res) => {
     let productsList: any[] = [];
 
     // Extract potential products
-    if (textLower.includes("snail") || textLower.includes("essence") || textLower.includes("স্নেইল")) {
+    if (textLower.includes("snail") || textLower.includes("essence") || textLower.includes("à¦¸à§à¦¨à§‡à¦‡à¦²")) {
       productsList.push({ id: "cosrx-snail-96", name: "COSRX Advanced Snail 96 Mucin Power Essence", price: 1850, quantity: 1 });
     }
-    if (textLower.includes("sunscreen") || textLower.includes("spf") || textLower.includes("সানস্ক্রিন") || textLower.includes("joseon")) {
+    if (textLower.includes("sunscreen") || textLower.includes("spf") || textLower.includes("à¦¸à¦¾à¦¨à¦¸à§à¦•à§à¦°à¦¿à¦¨") || textLower.includes("joseon")) {
       productsList.push({ id: "boj-sunscreen-rice", name: "Beauty of Joseon Relief Sun : Rice + Probiotics SPF50+", price: 1650, quantity: 1 });
     }
-    if (textLower.includes("cleanser") || textLower.includes("ক্লিনজার") || textLower.includes("low ph") || textLower.includes("good morning")) {
+    if (textLower.includes("cleanser") || textLower.includes("à¦•à§à¦²à¦¿à¦¨à¦œà¦¾à¦°") || textLower.includes("low ph") || textLower.includes("good morning")) {
       productsList.push({ id: "cosrx-cleanser-goodmorning", name: "COSRX Low pH Good Morning Gel Cleanser", price: 1150, quantity: 1 });
     }
-    if (textLower.includes("toner") || textLower.includes("টোনার") || textLower.includes("anua") || textLower.includes("heartleaf")) {
+    if (textLower.includes("toner") || textLower.includes("à¦Ÿà§‹à¦¨à¦¾à¦°") || textLower.includes("anua") || textLower.includes("heartleaf")) {
       productsList.push({ id: "anua-toner-77", name: "Anua Heartleaf 77% Soothing Toner", price: 2100, quantity: 1 });
     }
-    if (textLower.includes("ampoule") || textLower.includes("অ্যাম্পুল") || textLower.includes("centella") || textLower.includes("skin1004")) {
+    if (textLower.includes("ampoule") || textLower.includes("à¦…à§à¦¯à¦¾à¦®à§à¦ªà§à¦²") || textLower.includes("centella") || textLower.includes("skin1004")) {
       productsList.push({ id: "skin1004-centella-ampoule", name: "Madagascar Centella Ampoule", price: 1950, quantity: 1 });
     }
 
@@ -4907,7 +4907,7 @@ app.post("/api/chatbot", async (req, res) => {
     // Extract address
     const lines = historyText.split("\n");
     for (const line of lines) {
-      if (line.includes("User:") && (line.includes("Dhaka") || line.includes("dhaka") || line.includes("ঢাকা") || line.includes("Road") || line.includes("Sector") || line.includes("Mirpur") || line.includes("Uttara") || line.includes("Dhanmondi") || line.includes("Bangladesh") || line.includes("চট্টগ্রাম") || line.includes("Chittagong") || line.includes("Khulna") || line.includes("Sylhet"))) {
+      if (line.includes("User:") && (line.includes("Dhaka") || line.includes("dhaka") || line.includes("à¦¢à¦¾à¦•à¦¾") || line.includes("Road") || line.includes("Sector") || line.includes("Mirpur") || line.includes("Uttara") || line.includes("Dhanmondi") || line.includes("Bangladesh") || line.includes("à¦šà¦Ÿà§à¦Ÿà¦—à§à¦°à¦¾à¦®") || line.includes("Chittagong") || line.includes("Khulna") || line.includes("Sylhet"))) {
         const clean = line.replace(/User:\s*"/, "").replace(/"\s*$/, "");
         if (clean.length > 5) {
           address = clean;
@@ -4916,7 +4916,7 @@ app.post("/api/chatbot", async (req, res) => {
     }
 
     const lastMessage = messages[messages.length - 1]?.text?.toLowerCase() || "";
-    if (lastMessage.includes("হ্যাঁ") || lastMessage.includes("confirm") || lastMessage.includes("yes") || lastMessage.includes("ঠিক আছে") || lastMessage.includes("হা") || lastMessage.includes("কনফার্ম")) {
+    if (lastMessage.includes("à¦¹à§à¦¯à¦¾à¦") || lastMessage.includes("confirm") || lastMessage.includes("yes") || lastMessage.includes("à¦ à¦¿à¦• à¦†à¦›à§‡") || lastMessage.includes("à¦¹à¦¾") || lastMessage.includes("à¦•à¦¨à¦«à¦¾à¦°à§à¦®")) {
       if (phone && address && productsList.length > 0) {
         isConfirmed = true;
       }
@@ -4924,25 +4924,25 @@ app.post("/api/chatbot", async (req, res) => {
 
     let reply = "";
     if (messages.length <= 1) {
-      reply = "আসসালামু আলাইকুম! আমি কোরিয়ান স্কিন ফুড অ্যাসিস্ট্যান্ট। আপনার ত্বকের যত্ন নিতে আমি এখানে আছি। আপনার ত্বকের ধরণ কেমন এবং কি ধরণের সমস্যা সমাধান করতে চাচ্ছেন? যেমন: তৈলাক্ত বা শুষ্ক ত্বক, ব্রণ বা হাইড্রেশনের সমস্যা? 🌸";
-    } else if (textLower.includes("oily") || textLower.includes("তৈলাক্ত") || textLower.includes("ব্রন") || textLower.includes("acne") || textLower.includes("sensitive")) {
-      reply = "আপনার ত্বকের জন্য আমাদের COSRX Low pH Good Morning Gel Cleanser (৳১১৫০) অত্যন্ত কার্যকরী হবে। এটি টি ট্রি অয়েল এবং BHA সমৃদ্ধ যা ত্বক শান্ত ও এক্সফোলিয়েট করে। আপনি কি এটি অর্ডার করতে চান? 🌸";
-    } else if (textLower.includes("dry") || textLower.includes("শুষ্ক") || textLower.includes("hydration") || textLower.includes("glow")) {
-      reply = "শুষ্ক ত্বকের গভীর আর্দ্রতার জন্য COSRX Advanced Snail 96 Mucin Power Essence (৳১৮৫০) ব্যবহার করা উচিত। এটি ত্বকে দ্রুত শোষিত হয়ে ন্যাচারাল গ্লো দেয়। আপনি কি এটি অর্ডার করতে চান? ✨";
-    } else if (textLower.includes("order") || textLower.includes("কিনব") || textLower.includes("নিতে চাই") || textLower.includes("buy")) {
+      reply = "à¦†à¦¸à¦¸à¦¾à¦²à¦¾à¦®à§ à¦†à¦²à¦¾à¦‡à¦•à§à¦®! à¦†à¦®à¦¿ à¦•à§‹à¦°à¦¿à¦¯à¦¼à¦¾à¦¨ à¦¸à§à¦•à¦¿à¦¨ à¦«à§à¦¡ à¦…à§à¦¯à¦¾à¦¸à¦¿à¦¸à§à¦Ÿà§à¦¯à¦¾à¦¨à§à¦Ÿà¥¤ à¦†à¦ªà¦¨à¦¾à¦° à¦¤à§à¦¬à¦•à§‡à¦° à¦¯à¦¤à§à¦¨ à¦¨à¦¿à¦¤à§‡ à¦†à¦®à¦¿ à¦à¦–à¦¾à¦¨à§‡ à¦†à¦›à¦¿à¥¤ à¦†à¦ªà¦¨à¦¾à¦° à¦¤à§à¦¬à¦•à§‡à¦° à¦§à¦°à¦£ à¦•à§‡à¦®à¦¨ à¦à¦¬à¦‚ à¦•à¦¿ à¦§à¦°à¦£à§‡à¦° à¦¸à¦®à¦¸à§à¦¯à¦¾ à¦¸à¦®à¦¾à¦§à¦¾à¦¨ à¦•à¦°à¦¤à§‡ à¦šà¦¾à¦šà§à¦›à§‡à¦¨? à¦¯à§‡à¦®à¦¨: à¦¤à§ˆà¦²à¦¾à¦•à§à¦¤ à¦¬à¦¾ à¦¶à§à¦·à§à¦• à¦¤à§à¦¬à¦•, à¦¬à§à¦°à¦£ à¦¬à¦¾ à¦¹à¦¾à¦‡à¦¡à§à¦°à§‡à¦¶à¦¨à§‡à¦° à¦¸à¦®à¦¸à§à¦¯à¦¾? ðŸŒ¸";
+    } else if (textLower.includes("oily") || textLower.includes("à¦¤à§ˆà¦²à¦¾à¦•à§à¦¤") || textLower.includes("à¦¬à§à¦°à¦¨") || textLower.includes("acne") || textLower.includes("sensitive")) {
+      reply = "à¦†à¦ªà¦¨à¦¾à¦° à¦¤à§à¦¬à¦•à§‡à¦° à¦œà¦¨à§à¦¯ à¦†à¦®à¦¾à¦¦à§‡à¦° COSRX Low pH Good Morning Gel Cleanser (à§³à§§à§§à§«à§¦) à¦…à¦¤à§à¦¯à¦¨à§à¦¤ à¦•à¦¾à¦°à§à¦¯à¦•à¦°à§€ à¦¹à¦¬à§‡à¥¤ à¦à¦Ÿà¦¿ à¦Ÿà¦¿ à¦Ÿà§à¦°à¦¿ à¦…à§Ÿà§‡à¦² à¦à¦¬à¦‚ BHA à¦¸à¦®à§ƒà¦¦à§à¦§ à¦¯à¦¾ à¦¤à§à¦¬à¦• à¦¶à¦¾à¦¨à§à¦¤ à¦“ à¦à¦•à§à¦¸à¦«à§‹à¦²à¦¿à¦¯à¦¼à§‡à¦Ÿ à¦•à¦°à§‡à¥¤ à¦†à¦ªà¦¨à¦¿ à¦•à¦¿ à¦à¦Ÿà¦¿ à¦…à¦°à§à¦¡à¦¾à¦° à¦•à¦°à¦¤à§‡ à¦šà¦¾à¦¨? ðŸŒ¸";
+    } else if (textLower.includes("dry") || textLower.includes("à¦¶à§à¦·à§à¦•") || textLower.includes("hydration") || textLower.includes("glow")) {
+      reply = "à¦¶à§à¦·à§à¦• à¦¤à§à¦¬à¦•à§‡à¦° à¦—à¦­à§€à¦° à¦†à¦°à§à¦¦à§à¦°à¦¤à¦¾à¦° à¦œà¦¨à§à¦¯ COSRX Advanced Snail 96 Mucin Power Essence (à§³à§§à§®à§«à§¦) à¦¬à§à¦¯à¦¬à¦¹à¦¾à¦° à¦•à¦°à¦¾ à¦‰à¦šà¦¿à¦¤à¥¤ à¦à¦Ÿà¦¿ à¦¤à§à¦¬à¦•à§‡ à¦¦à§à¦°à§à¦¤ à¦¶à§‹à¦·à¦¿à¦¤ à¦¹à§Ÿà§‡ à¦¨à§à¦¯à¦¾à¦šà¦¾à¦°à¦¾à¦² à¦—à§à¦²à§‹ à¦¦à§‡à§Ÿà¥¤ à¦†à¦ªà¦¨à¦¿ à¦•à¦¿ à¦à¦Ÿà¦¿ à¦…à¦°à§à¦¡à¦¾à¦° à¦•à¦°à¦¤à§‡ à¦šà¦¾à¦¨? âœ¨";
+    } else if (textLower.includes("order") || textLower.includes("à¦•à¦¿à¦¨à¦¬") || textLower.includes("à¦¨à¦¿à¦¤à§‡ à¦šà¦¾à¦‡") || textLower.includes("buy")) {
       if (!phone) {
-        reply = "অর্ডার করার জন্য অনুগ্রহ করে আপনার সচল মোবাইল নাম্বারটি বলুন।";
+        reply = "à¦…à¦°à§à¦¡à¦¾à¦° à¦•à¦°à¦¾à¦° à¦œà¦¨à§à¦¯ à¦…à¦¨à§à¦—à§à¦°à¦¹ à¦•à¦°à§‡ à¦†à¦ªà¦¨à¦¾à¦° à¦¸à¦šà¦² à¦®à§‹à¦¬à¦¾à¦‡à¦² à¦¨à¦¾à¦®à§à¦¬à¦¾à¦°à¦Ÿà¦¿ à¦¬à¦²à§à¦¨à¥¤";
       } else if (!address) {
-        reply = "অনেক ধন্যবাদ! এবার আপনার ডেলিভারি অ্যাড্রেস বা ঠিকানাটি অনুগ্রহ করে জানান।";
+        reply = "à¦…à¦¨à§‡à¦• à¦§à¦¨à§à¦¯à¦¬à¦¾à¦¦! à¦à¦¬à¦¾à¦° à¦†à¦ªà¦¨à¦¾à¦° à¦¡à§‡à¦²à¦¿à¦­à¦¾à¦°à¦¿ à¦…à§à¦¯à¦¾à¦¡à§à¦°à§‡à¦¸ à¦¬à¦¾ à¦ à¦¿à¦•à¦¾à¦¨à¦¾à¦Ÿà¦¿ à¦…à¦¨à§à¦—à§à¦°à¦¹ à¦•à¦°à§‡ à¦œà¦¾à¦¨à¦¾à¦¨à¥¤";
       } else {
-        reply = `ধন্যবাদ! আপনার অর্ডার সামারি:\n\nপণ্য: ${productsList.map(p => `${p.name} (৳${p.price})`).join(", ")}\nমোবাইল: ${phone}\nঠিকানা: ${address}\n\nসব তথ্য কি ঠিক আছে? 'হ্যাঁ' বা 'confirm' লিখে অর্ডারটি নিশ্চিত করুন।`;
+        reply = `à¦§à¦¨à§à¦¯à¦¬à¦¾à¦¦! à¦†à¦ªà¦¨à¦¾à¦° à¦…à¦°à§à¦¡à¦¾à¦° à¦¸à¦¾à¦®à¦¾à¦°à¦¿:\n\nà¦ªà¦£à§à¦¯: ${productsList.map(p => `${p.name} (à§³${p.price})`).join(", ")}\nà¦®à§‹à¦¬à¦¾à¦‡à¦²: ${phone}\nà¦ à¦¿à¦•à¦¾à¦¨à¦¾: ${address}\n\nà¦¸à¦¬ à¦¤à¦¥à§à¦¯ à¦•à¦¿ à¦ à¦¿à¦• à¦†à¦›à§‡? 'à¦¹à§à¦¯à¦¾à¦' à¦¬à¦¾ 'confirm' à¦²à¦¿à¦–à§‡ à¦…à¦°à§à¦¡à¦¾à¦°à¦Ÿà¦¿ à¦¨à¦¿à¦¶à§à¦šà¦¿à¦¤ à¦•à¦°à§à¦¨à¥¤`;
       }
     } else if (phone && address && !isConfirmed) {
-      reply = `ধন্যবাদ! আপনার অর্ডার সামারি:\n\nপণ্য: ${productsList.map(p => `${p.name} (৳${p.price})`).join(", ")}\nমোবাইল: ${phone}\nঠিকানা: ${address}\n\nসব তথ্য কি ঠিক আছে? 'হ্যাঁ' বা 'confirm' লিখে অর্ডারটি নিশ্চিত করুন।`;
+      reply = `à¦§à¦¨à§à¦¯à¦¬à¦¾à¦¦! à¦†à¦ªà¦¨à¦¾à¦° à¦…à¦°à§à¦¡à¦¾à¦° à¦¸à¦¾à¦®à¦¾à¦°à¦¿:\n\nà¦ªà¦£à§à¦¯: ${productsList.map(p => `${p.name} (à§³${p.price})`).join(", ")}\nà¦®à§‹à¦¬à¦¾à¦‡à¦²: ${phone}\nà¦ à¦¿à¦•à¦¾à¦¨à¦¾: ${address}\n\nà¦¸à¦¬ à¦¤à¦¥à§à¦¯ à¦•à¦¿ à¦ à¦¿à¦• à¦†à¦›à§‡? 'à¦¹à§à¦¯à¦¾à¦' à¦¬à¦¾ 'confirm' à¦²à¦¿à¦–à§‡ à¦…à¦°à§à¦¡à¦¾à¦°à¦Ÿà¦¿ à¦¨à¦¿à¦¶à§à¦šà¦¿à¦¤ à¦•à¦°à§à¦¨à¥¤`;
     } else if (isConfirmed) {
-      reply = "অসাধারণ! আপনার অর্ডারটি কনফার্ম করা হয়েছে। নিচে 'Send Order via WhatsApp' বাটনে ক্লিক করে আমাদের হোয়াটসঅ্যাপ নাম্বারে অর্ডারটি সম্পন্ন করুন। ধন্যবাদ! 🌸✨";
+      reply = "à¦…à¦¸à¦¾à¦§à¦¾à¦°à¦£! à¦†à¦ªà¦¨à¦¾à¦° à¦…à¦°à§à¦¡à¦¾à¦°à¦Ÿà¦¿ à¦•à¦¨à¦«à¦¾à¦°à§à¦® à¦•à¦°à¦¾ à¦¹à§Ÿà§‡à¦›à§‡à¥¤ à¦¨à¦¿à¦šà§‡ 'Send Order via WhatsApp' à¦¬à¦¾à¦Ÿà¦¨à§‡ à¦•à§à¦²à¦¿à¦• à¦•à¦°à§‡ à¦†à¦®à¦¾à¦¦à§‡à¦° à¦¹à§‹à§Ÿà¦¾à¦Ÿà¦¸à¦…à§à¦¯à¦¾à¦ª à¦¨à¦¾à¦®à§à¦¬à¦¾à¦°à§‡ à¦…à¦°à§à¦¡à¦¾à¦°à¦Ÿà¦¿ à¦¸à¦®à§à¦ªà¦¨à§à¦¨ à¦•à¦°à§à¦¨à¥¤ à¦§à¦¨à§à¦¯à¦¬à¦¾à¦¦! ðŸŒ¸âœ¨";
     } else {
-      reply = "আমি বুঝতে পেরেছি। আপনি কি কোন নির্দিষ্ট প্রোডাক্ট সম্পর্কে জানতে চান বা অর্ডার করতে চান? আমাদের কাছে COSRX Snail Essence (৳১৮৫০) এবং Joseon Sunscreen (৳১৬৫০) এভেইলেবল আছে।";
+      reply = "à¦†à¦®à¦¿ à¦¬à§à¦à¦¤à§‡ à¦ªà§‡à¦°à§‡à¦›à¦¿à¥¤ à¦†à¦ªà¦¨à¦¿ à¦•à¦¿ à¦•à§‹à¦¨ à¦¨à¦¿à¦°à§à¦¦à¦¿à¦·à§à¦Ÿ à¦ªà§à¦°à§‹à¦¡à¦¾à¦•à§à¦Ÿ à¦¸à¦®à§à¦ªà¦°à§à¦•à§‡ à¦œà¦¾à¦¨à¦¤à§‡ à¦šà¦¾à¦¨ à¦¬à¦¾ à¦…à¦°à§à¦¡à¦¾à¦° à¦•à¦°à¦¤à§‡ à¦šà¦¾à¦¨? à¦†à¦®à¦¾à¦¦à§‡à¦° à¦•à¦¾à¦›à§‡ COSRX Snail Essence (à§³à§§à§®à§«à§¦) à¦à¦¬à¦‚ Joseon Sunscreen (à§³à§§à§¬à§«à§¦) à¦à¦­à§‡à¦‡à¦²à§‡à¦¬à¦² à¦†à¦›à§‡à¥¤";
     }
 
     return res.json({
@@ -4967,16 +4967,16 @@ Your goal is to guide the customer to find authentic Korean skincare products, a
 CRITICAL INSTRUCTIONS FOR CONVERSATION STYLE:
 1. Speak in a warm, texting-style tone in Bangla by default. Switch to English if the customer writes in English.
 2. NEVER use bullet-point lists, numbered lists, markdown titles (#, ##), or bolded blocks in your chat replies. Keep it conversational like a real human texting a friend on WhatsApp.
-3. Keep replies relatively concise, friendly, and easy to read. Use emojis naturally (like 🌸, ✨, 🧴, ☀️).
+3. Keep replies relatively concise, friendly, and easy to read. Use emojis naturally (like ðŸŒ¸, âœ¨, ðŸ§´, â˜€ï¸).
 4. Do NOT sound robotic.
 
 SKINCARE CONSULTATION CONVERSATION FLOW:
 - Greet the user warmly.
 - If they haven't mentioned their skin type or main concern, ask about it nicely (Dry / Oily / Combination / Sensitive / Normal; Acne / Brightening / Hydration / Anti-aging).
-- Once they share, recommend 1 to 3 specific products from our real catalog below. Mention their name and price in BDT (৳) naturally in your response text.
+- Once they share, recommend 1 to 3 specific products from our real catalog below. Mention their name and price in BDT (à§³) naturally in your response text.
 - If they show interest in buying, ask which product(s) and how many they want, their delivery address, and their phone number. Ask these details conversationally, one or two questions at a time (e.g. first ask which products, then ask for address and phone), rather than sending a bulk form.
-- Once you have the items, quantities, phone number, and delivery address, summarize the order back to them in the chat text and ask them to confirm (e.g., 'তাহলে কনফার্ম করছি...').
-- Once the customer explicitly confirms the summary (e.g., they say yes, ঠিক আছে, হ্যাঁ, confirm, etc.), set orderState.isConfirmed to true in your JSON output.
+- Once you have the items, quantities, phone number, and delivery address, summarize the order back to them in the chat text and ask them to confirm (e.g., 'à¦¤à¦¾à¦¹à¦²à§‡ à¦•à¦¨à¦«à¦¾à¦°à§à¦® à¦•à¦°à¦›à¦¿...').
+- Once the customer explicitly confirms the summary (e.g., they say yes, à¦ à¦¿à¦• à¦†à¦›à§‡, à¦¹à§à¦¯à¦¾à¦, confirm, etc.), set orderState.isConfirmed to true in your JSON output.
 
 Here is the real-time product catalog:
 ${JSON.stringify(catalog, null, 2)}
@@ -5752,7 +5752,7 @@ app.post("/api/functions/posCheckout", async (req, res) => {
 });
 
 // =========================================================================
-// STEP 5 — WHOLESALE ORDER BACKEND & DATA MODEL ENDPOINTS
+// STEP 5 â€” WHOLESALE ORDER BACKEND & DATA MODEL ENDPOINTS
 // =========================================================================
 
 /**
@@ -7274,7 +7274,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
     }
 
     const order1Id = data1.order.id;
-    log(`✓ Order 1 created successfully: ${data1.order.orderNumber} (ID: ${order1Id})`);
+    log(`âœ“ Order 1 created successfully: ${data1.order.orderNumber} (ID: ${order1Id})`);
 
     // Verify stocks
     const p1Snap1 = await getDoc(doc(db, 'products', testProd1Id));
@@ -7304,7 +7304,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
       log(`    Movement: Product=${m.productName}, Type=${m.type}, Quantity=${m.quantity}, OrderType=${m.orderType}, Source=${m.source}`);
     });
     if (movSnap1.size !== 2) throw new Error(`Expected 2 stock movements, got ${movSnap1.size}`);
-    log("✓ Test 1 Passed!");
+    log("âœ“ Test 1 Passed!");
 
     // --- TEST 2: DUPLICATE SUBMISSION IDEMPOTENCY ---
     log("--- TEST 2: Duplicate Submission with Idempotency Key ---");
@@ -7324,7 +7324,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
     if (p1Snap2.data()?.stock !== 15 || p2Snap2.data()?.stock !== 7) {
       throw new Error("Duplicate submission deducted stock again!");
     }
-    log("✓ Test 2 Passed!");
+    log("âœ“ Test 2 Passed!");
 
     // --- TEST 3: INSUFFICIENT STOCK ---
     log("--- TEST 3: Insufficient Stock (Atomic Rejection) ---");
@@ -7360,7 +7360,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
     if (p1Snap3.data()?.stock !== 15 || p2Snap3.data()?.stock !== 7) {
       throw new Error("Stock was partially deducted on failed order!");
     }
-    log("✓ Test 3 Passed!");
+    log("âœ“ Test 3 Passed!");
 
     // --- TEST 4: ORDER CANCELLATION & ATOMIC STOCK RESTORATION ---
     log("--- TEST 4: Order Cancellation & Atomic Stock Restoration ---");
@@ -7376,7 +7376,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
     if (!res4.ok || !data4.success) {
       throw new Error(`Test 4 Failed: ${JSON.stringify(data4)}`);
     }
-    log(`✓ Order cancelled: ${data4.message}`);
+    log(`âœ“ Order cancelled: ${data4.message}`);
 
     // Verify stocks restored to 20 and 10
     const p1Snap4 = await getDoc(doc(db, 'products', testProd1Id));
@@ -7394,7 +7394,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
     log(`  Total inventory logs for Order 1 now: ${invLogs4.size} records`);
     const movSnap4 = await getDocs(query(collection(db, 'stock_movements'), where('orderId', '==', order1Id)));
     log(`  Total stock movements for Order 1 now: ${movSnap4.size} records`);
-    log("✓ Test 4 Passed!");
+    log("âœ“ Test 4 Passed!");
 
     // --- TEST 5: PREVENT DOUBLE RESTORATION ---
     log("--- TEST 5: Prevent Double Restoration on Duplicate Cancellation ---");
@@ -7416,7 +7416,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
     if (p1Snap5.data()?.stock !== 20 || p2Snap5.data()?.stock !== 10) {
       throw new Error("Stock was restored multiple times!");
     }
-    log("✓ Test 5 Passed!");
+    log("âœ“ Test 5 Passed!");
 
     // Cleanup fixtures
     try {
@@ -7424,12 +7424,12 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
       await deleteDoc(doc(db, 'products', testProd1Id));
       await deleteDoc(doc(db, 'products', testProd2Id));
       await deleteDoc(doc(db, 'wholesale_orders', order1Id));
-      log("✓ Cleanup completed successfully.");
+      log("âœ“ Cleanup completed successfully.");
     } catch (cleanupErr: any) {
       log(`  Cleanup note: ${cleanupErr.message || 'Ignored fixture cleanup permission'}`);
     }
 
-    log("🎉 ALL STEP 6 TESTS PASSED WITH 100% SUCCESS!");
+    log("ðŸŽ‰ ALL STEP 6 TESTS PASSED WITH 100% SUCCESS!");
 
     return res.json({
       success: true,
@@ -7437,7 +7437,7 @@ app.post("/api/test/wholesale-inventory-runner", verifyAdminAuth, async (req, re
       logs
     });
   } catch (err: any) {
-    log(`❌ TEST SUITE FAILED: ${err.message}`);
+    log(`âŒ TEST SUITE FAILED: ${err.message}`);
     return res.status(500).json({
       success: false,
       error: err.message,

@@ -381,11 +381,8 @@ export function WholesaleCustomerDetailsPage() {
                       <td className="p-4 font-mono font-bold text-indigo-600 text-sm">
                         {order.orderNumber || order.id.slice(0, 8)}
                       </td>
-                      <td className="p-4 text-xs font-semibold text-slate-600 whitespace-nowrap font-mono tabular-nums">
-                        <div>{new Date(order.orderDate ? (order.orderDate.includes('T') ? order.orderDate : `${order.orderDate}T12:00:00Z`) : order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                        <div className="text-[11px] text-slate-400 font-normal">
-                          {order.orderDate ? 'Commercial Date' : new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                      <td className="p-4 text-xs font-semibold text-slate-600 whitespace-nowrap">
+                        {new Date(order.createdAt).toLocaleDateString()} {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="p-4">
                         <div className="font-bold text-slate-900 text-sm">{firstProdName}{moreCount}</div>
@@ -499,13 +496,8 @@ export function WholesaleCustomerDetailsPage() {
               ) : (
                 paginatedPayments.map(payment => (
                   <tr key={payment.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-4 text-xs font-semibold text-slate-600 whitespace-nowrap font-mono tabular-nums">
-                      <div>
-                        {new Date(payment.paymentDate ? (payment.paymentDate.includes('T') ? payment.paymentDate : `${payment.paymentDate}T12:00:00Z`) : payment.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-normal">
-                        {payment.paymentDate ? 'Payment Date' : new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
+                    <td className="p-4 text-xs font-semibold text-slate-600">
+                      {new Date(payment.createdAt).toLocaleDateString()} {new Date(payment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="p-4 font-black text-emerald-600 text-base">
                       ৳{(payment.amount || 0).toLocaleString()}

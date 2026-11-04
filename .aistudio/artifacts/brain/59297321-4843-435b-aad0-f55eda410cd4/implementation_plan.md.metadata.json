@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for completing and production-hardening the Google Sheets automated backup system and integrating the Google Sheets Backup Center into the Admin Dashboard (/admin/google-sheets-backup).",
-  "updatedAt": "2026-11-04T12:57:42.199932854Z",
+  "summary": "Implementation plan for dynamic Meta Catalog (Facebook/Instagram Commerce Manager) setup with Meta Graph API direct sync, scheduled XML/CSV data feeds, and a full admin management dashboard.",
+  "updatedAt": "2026-10-15T10:57:42.012438809Z",
   "requestFeedback": true,
   "userFacing": true
 }
