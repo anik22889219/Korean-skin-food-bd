@@ -9,7 +9,6 @@ import { analytics } from '../services/analyticsService';
 import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
 import { getProductUnitPrice, getRetailPrice } from '../utils/pricing';
 import { authFetch } from '../services/apiClient';
-import posthog, { isPostHogConfigured } from '../lib/posthog';
 
 export interface CartItem {
   product: Product;
@@ -373,50 +372,17 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCheckoutStep('cart');
     // Track Add To Cart
     analytics.trackAddToCart(product, validQty);
-    if (isPostHogConfigured) {
-      posthog.capture('retail_cart_item_added', {
-        product_id: product.id,
-        product_category: product.category,
-        quantity: validQty,
-        unit_price: getRetailPrice(product),
-      });
-    }
   };
 
   const removeFromCart = (productId: string) => {
     const targetItem = cart.find((item) => item.product.id === productId);
     if (targetItem) {
       analytics.trackRemoveFromCart(targetItem.product, targetItem.quantity);
-      if (isPostHogConfigured) {
-        posthog.capture('retail_cart_item_removed', {
-          product_id: targetItem.product.id,
-          product_category: targetItem.product.category,
-          quantity: targetItem.quantity,
-          unit_price: getRetailPrice(targetItem.product),
-        });
-      }
     }
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
   };
 
   const updateCartQty = (productId: string, delta: number) => {
-    const targetItem = cart.find((item) => item.product.id === productId);
-    if (isPostHogConfigured && targetItem && delta > 0) {
-      posthog.capture('retail_cart_item_added', {
-        product_id: targetItem.product.id,
-        product_category: targetItem.product.category,
-        quantity: delta,
-        unit_price: getRetailPrice(targetItem.product),
-      });
-    } else if (isPostHogConfigured && targetItem && delta < 0) {
-      posthog.capture('retail_cart_item_removed', {
-        product_id: targetItem.product.id,
-        product_category: targetItem.product.category,
-        quantity: Math.abs(delta),
-        unit_price: getRetailPrice(targetItem.product),
-      });
-    }
-
     setCart((prev) => {
       return prev
         .map((item) => {
@@ -562,19 +528,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Track Authoritative Purchase immediately on order placement
       analytics.trackPurchase(createdOrder).catch(console.warn);
-      if (isPostHogConfigured) {
-        posthog.capture('retail_order_placed', {
-          item_count: orderItems.length,
-          total_quantity: orderItems.reduce((total, item) => total + item.quantity, 0),
-          total_amount: grandTotal,
-          discount_amount: totalDiscount,
-          shipping_amount: calculateShipping(),
-          payment_method: 'cod',
-          delivery_area: checkoutForm.area,
-          used_loyalty_points: redeemedPts > 0,
-          used_coupon: Boolean(appliedCoupon),
-        });
-      }
 
       // Record coupon redemption count if applicable
       if (appliedCoupon?.id) {

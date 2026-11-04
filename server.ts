@@ -4,36 +4,13 @@ import dotenv from "dotenv";
 import fs from "fs";
 import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
-import { GoogleGenAI as PostHogGoogleGenAI } from "@posthog/ai/gemini";
-import { PostHog } from "posthog-node";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, getDocs, runTransaction, query, where, deleteDoc, orderBy } from "firebase/firestore";
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
-import { createPostHogLogExporter } from "./src/services/posthogServerLogs";
 
 dotenv.config();
-
-const posthogKey = process.env.POSTHOG_KEY;
-const posthogHost = process.env.POSTHOG_HOST;
-if ((!posthogKey || !posthogHost) && process.env.NODE_ENV !== "production") {
-  const missingVariable = !posthogKey ? "POSTHOG_KEY" : "POSTHOG_HOST";
-  console.error(`${missingVariable} variable required by PostHog is missing or un-configured, this causes events to be silently missed. This error stops appearing once ${missingVariable} is configured`);
-}
-const posthog = posthogKey && posthogHost
-  ? new PostHog(posthogKey, {
-      host: posthogHost,
-      privacyMode: false,
-      flushAt: 1,
-      flushInterval: 0
-    })
-  : null;
-const posthogLogExporter = createPostHogLogExporter({
-  posthogKey,
-  posthogHost,
-  serviceName: "korean-skin-food-express",
-});
 
 const app = express();
 const PORT = 3000;
@@ -276,9 +253,7 @@ try {
         }
       }
     };
-    ai = posthog
-      ? new PostHogGoogleGenAI({ ...clientOptions, posthog })
-      : new GoogleGenAI(clientOptions);
+    ai = new GoogleGenAI(clientOptions);
     console.log("Gemini API initialized successfully.");
   } else {
     console.warn("GEMINI_API_KEY is not set. Falling back to simulated AI generation.");
@@ -307,7 +282,6 @@ async function callGeminiGenerate(params: {
   const preferred = params.preferredModel || "gemini-3.7-flash";
   const defaultList = ["gemini-3.7-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
   const modelsToTry = [preferred, ...defaultList.filter(m => m !== preferred)];
-  const traceId = crypto.randomUUID();
 
   let lastError: any = null;
 
@@ -320,18 +294,9 @@ async function callGeminiGenerate(params: {
         const response = await ai.models.generateContent({
           model,
           contents: normalizedContents,
-          ...(params.config ? { config: params.config } : {}),
-          ...(posthog ? {
-            posthogTraceId: traceId,
-            posthogProperties: { $ai_session_id: `server-${process.pid}` }
-          } : {})
+          ...(params.config ? { config: params.config } : {})
         });
         if (response) {
-          posthogLogExporter?.logger.emit({
-            severityText: "INFO",
-            body: "gemini_generation_completed",
-            attributes: { model, attempt: attempt + 1 },
-          });
           return response;
         }
       } catch (err: any) {
@@ -359,15 +324,6 @@ async function callGeminiGenerate(params: {
         } else {
           console.log(`[Gemini API] Note for ${model}: ${errMsg.slice(0, 80)}, switching to next tier...`);
         }
-
-        posthogLogExporter?.logger.emit({
-          severityText: "WARN",
-          body: "gemini_generation_retry",
-          attributes: {
-            model,
-            failure_kind: is504 ? "deadline" : is503 ? "unavailable" : is429 ? "quota" : isNetworkErr ? "network" : "other",
-          },
-        });
 
         // Add a slight 200ms pause before attempting next model tier
         if (i < modelsToTry.length - 1) {
@@ -583,11 +539,7 @@ app.post("/api/google-business/sync", async (req, res) => {
               }
             }
           }
-        },
-        ...(posthog ? {
-          posthogTraceId: crypto.randomUUID(),
-          posthogProperties: { $ai_session_id: `server-${process.pid}` }
-        } : {})
+        }
       });
 
       const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;

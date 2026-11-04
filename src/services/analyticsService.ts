@@ -7,7 +7,7 @@ import { Product, Order, OrderItem } from '../types';
 import { productService } from './productService';
 import { getStoredAttribution } from './attributionService';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from './firebase';
+import { functions, firebaseConfig } from './firebase';
 
 /// <reference types="vite/client" />
 
@@ -22,6 +22,7 @@ declare global {
     __KSF_ANALYTICS_DEBUG__?: {
       GA4_MEASUREMENT_ID: string;
       isConfigured: boolean;
+      ga4Source: 'env' | 'firebase-config' | 'hardcoded-fallback';
       META_PIXEL_ID: string;
       source: 'env' | 'hardcoded-fallback';
       gtagScriptRequested: boolean;
@@ -33,10 +34,26 @@ declare global {
 // Configurable Environment Variables
 const metaEnv = (import.meta as any).env || {};
 const rawMetaPixelEnv = metaEnv.VITE_META_PIXEL_ID as string | undefined;
-const GA4_MEASUREMENT_ID = (metaEnv.VITE_GA4_MEASUREMENT_ID as string) || '';
-const META_PIXEL_ID = rawMetaPixelEnv || '1181966467366737';
-const metaPixelSource: 'env' | 'hardcoded-fallback' = rawMetaPixelEnv ? 'env' : 'hardcoded-fallback';
-const isGa4Configured = Boolean(
+const rawGa4Env = ((metaEnv.VITE_GA4_MEASUREMENT_ID as string) || (metaEnv.VITE_FIREBASE_MEASUREMENT_ID as string) || '').trim();
+const rawGa4Valid = Boolean(
+  rawGa4Env &&
+  !/^G-X+$/i.test(rawGa4Env) &&
+  rawGa4Env !== 'G-XXXXXXXXXX'
+);
+
+// GA4 Measurement ID priority: Env Var -> Firebase Config -> Hardcoded Project ID
+export const GA4_MEASUREMENT_ID = rawGa4Valid
+  ? rawGa4Env
+  : (firebaseConfig.measurementId || 'G-CGPWW8JK6V');
+
+export const ga4Source: 'env' | 'firebase-config' | 'hardcoded-fallback' = rawGa4Valid
+  ? 'env'
+  : (firebaseConfig.measurementId ? 'firebase-config' : 'hardcoded-fallback');
+
+export const META_PIXEL_ID = rawMetaPixelEnv || '1181966467366737';
+export const metaPixelSource: 'env' | 'hardcoded-fallback' = rawMetaPixelEnv ? 'env' : 'hardcoded-fallback';
+
+export const isGa4Configured = Boolean(
   GA4_MEASUREMENT_ID &&
   GA4_MEASUREMENT_ID.trim() !== '' &&
   !/^G-X+$/i.test(GA4_MEASUREMENT_ID.trim()) &&
@@ -141,7 +158,7 @@ class AnalyticsService {
     let fbqScriptRequested = false;
 
     // 1. Initialize Google Analytics 4 (GA4)
-    if (GA4_MEASUREMENT_ID) {
+    if (isGa4Configured) {
       try {
         window.dataLayer = window.dataLayer || [];
         function gtag(...args: any[]) {
@@ -156,12 +173,15 @@ class AnalyticsService {
           currency: 'BDT'
         });
 
-        const script = document.createElement('script');
-        script.async = true;
-        script.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}`;
-        document.head.appendChild(script);
+        const existingScript = document.querySelector(`script[src*="googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}"]`);
+        if (!existingScript) {
+          const script = document.createElement('script');
+          script.async = true;
+          script.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}`;
+          document.head.appendChild(script);
+        }
         gtagScriptRequested = true;
-        logDebug('GA4 Initialized', { measurementId: GA4_MEASUREMENT_ID });
+        logDebug('GA4 Initialized', { measurementId: GA4_MEASUREMENT_ID, source: ga4Source });
       } catch (err) {
         console.warn('[Analytics] GA4 init failed:', err);
       }
@@ -213,6 +233,7 @@ class AnalyticsService {
     const diagnostic = {
       GA4_MEASUREMENT_ID,
       isConfigured: isGa4Configured,
+      ga4Source,
       META_PIXEL_ID,
       source: metaPixelSource,
       gtagScriptRequested,
@@ -223,7 +244,7 @@ class AnalyticsService {
 
     try {
       console.group('[Analytics Diagnostic]');
-      console.log('GA4_MEASUREMENT_ID:', GA4_MEASUREMENT_ID, `(isConfigured: ${isGa4Configured})`);
+      console.log('GA4_MEASUREMENT_ID:', GA4_MEASUREMENT_ID, `(isConfigured: ${isGa4Configured}, source: ${ga4Source})`);
       console.log('META_PIXEL_ID:', META_PIXEL_ID, `(source: ${metaPixelSource})`);
       console.log('gtagScriptRequested:', gtagScriptRequested);
       console.log('fbqScriptRequested:', fbqScriptRequested);
@@ -825,6 +846,26 @@ class AnalyticsService {
     }
   }
   public refund = this.trackRefund.bind(this);
+
+  /**
+   * Get current analytics diagnostic status for admin panel and diagnostics
+   */
+  public getStatus() {
+    return {
+      ga4: {
+        measurementId: GA4_MEASUREMENT_ID,
+        isConfigured: isGa4Configured,
+        source: ga4Source,
+        scriptLoaded: typeof window !== 'undefined' && Boolean(window.gtag)
+      },
+      metaPixel: {
+        pixelId: META_PIXEL_ID,
+        isConfigured: Boolean(META_PIXEL_ID),
+        source: metaPixelSource,
+        scriptLoaded: typeof window !== 'undefined' && Boolean(window.fbq)
+      }
+    };
+  }
 }
 
 export const analytics = new AnalyticsService();

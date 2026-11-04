@@ -10,18 +10,12 @@
   "engines": {
     "node": "18"
   },
+  "type": "module",
   "main": "lib/index.js",
   "dependencies": {
     "@google/genai": "^2.4.0",
-    "@opentelemetry/api-logs": "^0.223.0",
-    "@opentelemetry/exporter-logs-otlp-http": "^0.300.0",
-    "@opentelemetry/resources": "^3.0.0",
-    "@opentelemetry/sdk-logs": "^3.0.0",
-    "@opentelemetry/sdk-node": "^0.300.0",
-    "@posthog/ai": "^6.6.0",
     "firebase-admin": "^11.8.0",
-    "firebase-functions": "^4.3.1",
-    "posthog-node": "^5.61.2"
+    "firebase-functions": "^4.3.1"
   },
   "devDependencies": {
     "typescript": "^5.8.2"
