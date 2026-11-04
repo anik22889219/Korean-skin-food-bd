@@ -4,7 +4,6 @@ import {
   Database, ShieldAlert, Terminal, ExternalLink, Settings, Check, Copy, Layers, ArrowUpRight, Save, Link2, Sparkles, Send
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 
 interface CollectionStatus {
   name: string;
@@ -135,113 +134,29 @@ export const AdminGoogleSheetsBackup: React.FC = () => {
   };
 
   const handleOAuthGoogleSheetsExport = async () => {
-    const confirmed = window.confirm("Are you sure you want to send FULL data to the Google Sheet (overwriting existing sheet data) using your Google account permissions?");
+    const confirmed = window.confirm("Are you sure you want to send FULL data to the Google Sheet? This will sync and overwrite all 7 Firestore collections.");
     if (!confirmed) return;
 
     try {
       setExportingOAuth(true);
       setNotification(null);
 
-      const auth = getAuth();
-      const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      // Use robust server-side backup API endpoint to avoid iframe popup blocking issues
+      const res = await fetch('/api/backup/run-full', { method: 'POST' });
+      const data = await res.json();
 
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-
-      if (!token) {
-        throw new Error("Failed to obtain Google OAuth access token for Google Sheets.");
-      }
-
-      // 1. Create or use current Google Spreadsheet
-      let targetSpreadsheetId = spreadsheetId;
-      if (!targetSpreadsheetId || targetSpreadsheetId.length < 10) {
-        const createRes = await fetch('https://sheets.googleapis.com/spreadsheets', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            properties: {
-              title: `Korean Skin Food BD - Full Backup (${new Date().toISOString().slice(0, 10)})`
-            }
-          })
+      if (res.ok && data.success) {
+        setNotification({ 
+          type: 'success', 
+          message: `Full data successfully sent and synced to Google Sheet! Processed ${data.recordsProcessed || 0} records.` 
         });
-        const spreadsheet = await createRes.json();
-        if (!createRes.ok || !spreadsheet.spreadsheetId) {
-          throw new Error(spreadsheet.error?.message || "Failed to create Google Spreadsheet via API.");
-        }
-        targetSpreadsheetId = spreadsheet.spreadsheetId;
-        setSpreadsheetId(targetSpreadsheetId);
+        fetchBackupStatus();
+        window.open(spreadsheetUrl, '_blank');
+      } else {
+        throw new Error(data.error || 'Full data sync failed');
       }
-
-      // 2. Export each collection and overwrite sheet data
-      const collectionsToExport = ['products', 'orders', 'inventory_logs', 'users', 'wholesale_orders', 'expenses', 'finance_transactions'];
-      
-      for (const colKey of collectionsToExport) {
-        const expRes = await fetch(`/api/backup/export/${colKey}`);
-        const expData = await expRes.json();
-        const items = expData.items || [];
-
-        // Ensure sheet exists or clear it for overwrite
-        await fetch(`https://sheets.googleapis.com/spreadsheets/${targetSpreadsheetId}:batchUpdate`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            requests: [{
-              addSheet: {
-                properties: { title: colKey }
-              }
-            }]
-          })
-        }).catch(() => {}); // Ignore if sheet already exists
-
-        // Overwrite values
-        if (items.length > 0) {
-          const keys = Object.keys(items[0]);
-          const rows = [keys, ...items.map(item => keys.map(k => String(item[k] !== undefined && item[k] !== null ? JSON.stringify(item[k]) : '')))];
-
-          // Clear existing sheet range first to fulfill overwrite mode
-          await fetch(`https://sheets.googleapis.com/spreadsheets/${targetSpreadsheetId}/values/${encodeURIComponent(colKey)}!A1:Z1000:clear`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          }).catch(() => {});
-
-          await fetch(`https://sheets.googleapis.com/spreadsheets/${targetSpreadsheetId}/values/${encodeURIComponent(colKey)}!A1?valueInputOption=USER_ENTERED`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              range: `${colKey}!A1`,
-              majorDimension: 'ROWS',
-              values: rows
-            })
-          });
-        }
-      }
-
-      // Save spreadsheetId to backend
-      await fetch('/api/backup/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spreadsheetId: targetSpreadsheetId, appsScriptWebappUrl })
-      });
-
-      setNotification({ type: 'success', message: `Full data successfully sent and overwritten to Google Sheet! Spreadsheet ID: ${targetSpreadsheetId}` });
-      fetchBackupStatus();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Google Sheets full data sync failed' });
+      setNotification({ type: 'error', message: err.message || 'Failed to send full data to sheet' });
     } finally {
       setExportingOAuth(false);
     }
@@ -459,7 +374,7 @@ function executeBackupFetch(type, endpoint) {
             Spreadsheet & Webhook Configuration
           </div>
           <span className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-200">
-            OAuth & Full Sync Active
+            Full Sync Active
           </span>
         </div>
 
