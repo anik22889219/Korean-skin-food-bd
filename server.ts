@@ -12,6 +12,7 @@ import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, getDocs, runT
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
 import { createPostHogLogExporter } from "./src/services/posthogServerLogs";
+import { registerMcpEndpoint } from "./mcpServer";
 
 dotenv.config();
 
@@ -176,6 +177,9 @@ try {
 } catch (error) {
   console.error("Failed to initialize Firebase on Server:", error);
 }
+
+// MCP endpoint: authenticated, stateless, read-only access for trusted MCP clients.
+registerMcpEndpoint(app, () => db, createRateLimiter);
 
 // ==========================================
 // FIREBASE CLOUD MESSAGING (FCM) WEB PUSH
