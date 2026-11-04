@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for dynamic Meta Catalog (Facebook/Instagram Commerce Manager) setup with Meta Graph API direct sync, scheduled XML/CSV data feeds, and a full admin management dashboard.",
-  "updatedAt": "2026-10-15T10:57:42.012438809Z",
+  "summary": "Implementation plan for displaying the active Google Sheet link prominently in the header of the Google Sheets Backup Center and sending full data export with overwrite mode.",
+  "updatedAt": "2026-11-04T14:38:50.539852437Z",
   "requestFeedback": true,
   "userFacing": true
 }

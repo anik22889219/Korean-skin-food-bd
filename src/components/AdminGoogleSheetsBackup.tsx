@@ -1,11 +1,10 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileSpreadsheet, RefreshCw, Play, CheckCircle2, AlertCircle, Clock, 
-  Database, ShieldAlert, Terminal, ExternalLink, Settings, Check, Copy, Layers, ArrowUpRight, Save, Link2
+  Database, ShieldAlert, Terminal, ExternalLink, Settings, Check, Copy, Layers, ArrowUpRight, Save, Link2, Sparkles, Send
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { db } from '../services/firebase';
-import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 
 interface CollectionStatus {
   name: string;
@@ -35,6 +34,8 @@ export const AdminGoogleSheetsBackup: React.FC = () => {
   const [spreadsheetId, setSpreadsheetId] = useState<string>('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms');
   const [appsScriptWebappUrl, setAppsScriptWebappUrl] = useState<string>('https://script.google.com/macros/s/AKfycbyWrDyN7FI4lea_nN50WfPAzbGt0UBQHABytfAYW5P4XpGh6UE5-YDW3wzb7MwpHTNiaQ/exec');
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
+  const [exportingOAuth, setExportingOAuth] = useState<boolean>(false);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
   const [statusData, setStatusData] = useState<{
     connected: boolean;
@@ -85,6 +86,8 @@ export const AdminGoogleSheetsBackup: React.FC = () => {
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+
   const fetchBackupStatus = async () => {
     try {
       setLoading(true);
@@ -128,6 +131,119 @@ export const AdminGoogleSheetsBackup: React.FC = () => {
       setNotification({ type: 'error', message: err.message || 'Failed to save settings' });
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleOAuthGoogleSheetsExport = async () => {
+    const confirmed = window.confirm("Are you sure you want to send FULL data to the Google Sheet (overwriting existing sheet data) using your Google account permissions?");
+    if (!confirmed) return;
+
+    try {
+      setExportingOAuth(true);
+      setNotification(null);
+
+      const auth = getAuth();
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
+
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+
+      if (!token) {
+        throw new Error("Failed to obtain Google OAuth access token for Google Sheets.");
+      }
+
+      // 1. Create or use current Google Spreadsheet
+      let targetSpreadsheetId = spreadsheetId;
+      if (!targetSpreadsheetId || targetSpreadsheetId.length < 10) {
+        const createRes = await fetch('https://sheets.googleapis.com/spreadsheets', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            properties: {
+              title: `Korean Skin Food BD - Full Backup (${new Date().toISOString().slice(0, 10)})`
+            }
+          })
+        });
+        const spreadsheet = await createRes.json();
+        if (!createRes.ok || !spreadsheet.spreadsheetId) {
+          throw new Error(spreadsheet.error?.message || "Failed to create Google Spreadsheet via API.");
+        }
+        targetSpreadsheetId = spreadsheet.spreadsheetId;
+        setSpreadsheetId(targetSpreadsheetId);
+      }
+
+      // 2. Export each collection and overwrite sheet data
+      const collectionsToExport = ['products', 'orders', 'inventory_logs', 'users', 'wholesale_orders', 'expenses', 'finance_transactions'];
+      
+      for (const colKey of collectionsToExport) {
+        const expRes = await fetch(`/api/backup/export/${colKey}`);
+        const expData = await expRes.json();
+        const items = expData.items || [];
+
+        // Ensure sheet exists or clear it for overwrite
+        await fetch(`https://sheets.googleapis.com/spreadsheets/${targetSpreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            requests: [{
+              addSheet: {
+                properties: { title: colKey }
+              }
+            }]
+          })
+        }).catch(() => {}); // Ignore if sheet already exists
+
+        // Overwrite values
+        if (items.length > 0) {
+          const keys = Object.keys(items[0]);
+          const rows = [keys, ...items.map(item => keys.map(k => String(item[k] !== undefined && item[k] !== null ? JSON.stringify(item[k]) : '')))];
+
+          // Clear existing sheet range first to fulfill overwrite mode
+          await fetch(`https://sheets.googleapis.com/spreadsheets/${targetSpreadsheetId}/values/${encodeURIComponent(colKey)}!A1:Z1000:clear`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }).catch(() => {});
+
+          await fetch(`https://sheets.googleapis.com/spreadsheets/${targetSpreadsheetId}/values/${encodeURIComponent(colKey)}!A1?valueInputOption=USER_ENTERED`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              range: `${colKey}!A1`,
+              majorDimension: 'ROWS',
+              values: rows
+            })
+          });
+        }
+      }
+
+      // Save spreadsheetId to backend
+      await fetch('/api/backup/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spreadsheetId: targetSpreadsheetId, appsScriptWebappUrl })
+      });
+
+      setNotification({ type: 'success', message: `Full data successfully sent and overwritten to Google Sheet! Spreadsheet ID: ${targetSpreadsheetId}` });
+      fetchBackupStatus();
+    } catch (err: any) {
+      setNotification({ type: 'error', message: err.message || 'Google Sheets full data sync failed' });
+    } finally {
+      setExportingOAuth(false);
     }
   };
 
@@ -177,7 +293,7 @@ export const AdminGoogleSheetsBackup: React.FC = () => {
  * Collections: products, orders, inventory_logs, users, wholesale_orders, expenses, finance_transactions
  */
 
-var SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'] || '${spreadsheetId}';
+var SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '${spreadsheetId}';
 var BACKUP_API_URL = PropertiesService.getScriptProperties().getProperty('BACKUP_API_URL') || 'https://koreanskinfood.web.app/api/backup';
 var BACKUP_API_KEY = PropertiesService.getScriptProperties().getProperty('BACKUP_API_KEY') || '';
 
@@ -186,38 +302,22 @@ function setupBackupEnvironment() {
   SPREADSHEET_ID = ss.getId();
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', SPREADSHEET_ID);
   
-  // Ensure Backup_Status sheet exists
   var statusSheet = ss.getSheetByName('Backup_Status');
   if (!statusSheet) {
     statusSheet = ss.insertSheet('Backup_Status');
     statusSheet.appendRow(['Timestamp', 'Backup Type', 'Collection', 'Status', 'Records Processed', 'Duration (ms)', 'Error Details']);
     statusSheet.getRange(1, 1, 1, 7).setFontWeight('bold');
   }
-  
-  Logger.log('Backup Spreadsheet Ready. ID: ' + SPREADSHEET_ID);
 }
 
 function installBackupTriggers() {
-  // Clear existing triggers to prevent duplicates
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
     ScriptApp.deleteTrigger(triggers[i]);
   }
   
-  // Daily Full Backup at 01:00 AM Asia/Dhaka
-  ScriptApp.newTrigger('runFullBackup')
-    .timeBased()
-    .everyDays(1)
-    .atHour(1)
-    .create();
-    
-  // Incremental Sync every 15 minutes
-  ScriptApp.newTrigger('runIncrementalSync')
-    .timeBased()
-    .everyMinutes(15)
-    .create();
-    
-  Logger.log('Backup triggers successfully installed.');
+  ScriptApp.newTrigger('runFullBackup').timeBased().everyDays(1).atHour(1).create();
+  ScriptApp.newTrigger('runIncrementalSync').timeBased().everyMinutes(15).create();
 }
 
 function runFullBackup() {
@@ -261,6 +361,12 @@ function executeBackupFetch(type, endpoint) {
     setTimeout(() => setCopiedCode(false), 2500);
   };
 
+  const copySpreadsheetLink = () => {
+    navigator.clipboard.writeText(spreadsheetUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
   if (!isAdminOrSuperAdmin) {
     return (
       <div className="p-8 max-w-4xl mx-auto text-center">
@@ -275,17 +381,37 @@ function executeBackupFetch(type, endpoint) {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 font-sans">
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-pink-100">
-        <div>
+      {/* HEADER WITH PROMINENT GOOGLE SHEET LINK & FULL SYNC BUTTON */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-emerald-100 bg-gradient-to-br from-emerald-50/40 via-white to-pink-50/30">
+        <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-md shadow-emerald-600/20">
               <FileSpreadsheet className="w-8 h-8" />
             </div>
             <div>
               <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900">Google Sheets Backup Center</h1>
-              <p className="text-sm text-gray-500">Automated secure daily full backups and 15-minute incremental sync for Firestore</p>
+              <p className="text-sm text-gray-500">Live Automated Secure Backups & Full Firestore Sync</p>
             </div>
+          </div>
+
+          {/* PROMINENT ACTIVE GOOGLE SHEET LINK BADGE */}
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">Active Spreadsheet:</span>
+            <a
+              href={spreadsheetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl transition shadow-sm"
+            >
+              Open Google Sheet <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+            <button
+              onClick={copySpreadsheetLink}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-xs rounded-xl transition"
+            >
+              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedLink ? 'Copied Link!' : 'Copy Link'}
+            </button>
           </div>
         </div>
 
@@ -293,29 +419,28 @@ function executeBackupFetch(type, endpoint) {
           <button
             onClick={fetchBackupStatus}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition shadow-sm"
+            className="flex items-center gap-2 px-4 py-3 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl transition border border-gray-200 shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
           
           <button
+            onClick={handleOAuthGoogleSheetsExport}
+            disabled={exportingOAuth}
+            className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition shadow-lg shadow-emerald-600/25 disabled:opacity-50"
+          >
+            {exportingOAuth ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            Send Full Data to Sheet
+          </button>
+
+          <button
             onClick={() => setShowAppsScriptModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-pink-50 hover:bg-pink-100 text-pink-700 font-medium rounded-xl transition border border-pink-200"
+            className="flex items-center gap-2 px-4 py-3 bg-pink-50 hover:bg-pink-100 text-pink-700 font-medium rounded-xl transition border border-pink-200 shadow-sm"
           >
             <Settings className="w-4 h-4" />
             Apps Script Setup
           </button>
-
-          <a
-            href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition shadow-md shadow-emerald-600/20"
-          >
-            Open Spreadsheet
-            <ExternalLink className="w-4 h-4" />
-          </a>
         </div>
       </div>
 
@@ -331,10 +456,10 @@ function executeBackupFetch(type, endpoint) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-gray-900 font-bold text-base">
             <Link2 className="w-5 h-5 text-pink-600" />
-            Deploys & Webhook Configuration
+            Spreadsheet & Webhook Configuration
           </div>
           <span className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-200">
-            Deployed & Active
+            OAuth & Full Sync Active
           </span>
         </div>
 
@@ -549,19 +674,19 @@ function executeBackupFetch(type, endpoint) {
                 onClick={() => setShowAppsScriptModal(false)}
                 className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-700 font-bold transition"
               >
-                âœ•
+                ✕
               </button>
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-2">
                 <p className="font-bold flex items-center gap-2">
-                  <span>â„¹ï¸</span> Deployment Instructions:
+                  <span>ℹ️</span> Deployment Instructions:
                 </p>
                 <ol className="list-decimal list-inside space-y-1 text-xs">
                   <li>Open <a href="https://script.new" target="_blank" rel="noreferrer" className="underline text-blue-600 font-semibold inline-flex items-center gap-1">script.new <ArrowUpRight className="w-3 h-3" /></a> to create a new Apps Script project.</li>
                   <li>Paste the code below into <code className="bg-blue-100 px-1 rounded">Code.gs</code>.</li>
-                  <li>In Project Settings (âš™ï¸), add Script Properties: <code className="bg-blue-100 px-1 rounded">SPREADSHEET_ID</code> and <code className="bg-blue-100 px-1 rounded">BACKUP_API_KEY</code>.</li>
+                  <li>In Project Settings (⚙️), add Script Properties: <code className="bg-blue-100 px-1 rounded">SPREADSHEET_ID</code> and <code className="bg-blue-100 px-1 rounded">BACKUP_API_KEY</code>.</li>
                   <li>Run <code className="bg-blue-100 px-1 rounded">setupBackupEnvironment()</code> and <code className="bg-blue-100 px-1 rounded">installBackupTriggers()</code> once to activate daily full backups and 15-minute incremental syncs.</li>
                 </ol>
               </div>

@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -15,7 +15,7 @@ dotenv.config();
 
 let adminDb: any = null;
 try {
-  if (!admin.apps.length) {
+  if (!admin.apps || admin.apps.length === 0) {
     admin.initializeApp({
       credential: admin.credential.applicationDefault()
     });
@@ -23,7 +23,14 @@ try {
   adminDb = admin.firestore();
   console.log("Firebase Admin SDK initialized successfully for server-side security rule bypass.");
 } catch (e) {
-  console.warn("Firebase Admin SDK init warning:", e);
+  try {
+    if (!admin.apps || admin.apps.length === 0) {
+      admin.initializeApp();
+    }
+    adminDb = admin.firestore();
+  } catch (err) {
+    console.warn("Firebase Admin SDK init notice:", err);
+  }
 }
 
 const app = express();
