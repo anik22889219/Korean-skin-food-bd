@@ -7,7 +7,7 @@ import {
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
-  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2
+  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2, FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -124,6 +124,7 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/testimonials', label: 'Testimonials & Reviews', badge: '4.9★', icon: MessageSquareQuote },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/meta-catalog', label: 'Meta Catalog', badge: 'Sync', icon: Share2 },
+    { to: '/admin/google-sheets-backup', label: 'Google Sheets Backup', badge: 'Backup', icon: FileSpreadsheet },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
