@@ -1,4 +1,4 @@
-﻿import React, { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
@@ -31,7 +31,6 @@ import { AdminDiscounts } from './components/AdminDiscounts';
 import { AdminSlackSettings } from './components/AdminSlackSettings';
 import { AdminMetaCatalog } from './components/AdminMetaCatalog';
 import { AdminAIAgents } from './components/AdminAIAgents';
-import { AdminGoogleSheetsBackup } from './components/AdminGoogleSheetsBackup';
 import { AdminWholesaleManagement } from './components/AdminWholesaleManagement';
 import { WholesaleCustomerDetailsPage } from './components/WholesaleCustomerDetailsPage';
 import { UserManagement } from './components/UserManagement';
@@ -242,7 +241,6 @@ export default function App() {
                   <Route path="chat-leads" element={<AdminChatLeads />} />
                   <Route path="slack" element={<AdminSlackSettings />} />
                   <Route path="ai-agents" element={<AdminAIAgents />} />
-                  <Route path="google-sheets-backup" element={<AdminGoogleSheetsBackup />} />
                 </Route>
               </Route>
 

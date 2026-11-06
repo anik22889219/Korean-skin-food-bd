@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -7,7 +7,7 @@ import {
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
-  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2, FileSpreadsheet
+  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -127,7 +127,6 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
     { to: '/admin/chat-leads', label: 'WhatsApp Leads', badge: 'CRM', icon: MessageCircle },
     { to: '/admin/slack', label: 'Slack Integration', badge: 'Notify', icon: ShieldCheck },
-    { to: '/admin/google-sheets-backup', label: 'Google Sheets Backup', badge: 'Backup', icon: FileSpreadsheet },
   ];
 
   // Role-Specific Navigation & Access Control Matrices
