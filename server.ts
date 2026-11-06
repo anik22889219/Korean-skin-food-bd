@@ -9,29 +9,8 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, getDocs, runTransaction, query, where, deleteDoc, orderBy } from "firebase/firestore";
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
-import admin from "firebase-admin";
 
 dotenv.config();
-
-let adminDb: any = null;
-try {
-  if (!admin.apps || admin.apps.length === 0) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault()
-    });
-  }
-  adminDb = admin.firestore();
-  console.log("Firebase Admin SDK initialized successfully for server-side security rule bypass.");
-} catch (e) {
-  try {
-    if (!admin.apps || admin.apps.length === 0) {
-      admin.initializeApp();
-    }
-    adminDb = admin.firestore();
-  } catch (err) {
-    console.warn("Firebase Admin SDK init notice:", err);
-  }
-}
 
 const app = express();
 const PORT = 3000;

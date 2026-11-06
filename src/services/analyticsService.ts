@@ -140,18 +140,20 @@ class AnalyticsService {
     let gtagScriptRequested = false;
     let fbqScriptRequested = false;
 
-    // 1. Initialize Google Analytics 4 (GA4)
+    // Ensure window.dataLayer & window.gtag are always accessible
+    window.dataLayer = window.dataLayer || [];
+    if (!window.gtag) {
+      window.gtag = function (...args: any[]) {
+        window.dataLayer!.push(args);
+      };
+    }
+
+    // 1. Initialize Google Analytics 4 (GA4) if measurement ID is provided
     if (GA4_MEASUREMENT_ID) {
       try {
-        window.dataLayer = window.dataLayer || [];
-        function gtag(...args: any[]) {
-          window.dataLayer!.push(args);
-        }
-        window.gtag = gtag;
-
-        gtag('js', new Date());
+        window.gtag('js', new Date());
         // Configure with send_page_view: false to manually manage SPA route transitions
-        gtag('config', GA4_MEASUREMENT_ID, {
+        window.gtag('config', GA4_MEASUREMENT_ID, {
           send_page_view: false,
           currency: 'BDT'
         });
@@ -250,8 +252,8 @@ class AnalyticsService {
     const title = pageTitle || document.title;
     logDebug('PageView', { path: pagePath, title });
 
-    // GA4
-    if (typeof window.gtag === 'function' && GA4_MEASUREMENT_ID) {
+    // GA4 / Google Tag Manager
+    if (typeof window.gtag === 'function') {
       window.gtag('event', 'page_view', {
         page_path: pagePath,
         page_title: title,

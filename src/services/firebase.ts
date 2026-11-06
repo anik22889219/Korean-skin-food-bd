@@ -58,7 +58,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Get custom database ID if available
-const databaseId = getEnvVar('VITE_FIREBASE_FIRESTORE_DATABASE_ID') || firebaseConfigJson.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
+const databaseId = getEnvVar('VITE_FIREBASE_FIRESTORE_DATABASE_ID') || (firebaseConfigJson as any).firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
 
 // Initialize Services using official Firestore initializer with persistent local cache & auto-detect long polling
 let db: ReturnType<typeof getFirestore>;
