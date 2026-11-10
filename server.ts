@@ -5192,15 +5192,188 @@ app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
 });
 
 // ==========================================
-// META CONVERSIONS API (CAPI) PROXY ENDPOINT
 // ==========================================
+// DYNAMIC TRACKING SETTINGS & META CAPI ENDPOINTS
+// ==========================================
+interface ServerTrackingSettings {
+  gtm: { enabled: boolean; containerId: string };
+  ga4: { enabled: boolean; measurementId: string };
+  metaPixel: { enabled: boolean; pixelId: string };
+  metaCapi: { enabled: boolean; accessToken?: string; testEventCode?: string };
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+let serverTrackingSettingsCache: ServerTrackingSettings | null = null;
+let lastTrackingSettingsFetch = 0;
+
+async function getOrFetchTrackingSettings(): Promise<ServerTrackingSettings> {
+  const now = Date.now();
+  if (serverTrackingSettingsCache && (now - lastTrackingSettingsFetch) < 30000) {
+    return serverTrackingSettingsCache;
+  }
+
+  const fallbackSettings: ServerTrackingSettings = {
+    gtm: { enabled: true, containerId: process.env.GTM_CONTAINER_ID || "GTM-T2SWSLZ8" },
+    ga4: { enabled: true, measurementId: process.env.GA4_MEASUREMENT_ID || "G-8DXKFYM3YQ" },
+    metaPixel: { enabled: true, pixelId: process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID || "1181966473667367" },
+    metaCapi: {
+      enabled: true,
+      accessToken: process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || "",
+      testEventCode: process.env.META_TEST_EVENT_CODE || ""
+    }
+  };
+
+  if (!db) {
+    serverTrackingSettingsCache = fallbackSettings;
+    return fallbackSettings;
+  }
+
+  try {
+    const trackingDocRef = doc(db, "settings", "tracking");
+    const snap = await getDoc(trackingDocRef);
+    if (snap.exists()) {
+      const data = snap.data() as any;
+      serverTrackingSettingsCache = {
+        gtm: {
+          enabled: data.gtm?.enabled ?? true,
+          containerId: (data.gtm?.containerId || fallbackSettings.gtm.containerId).trim().toUpperCase(),
+        },
+        ga4: {
+          enabled: data.ga4?.enabled ?? true,
+          measurementId: (data.ga4?.measurementId || fallbackSettings.ga4.measurementId).trim().toUpperCase(),
+        },
+        metaPixel: {
+          enabled: data.metaPixel?.enabled ?? true,
+          pixelId: (data.metaPixel?.pixelId || fallbackSettings.metaPixel.pixelId).trim(),
+        },
+        metaCapi: {
+          enabled: data.metaCapi?.enabled ?? true,
+          accessToken: (data.metaCapi?.accessToken || fallbackSettings.metaCapi.accessToken || "").trim(),
+          testEventCode: (data.metaCapi?.testEventCode || fallbackSettings.metaCapi.testEventCode || "").trim().toUpperCase(),
+        },
+        updatedAt: data.updatedAt,
+        updatedBy: data.updatedBy,
+      };
+      lastTrackingSettingsFetch = now;
+      return serverTrackingSettingsCache;
+    }
+  } catch (err) {
+    console.warn("[Server Tracking] Failed to load settings from Firestore, using fallbacks:", err);
+  }
+
+  serverTrackingSettingsCache = fallbackSettings;
+  return fallbackSettings;
+}
+
 const serverDispatchedCapiEvents = new Set<string>();
+
+// Get dynamic tracking settings
+app.get("/api/tracking/settings", async (req, res) => {
+  try {
+    const settings = await getOrFetchTrackingSettings();
+    // Return settings with partially masked accessToken for security
+    const maskedToken = settings.metaCapi.accessToken
+      ? `${settings.metaCapi.accessToken.slice(0, 8)}••••••••${settings.metaCapi.accessToken.slice(-6)}`
+      : "";
+    res.json({
+      success: true,
+      settings: {
+        ...settings,
+        metaCapi: {
+          ...settings.metaCapi,
+          hasToken: Boolean(settings.metaCapi.accessToken),
+          maskedToken,
+        }
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || "Failed to load tracking settings" });
+  }
+});
+
+// Update dynamic tracking settings
+app.post("/api/tracking/settings", async (req, res) => {
+  try {
+    const incoming = req.body;
+    const current = await getOrFetchTrackingSettings();
+    const updated: ServerTrackingSettings = {
+      gtm: {
+        enabled: incoming.gtm?.enabled ?? current.gtm.enabled,
+        containerId: (incoming.gtm?.containerId || current.gtm.containerId).trim().toUpperCase(),
+      },
+      ga4: {
+        enabled: incoming.ga4?.enabled ?? current.ga4.enabled,
+        measurementId: (incoming.ga4?.measurementId || current.ga4.measurementId).trim().toUpperCase(),
+      },
+      metaPixel: {
+        enabled: incoming.metaPixel?.enabled ?? current.metaPixel.enabled,
+        pixelId: (incoming.metaPixel?.pixelId || current.metaPixel.pixelId).trim(),
+      },
+      metaCapi: {
+        enabled: incoming.metaCapi?.enabled ?? current.metaCapi.enabled,
+        accessToken: incoming.metaCapi?.accessToken !== undefined
+          ? incoming.metaCapi.accessToken.trim()
+          : current.metaCapi.accessToken,
+        testEventCode: (incoming.metaCapi?.testEventCode !== undefined
+          ? incoming.metaCapi.testEventCode
+          : current.metaCapi.testEventCode || "").trim().toUpperCase(),
+      },
+      updatedAt: new Date().toISOString(),
+      updatedBy: req.body.updatedBy || "admin"
+    };
+
+    serverTrackingSettingsCache = updated;
+    lastTrackingSettingsFetch = Date.now();
+
+    if (db) {
+      const trackingDocRef = doc(db, "settings", "tracking");
+      await setDoc(trackingDocRef, updated, { merge: true });
+    }
+
+    console.log("[Server Tracking] Dynamic settings updated and synced to cache & Firestore");
+    res.json({ success: true, message: "Tracking settings saved and synchronized", settings: updated });
+  } catch (err: any) {
+    console.error("[Server Tracking] Error updating settings:", err);
+    res.status(500).json({ success: false, error: err?.message || "Failed to save tracking settings" });
+  }
+});
+
+app.get("/api/tracking/meta-capi/status", async (req, res) => {
+  const settings = await getOrFetchTrackingSettings();
+  const pixelId = settings.metaPixel.pixelId || process.env.META_PIXEL_ID || "1181966473667367";
+  const hasToken = Boolean(settings.metaCapi.accessToken || process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN);
+  const testEventCode = settings.metaCapi.testEventCode || process.env.META_TEST_EVENT_CODE || "";
+  const isEnabled = settings.metaCapi.enabled;
+
+  res.json({
+    success: true,
+    pixelId,
+    hasToken,
+    testEventCode,
+    enabled: isEnabled,
+    status: !isEnabled ? "disabled" : hasToken ? "connected" : "ready_for_credentials"
+  });
+});
 
 app.post("/api/tracking/meta-capi", async (req, res) => {
   const { eventName = "Purchase", eventId, orderId, value, currency = "BDT", items, customerData, attribution } = req.body;
   let orderSource = req.body.order_source || req.body.orderSource;
   let verifiedValue = Number(value || 0);
   let verifiedItems = items || [];
+
+  const settings = await getOrFetchTrackingSettings();
+
+  // If CAPI is disabled in admin tracking settings, cleanly skip
+  if (!settings.metaCapi.enabled) {
+    console.log(`[Meta CAPI] Skipped event ${eventName}: Meta CAPI is disabled in admin tracking settings.`);
+    return res.json({
+      success: true,
+      skipped: true,
+      reason: "Meta CAPI tracking is disabled in tracking settings",
+      eventId
+    });
+  }
 
   // 1. Authoritative Database Verification for Purchase Events
   let orderDocRef: any = null;
@@ -5246,7 +5419,6 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
   }
 
   // Strict Allow-List: For Purchase events, ONLY website orders (order_source === 'WEBSITE') may generate CAPI conversion.
-  // POS, ADMIN, MANUAL, null, undefined, or any unknown sources are strictly rejected.
   if (eventName === "Purchase" && orderSource !== "WEBSITE") {
     console.log(`[Meta CAPI] Skipped: event ${eventName} (order ${orderId}) has non-website source '${orderSource}'.`);
     return res.json({
@@ -5268,9 +5440,9 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
     });
   }
 
-  const pixelId = process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID || "1181966467366737";
-  const capiAccessToken = process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-  const testEventCode = process.env.META_TEST_EVENT_CODE;
+  const pixelId = settings.metaPixel.pixelId || process.env.META_PIXEL_ID || process.env.VITE_META_PIXEL_ID || "1181966473667367";
+  const capiAccessToken = settings.metaCapi.accessToken || process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  const testEventCode = req.body.test_event_code || settings.metaCapi.testEventCode || process.env.META_TEST_EVENT_CODE;
 
   const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || req.ip;
   const clientUserAgent = customerData?.clientUserAgent || req.headers["user-agent"] || "";
@@ -5279,7 +5451,7 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
 
   if (!pixelId || !capiAccessToken) {
     if (eventId) serverDispatchedCapiEvents.add(eventId);
-    console.log(`[Meta CAPI] Access token or Pixel ID not configured in server environment. Simulated CAPI event logged.`, {
+    console.log(`[Meta CAPI] Access token or Pixel ID not configured in settings/environment. Simulated CAPI event logged.`, {
       eventId,
       orderId,
       value,
@@ -8074,20 +8246,466 @@ app.post("/api/meta-catalog/sync", async (req, res) => {
   }
 });
 
+// ==========================================
+// TECHNICAL SEO & GOOGLE RANKING ENGINE
+// ==========================================
+
+const BASE_STORE_URL = "https://koreanskinfood.web.app";
+
+function isSearchEngineBot(userAgent?: string): boolean {
+  if (!userAgent) return false;
+  const botList = [
+    "googlebot", "bingbot", "slurp", "duckduckbot", "baiduspider",
+    "yandexbot", "sogou", "exabot", "facebot", "facebookexternalhit",
+    "twitterbot", "rogerbot", "linkedinbot", "embedly", "quora link preview",
+    "showyoubot", "outbrain", "pinterest", "slackbot", "vkshare", "w3c_validator",
+    "whatsapp", "telegrambot", "discordbot", "applebot"
+  ];
+  const ua = userAgent.toLowerCase();
+  return botList.some(bot => ua.includes(bot));
+}
+
+// 1. Technical robots.txt Endpoint
+app.get("/robots.txt", (req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+
+  const robotsPath = path.resolve(process.cwd(), "public", "robots.txt");
+  if (fs.existsSync(robotsPath)) {
+    return res.sendFile(robotsPath);
+  }
+
+  const defaultRobots = [
+    "# robots.txt for Korean Skin Food BD (https://koreanskinfood.web.app/)",
+    "User-agent: *",
+    "Allow: /",
+    "Allow: /shop",
+    "Allow: /brand/",
+    "Allow: /brands",
+    "Allow: /guides",
+    "Allow: /guide/",
+    "Allow: /about-us",
+    "Allow: /contact-us",
+    "Allow: /privacy-policy",
+    "Allow: /terms-of-service",
+    "Allow: /become-a-creator",
+    "Disallow: /admin/",
+    "Disallow: /login",
+    "Disallow: /profile",
+    "Disallow: /wholesale/profile",
+    "Disallow: /wholesale/checkout",
+    "Disallow: /wholesale/cart",
+    "Disallow: /creator/dashboard",
+    "Disallow: /creator/reels/upload",
+    "Disallow: /pos/",
+    "Disallow: /api/",
+    "",
+    "Sitemap: https://koreanskinfood.web.app/sitemap.xml"
+  ].join("\n");
+
+  return res.send(defaultRobots);
+});
+
+// 2. Dynamic XML Sitemap (/sitemap.xml)
+app.get("/sitemap.xml", async (req, res) => {
+  try {
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=14400");
+
+    let products: any[] = [];
+    if (db) {
+      try {
+        const snap = await getDocs(collection(db, "products"));
+        snap.forEach(d => {
+          const data = d.data();
+          products.push({ id: d.id, ...data });
+        });
+      } catch (err) {
+        console.warn("[Sitemap] Firestore products load warning:", err);
+      }
+    }
+
+    // Static core pages
+    const staticRoutes = [
+      { url: `${BASE_STORE_URL}/`, priority: "1.0", changefreq: "daily", lastmod: "2026-03-25" },
+      { url: `${BASE_STORE_URL}/shop`, priority: "0.9", changefreq: "daily", lastmod: "2026-03-25" },
+      { url: `${BASE_STORE_URL}/brands`, priority: "0.9", changefreq: "weekly", lastmod: "2026-03-22" },
+      { url: `${BASE_STORE_URL}/guides`, priority: "0.85", changefreq: "weekly", lastmod: "2026-03-24" },
+      { url: `${BASE_STORE_URL}/about-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
+      { url: `${BASE_STORE_URL}/contact-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
+      { url: `${BASE_STORE_URL}/become-a-creator`, priority: "0.7", changefreq: "monthly", lastmod: "2026-02-20" },
+      { url: `${BASE_STORE_URL}/privacy-policy`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" },
+      { url: `${BASE_STORE_URL}/terms-of-service`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" }
+    ];
+
+    // Top Flagship Brands
+    const brandSlugs = ["cosrx", "beauty-of-joseon", "skin1004", "anua", "some-by-mi", "round-lab"];
+    const brandRoutes = brandSlugs.map(slug => ({
+      url: `${BASE_STORE_URL}/brand/${slug}`,
+      priority: "0.85",
+      changefreq: "weekly",
+      lastmod: "2026-03-22"
+    }));
+
+    // Top 10 Skincare Routine Guides
+    const guideSlugs = [
+      "korean-skincare-routine-for-beginners-in-bangladesh",
+      "best-korean-sunscreen-for-oily-skin",
+      "korean-skincare-for-sensitive-skin",
+      "how-to-build-a-skincare-routine-for-acne-prone-skin",
+      "korean-moisturizer-for-dry-skin",
+      "how-to-identify-authentic-korean-skincare-products",
+      "understanding-centella-asiatica-in-skincare",
+      "niacinamide-uses-and-precautions",
+      "how-to-layer-korean-skincare-products",
+      "choosing-skincare-products-according-to-skin-type"
+    ];
+    const guideRoutes = guideSlugs.map(slug => ({
+      url: `${BASE_STORE_URL}/guide/${slug}`,
+      priority: "0.8",
+      changefreq: "weekly",
+      lastmod: "2026-03-24"
+    }));
+
+    // Product routes from active Firestore products
+    const productRoutes = products
+      .filter(p => p.id && !p.noindex)
+      .map(p => {
+        let lastmod = "2026-03-20";
+        if (p.updatedAt) {
+          try {
+            lastmod = new Date(p.updatedAt).toISOString().split("T")[0];
+          } catch {}
+        } else if (p.createdAt) {
+          try {
+            lastmod = new Date(p.createdAt).toISOString().split("T")[0];
+          } catch {}
+        }
+        return {
+          url: `${BASE_STORE_URL}/product/${encodeURIComponent(p.id)}`,
+          priority: "0.8",
+          changefreq: "weekly",
+          lastmod
+        };
+      });
+
+    const allUrls = [...staticRoutes, ...brandRoutes, ...guideRoutes, ...productRoutes];
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+    for (const item of allUrls) {
+      xml += `  <url>\n`;
+      xml += `    <loc>${escapeXmlString(item.url)}</loc>\n`;
+      xml += `    <lastmod>${item.lastmod}</lastmod>\n`;
+      xml += `    <changefreq>${item.changefreq}</changefreq>\n`;
+      xml += `    <priority>${item.priority}</priority>\n`;
+      xml += `  </url>\n`;
+    }
+
+    xml += `</urlset>`;
+    return res.send(xml);
+  } catch (err: any) {
+    console.error("[Sitemap] Error building sitemap:", err);
+    return res.status(500).send("<!-- Error building sitemap -->");
+  }
+});
+
+// 3. Admin SEO Health Overview Endpoint
+app.get("/api/seo/overview", async (req, res) => {
+  try {
+    let products: any[] = [];
+    if (db) {
+      const snap = await getDocs(collection(db, "products"));
+      snap.forEach(d => {
+        products.push({ id: d.id, ...d.data() });
+      });
+    }
+
+    let missingSeoTitleCount = 0;
+    let missingMetaDescriptionCount = 0;
+    let missingAltTextCount = 0;
+    let overlongTitleCount = 0;
+    let overlongDescriptionCount = 0;
+    let invalidSchemaCount = 0;
+    const issuesList: Array<{ productId: string; name: string; issue: string; severity: "warning" | "error" }> = [];
+    const seenTitles = new Map<string, string>();
+    let duplicateTitlesCount = 0;
+
+    for (const p of products) {
+      const title = (p.seoTitle || p.metaTitle || "").trim();
+      const desc = (p.metaDescription || "").trim();
+      const alt = (p.imageAltText || p.altText || "").trim();
+
+      if (!title) {
+        missingSeoTitleCount++;
+        issuesList.push({ productId: p.id, name: p.name, issue: "Missing custom SEO title", severity: "warning" });
+      } else if (title.length > 60) {
+        overlongTitleCount++;
+        issuesList.push({ productId: p.id, name: p.name, issue: `SEO title over 60 chars (${title.length} chars)`, severity: "warning" });
+      }
+
+      if (title) {
+        const lower = title.toLowerCase();
+        if (seenTitles.has(lower)) {
+          duplicateTitlesCount++;
+          issuesList.push({ productId: p.id, name: p.name, issue: `Duplicate title with product ID: ${seenTitles.get(lower)}`, severity: "error" });
+        } else {
+          seenTitles.set(lower, p.id);
+        }
+      }
+
+      if (!desc) {
+        missingMetaDescriptionCount++;
+        issuesList.push({ productId: p.id, name: p.name, issue: "Missing meta description", severity: "warning" });
+      } else if (desc.length > 160) {
+        overlongDescriptionCount++;
+        issuesList.push({ productId: p.id, name: p.name, issue: `Meta description exceeds 160 chars (${desc.length} chars)`, severity: "warning" });
+      }
+
+      if (!alt) {
+        missingAltTextCount++;
+        issuesList.push({ productId: p.id, name: p.name, issue: "Missing image alt text for accessibility and Image SEO", severity: "warning" });
+      }
+
+      if (p.generatedSeoContent) {
+        try {
+          const parsed = typeof p.generatedSeoContent === "string" ? JSON.parse(p.generatedSeoContent) : p.generatedSeoContent;
+          if (parsed.jsonLdSchema && typeof parsed.jsonLdSchema === "string") {
+            JSON.parse(parsed.jsonLdSchema);
+          }
+        } catch {
+          invalidSchemaCount++;
+          issuesList.push({ productId: p.id, name: p.name, issue: "Malformed JSON-LD schema syntax", severity: "error" });
+        }
+      }
+    }
+
+    const sitemapProductCount = products.filter(p => !p.noindex).length;
+
+    return res.json({
+      success: true,
+      stats: {
+        totalProducts: products.length,
+        missingSeoTitleCount,
+        missingMetaDescriptionCount,
+        missingAltTextCount,
+        overlongTitleCount,
+        overlongDescriptionCount,
+        duplicateTitlesCount,
+        invalidSchemaCount,
+        sitemapProductCount,
+        lastAuditTimestamp: new Date().toISOString()
+      },
+      issues: issuesList.slice(0, 50)
+    });
+  } catch (err: any) {
+    console.error("[SEO Overview] Error auditing catalog:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Helper: Injects pre-rendered SEO tags into base index.html for crawlers
+function injectMetaIntoHtml(html: string, options: {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+  ogImage?: string;
+  ogImageAlt?: string;
+  ogType?: string;
+  jsonLd?: Record<string, any> | Array<Record<string, any>>;
+  noindex?: boolean;
+}): string {
+  const { title, description, canonicalUrl, ogImage, ogImageAlt, ogType, jsonLd, noindex } = options;
+  const image = ogImage || "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80";
+  const imageAlt = ogImageAlt || title;
+  const type = ogType || "website";
+  const robots = noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1";
+
+  let tags = `\n    <!-- Server-Side SEO & OpenGraph Meta Injection (Crawler Optimized) -->\n`;
+  tags += `    <title>${escapeXmlString(title)}</title>\n`;
+  tags += `    <meta name="description" content="${escapeXmlString(description)}" />\n`;
+  tags += `    <meta name="robots" content="${robots}" />\n`;
+  tags += `    <link rel="canonical" href="${escapeXmlString(canonicalUrl)}" />\n`;
+  tags += `    <meta property="og:title" content="${escapeXmlString(title)}" />\n`;
+  tags += `    <meta property="og:description" content="${escapeXmlString(description)}" />\n`;
+  tags += `    <meta property="og:url" content="${escapeXmlString(canonicalUrl)}" />\n`;
+  tags += `    <meta property="og:site_name" content="Korean Skin Food BD" />\n`;
+  tags += `    <meta property="og:type" content="${type}" />\n`;
+  tags += `    <meta property="og:image" content="${escapeXmlString(image)}" />\n`;
+  tags += `    <meta property="og:image:alt" content="${escapeXmlString(imageAlt)}" />\n`;
+  tags += `    <meta name="twitter:card" content="summary_large_image" />\n`;
+  tags += `    <meta name="twitter:title" content="${escapeXmlString(title)}" />\n`;
+  tags += `    <meta name="twitter:description" content="${escapeXmlString(description)}" />\n`;
+  tags += `    <meta name="twitter:image" content="${escapeXmlString(image)}" />\n`;
+
+  if (jsonLd) {
+    tags += `    <script id="seo-json-ld" type="application/ld+json">${JSON.stringify(jsonLd)}</script>\n`;
+  }
+
+  // Replace existing title and standard meta, or insert right before </head>
+  let cleanHtml = html
+    .replace(/<title>.*?<\/title>/gi, "")
+    .replace(/<meta\s+name=["']description["'][^>]*>/gi, "")
+    .replace(/<meta\s+property=["']og:title["'][^>]*>/gi, "")
+    .replace(/<meta\s+property=["']og:description["'][^>]*>/gi, "")
+    .replace(/<meta\s+property=["']og:image["'][^>]*>/gi, "")
+    .replace(/<meta\s+name=["']twitter:title["'][^>]*>/gi, "")
+    .replace(/<meta\s+name=["']twitter:description["'][^>]*>/gi, "");
+
+  cleanHtml = cleanHtml.replace("</head>", `${tags}  </head>`);
+  return cleanHtml;
+}
+
 async function startServer() {
+  let vite: any = null;
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom",
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
   }
+
+  // CRAWLER SSR META INJECTION & SPA FALLBACK
+  app.get('*', async (req, res, next) => {
+    // If request is an API route or static asset, pass along
+    if (req.path.startsWith("/api/") || req.path.includes(".")) {
+      return next();
+    }
+
+    const userAgent = (req.headers["user-agent"] as string) || "";
+    const isBot = isSearchEngineBot(userAgent);
+
+    try {
+      let indexHtmlPath = process.env.NODE_ENV === "production"
+        ? path.join(process.cwd(), "dist", "index.html")
+        : path.join(process.cwd(), "index.html");
+
+      if (!fs.existsSync(indexHtmlPath)) {
+        indexHtmlPath = path.join(process.cwd(), "index.html");
+      }
+
+      let rawHtml = fs.readFileSync(indexHtmlPath, "utf-8");
+      if (vite && process.env.NODE_ENV !== "production") {
+        rawHtml = await vite.transformIndexHtml(req.url, rawHtml);
+      }
+
+      // If it's a regular browser user, deliver standard index.html for client SPA hydration
+      if (!isBot) {
+        return res.status(200).send(rawHtml);
+      }
+
+      console.log(`[SEO Bot Crawler Detected] User-Agent: "${userAgent.slice(0, 45)}" requested path: ${req.path}`);
+
+      // Build target metadata according to requested path
+      let meta = {
+        title: "Korean Skin Food BD | Authentic Korean Skincare in Bangladesh",
+        description: "Shop authentic Korean skincare products in Bangladesh at Korean Skin Food BD. Explore trusted Korean beauty brands, skincare essentials, product information and convenient nationwide delivery.",
+        canonicalUrl: `${BASE_STORE_URL}${req.path === "/" ? "/" : req.path}`,
+        ogImage: "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80",
+        ogImageAlt: "Korean Skin Food BD Authentic Korean Skincare in Bangladesh",
+        ogType: "website",
+        jsonLd: undefined as any,
+        noindex: false
+      };
+
+      // 1. Product Detail Page
+      if (req.path.startsWith("/product/")) {
+        const prodId = req.path.replace("/product/", "").trim();
+        let product: any = null;
+
+        if (db && prodId) {
+          try {
+            const pDoc = await getDoc(doc(db, "products", prodId));
+            if (pDoc.exists()) {
+              product = { id: pDoc.id, ...pDoc.data() };
+            }
+          } catch (e) {
+            console.warn("[Bot SSR] Error fetching product doc:", e);
+          }
+        }
+
+        if (product) {
+          const sizeSuffix = product.ml && product.ml.trim() ? ` ${product.ml.trim()}` : "";
+          const pTitle = (product.seoTitle || product.metaTitle)?.trim() || `${product.name}${sizeSuffix} | Price in Bangladesh | Korean Skin Food BD`;
+          const pDesc = (product.metaDescription)?.trim() || `Discover ${product.name} at Korean Skin Food BD. Explore product details, ingredients, skin compatibility, directions for use, and current availability in Bangladesh.`;
+          const regularPrice = typeof product.price === 'number' ? product.price : (product.retailPrice || 0);
+          const salePrice = typeof product.discountPrice === 'number' && product.discountPrice > 0 ? product.discountPrice : regularPrice;
+          const activePrice = salePrice > 0 ? salePrice : regularPrice;
+          const isAvail = (product.stock ?? 0) > 0;
+
+          meta = {
+            title: pTitle,
+            description: pDesc,
+            canonicalUrl: `${BASE_STORE_URL}/product/${encodeURIComponent(product.id)}`,
+            ogImage: product.image || (Array.isArray(product.images) && product.images[0]) || meta.ogImage,
+            ogImageAlt: product.imageAltText || `${product.name} ${product.brand || 'Korean Skin Food BD'}`,
+            ogType: "product",
+            noindex: !!product.noindex,
+            jsonLd: {
+              "@context": "https://schema.org",
+              "@type": "Product",
+              "@id": `${BASE_STORE_URL}/product/${encodeURIComponent(product.id)}#product`,
+              name: product.name,
+              image: [product.image, ...(product.images || [])].filter(Boolean),
+              description: pDesc,
+              sku: product.sku || product.barcode || product.id,
+              brand: {
+                "@type": "Brand",
+                name: product.brand || "Korean Skin Food BD"
+              },
+              offers: {
+                "@type": "Offer",
+                url: `${BASE_STORE_URL}/product/${encodeURIComponent(product.id)}`,
+                priceCurrency: "BDT",
+                price: activePrice,
+                availability: isAvail ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+                itemCondition: "https://schema.org/NewCondition"
+              }
+            }
+          };
+        } else {
+          // Real 404 for bots requesting non-existent products
+          meta.title = "Product Not Found | Korean Skin Food BD";
+          meta.description = "The requested Korean skincare product could not be found or has been discontinued.";
+          meta.noindex = true;
+          const modifiedHtml = injectMetaIntoHtml(rawHtml, meta);
+          return res.status(404).send(modifiedHtml);
+        }
+      } 
+      // 2. Dedicated Brand Page
+      else if (req.path.startsWith("/brand/")) {
+        const bSlug = req.path.replace("/brand/", "").trim();
+        const brandName = bSlug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+        meta.title = `${brandName} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
+        meta.description = `Shop 100% authentic ${brandName} skincare in Bangladesh. Direct Seoul imports, genuine ingredients, verified batch standards, and fast nationwide delivery.`;
+        meta.canonicalUrl = `${BASE_STORE_URL}/brand/${bSlug}`;
+      }
+      // 3. Educational Guide Page
+      else if (req.path.startsWith("/guide/")) {
+        const gSlug = req.path.replace("/guide/", "").trim();
+        const guideTitle = gSlug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+        meta.title = `${guideTitle} | Korean Skin Food BD`;
+        meta.description = `Learn essential Korean skincare routines, active ingredients, and barrier protection adapted for Bangladesh's climate.`;
+        meta.canonicalUrl = `${BASE_STORE_URL}/guide/${gSlug}`;
+        meta.ogType = "article";
+      }
+      // 4. Private / Admin routes should strictly return noindex to bots
+      else if (req.path.startsWith("/admin") || req.path === "/login" || req.path.startsWith("/profile") || req.path.startsWith("/wholesale/profile")) {
+        meta.noindex = true;
+      }
+
+      const injectedHtml = injectMetaIntoHtml(rawHtml, meta);
+      return res.status(200).send(injectedHtml);
+    } catch (err) {
+      console.error("[Crawler Meta Injection Error]:", err);
+      return next();
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
@@ -8095,3 +8713,4 @@ async function startServer() {
 }
 
 startServer();
+

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { SeoMetadata, applySeoMetadata, buildHomepageSeo } from '../services/seoService';
+import { SeoMetadata, applySeoMetadata, DEFAULT_HOMEPAGE_TITLE, DEFAULT_HOMEPAGE_DESCRIPTION } from '../services/seoService';
 
 interface SeoHeadProps {
   metadata?: SeoMetadata;
@@ -34,8 +34,8 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
   useEffect(() => {
     // If a full metadata object was supplied, use it; otherwise compose from individual props
     const activeMeta: SeoMetadata = metadata || {
-      title: title || 'Korean Skin Food Bangladesh',
-      description: description || 'Top Authentic Korean Skincare Brand in Bangladesh.',
+      title: title || DEFAULT_HOMEPAGE_TITLE,
+      description: description || DEFAULT_HOMEPAGE_DESCRIPTION,
       canonicalUrl,
       keywords,
       ogType,

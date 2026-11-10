@@ -181,6 +181,16 @@ export const Footer: React.FC = () => {
                 </Link>
               </li>
               <li>
+                <Link to="/brands" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
+                  <span className="text-[#E91E8C]">›</span> Korean Brands Directory
+                </Link>
+              </li>
+              <li>
+                <Link to="/guides" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
+                  <span className="text-[#E91E8C]">›</span> Skincare Routine Guides
+                </Link>
+              </li>
+              <li>
                 <Link to="/about-us" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
                   <span className="text-[#E91E8C]">›</span> About Our Story
                 </Link>

@@ -38,6 +38,7 @@ import { AdminCreators } from './components/AdminCreators';
 import { AdminReportsPage } from './components/AdminReportsPage';
 import AdminBusinessFinance from './components/AdminBusinessFinance';
 import AdminPaymentsDue from './components/AdminPaymentsDue';
+import { AdminAnalyticsHealth } from './components/AdminAnalyticsHealth';
 import { CreatorRoute } from './components/CreatorRoute';
 import { CreatorLayout } from './components/CreatorLayout';
 import { CreatorDashboard } from './components/CreatorDashboard';
@@ -50,6 +51,11 @@ import { AboutUs } from './components/AboutUs';
 import { ContactUs } from './components/ContactUs';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { TermsOfService } from './components/TermsOfService';
+import { BrandLandingPage } from './components/BrandLandingPage';
+import { BrandsIndexPage } from './components/BrandsIndexPage';
+import { SkincareGuidesIndex } from './components/SkincareGuidesIndex';
+import { SkincareGuideDetail } from './components/SkincareGuideDetail';
+import { NotFoundPage } from './components/NotFoundPage';
 import PosRegister from './components/PosRegister';
 import PosScan from './components/PosScan';
 import { productService } from './services/productService';
@@ -182,9 +188,14 @@ export default function App() {
                   <Route path="terms-of-service" element={<TermsOfService />} />
                   <Route path="terms" element={<Navigate to="/terms-of-service" replace />} />
                   <Route path="product/:id" element={<ProductDetail />} />
+                  <Route path="brands" element={<BrandsIndexPage />} />
+                  <Route path="brand/:brandSlug" element={<BrandLandingPage />} />
+                  <Route path="guides" element={<SkincareGuidesIndex />} />
+                  <Route path="guide/:slug" element={<SkincareGuideDetail />} />
                   <Route path="login" element={<Login />} />
                   <Route path="wholesale/checkout" element={<WholesaleCheckoutPage />} />
                   <Route path="wholesale/cart" element={<WholesaleCheckoutPage />} />
+                  <Route path="404" element={<NotFoundPage />} />
                   
                   {/* CUSTOMER PORTAL - REQUIRES GOOGLE AUTH */}
                   <Route element={<ProtectedRoute />}>
@@ -204,6 +215,9 @@ export default function App() {
                       <Route path="leaderboard" element={<CreatorLeaderboardPage />} />
                     </Route>
                   </Route>
+
+                  {/* CATCH-ALL ROUTE WITHIN MAIN LAYOUT */}
+                  <Route path="*" element={<NotFoundPage />} />
                 </Route>
 
               {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
@@ -219,6 +233,9 @@ export default function App() {
                   <Route path="payments-due" element={<AdminPaymentsDueRouteWrapper />} />
                   <Route path="dues" element={<AdminPaymentsDueRouteWrapper />} />
                   <Route path="reports" element={<AdminReportsPage />} />
+                  <Route path="analytics" element={<AdminAnalyticsHealth />} />
+                  <Route path="tracking" element={<AdminAnalyticsHealth />} />
+                  <Route path="analytics-health" element={<AdminAnalyticsHealth />} />
                   <Route path="creators" element={<AdminCreators />} />
                   <Route path="users" element={<UserManagement />} />
                   <Route path="wholesale" element={<AdminWholesaleManagement />} />
@@ -244,8 +261,8 @@ export default function App() {
                 </Route>
               </Route>
 
-              {/* FALLBACK ROUTING */}
-              <Route path="*" element={<Navigate to="/" replace />} />
+              {/* GLOBAL WILDCARD CATCHALL */}
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </BrowserRouter>
           </WholesaleCartProvider>

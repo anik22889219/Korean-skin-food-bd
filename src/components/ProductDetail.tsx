@@ -338,13 +338,6 @@ export const ProductDetail: React.FC = () => {
     return product ? buildProductSeo(product) : undefined;
   }, [product]);
 
-  // If query failed completely after loading and no product found, redirect gracefully
-  useEffect(() => {
-    if (!isProductLoading && !product && id) {
-      navigate('/', { replace: true });
-    }
-  }, [isProductLoading, product, id, navigate]);
-
   // Subscribe to Product Reviews
   useEffect(() => {
     if (!product?.id) return;
@@ -550,8 +543,49 @@ export const ProductDetail: React.FC = () => {
     return { avg, total, distribution, verifiedCount, withPhotosCount };
   }, [reviews, product]);
 
-  if (!product) {
+  if (isProductLoading) {
     return <ProductDetailSkeleton />;
+  }
+
+  if (!product) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-4 py-16 text-center space-y-6">
+        <SeoHead
+          title="Product Not Found | Korean Skin Food BD"
+          description="The requested Korean skincare product could not be found or may have been retired. Explore authentic K-Beauty in our catalog."
+          noindex={true}
+        />
+        <div className="w-20 h-20 bg-pink-50 text-[#E91E8C] rounded-full flex items-center justify-center mx-auto border border-pink-100 shadow-sm">
+          <AlertCircle size={36} />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold text-gray-900">Product Not Found</h1>
+          <p className="text-sm text-gray-600 max-w-md mx-auto">
+            The skincare product you are looking for is unavailable, discontinued, or may have an updated URL.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
+          <Link
+            to="/shop"
+            className="px-6 py-2.5 bg-[#E91E8C] text-white font-bold text-xs rounded-xl shadow-md hover:bg-[#d0177c] transition"
+          >
+            Browse Skincare Shop
+          </Link>
+          <Link
+            to="/brands"
+            className="px-6 py-2.5 bg-pink-50 text-[#E91E8C] font-bold text-xs rounded-xl border border-pink-200 hover:bg-pink-100 transition"
+          >
+            Explore Brands
+          </Link>
+          <Link
+            to="/"
+            className="px-6 py-2.5 bg-gray-100 text-gray-700 font-bold text-xs rounded-xl hover:bg-gray-200 transition"
+          >
+            Return Home
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   const discountPercent = product.discountPrice 
@@ -610,9 +644,13 @@ export const ProductDetail: React.FC = () => {
           <div className="relative aspect-square bg-pink-50/5 border border-pink-100 rounded-2xl overflow-hidden p-4 group">
             <img 
               src={selectedMainImage || product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=600'} 
-              alt={product.imageAltText || product.name} 
+              alt={product.imageAltText || `${product.name} ${product.brand} - Authentic Korean Skincare in Bangladesh`} 
               className="w-full h-full object-cover rounded-xl shadow-sm transition group-hover:scale-105 duration-300"
               referrerPolicy="no-referrer"
+              loading="eager"
+              fetchPriority="high"
+              width={600}
+              height={600}
             />
             {discountPercent > 0 && (
               <span className="absolute left-6 top-6 bg-[#E91E8C] text-white font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-wider shadow-sm animate-bounce">

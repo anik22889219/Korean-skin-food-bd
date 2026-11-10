@@ -619,6 +619,20 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "code", "discountType", "discountValue", "isActive", "createdAt"]
+    },
+    "TrackingSettings": {
+      "title": "TrackingSettings",
+      "description": "Dynamic tracking credentials and enabled toggles for GTM, GA4, Meta Pixel, and Meta CAPI",
+      "type": "object",
+      "properties": {
+        "gtm": { "type": "object" },
+        "ga4": { "type": "object" },
+        "metaPixel": { "type": "object" },
+        "metaCapi": { "type": "object" },
+        "customScripts": { "type": "object" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -737,6 +751,10 @@
     "/taxonomies/{taxonomyId}": {
       "schema": "TaxonomyItem",
       "description": "Taxonomy dimensions and filter configurations"
+    },
+    "/settings/{settingId}": {
+      "schema": "TrackingSettings",
+      "description": "Site-wide configuration and tracking settings documents"
     }
   }
 }

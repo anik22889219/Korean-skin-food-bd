@@ -38,6 +38,8 @@ export interface Product {
   generatedSocialPost?: string;
   autoDiscountReason?: string;
   isSlowMoving?: boolean;
+  noindex?: boolean;
+  seoSlug?: string;
   // Combo Package Fields
   isCombo?: boolean;
   comboConfig?: ComboConfig;

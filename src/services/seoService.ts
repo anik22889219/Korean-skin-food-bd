@@ -1,4 +1,6 @@
 import { Product } from '../types';
+import { SkincareGuide } from '../data/skincareGuides';
+import { BrandSeoProfile } from '../data/brandProfiles';
 
 export interface SeoMetadata {
   title: string;
@@ -13,213 +15,162 @@ export interface SeoMetadata {
   noindex?: boolean;
 }
 
-export const SITE_NAME = 'Korean Skin Food Bangladesh';
-export const SITE_URL = typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.web.app';
+export const SITE_NAME = 'Korean Skin Food BD';
+export const SITE_URL = 'https://koreanskinfood.web.app';
 export const DEFAULT_OG_IMAGE = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80';
-export const DEFAULT_DESCRIPTION = 'Top Authentic Korean Skincare Brand in Bangladesh. 100% Seoul-sourced cosmeceuticals with Google Business verified reviews and rapid delivery across Dhaka and Bangladesh.';
+export const DEFAULT_HOMEPAGE_TITLE = 'Korean Skin Food BD | Authentic Korean Skincare in Bangladesh';
+export const DEFAULT_HOMEPAGE_DESCRIPTION = 'Shop authentic Korean skincare products in Bangladesh at Korean Skin Food BD. Explore trusted Korean beauty brands, skincare essentials, product information and convenient nationwide delivery.';
 
 /**
- * Clean up text strings for meta tags (strip excess whitespace and newlines)
+ * Strips HTML tags, excess whitespace, and newlines from metadata strings.
  */
 export const sanitizeMetaText = (text?: string): string => {
   if (!text) return '';
   return text
-    .replace(/<[^>]*>?/gm, '') // Strip HTML tags
-    .replace(/\s+/g, ' ')      // Normalize multiple spaces
+    .replace(/<[^>]*>?/gm, '')
+    .replace(/\s+/g, ' ')
     .trim();
 };
 
 /**
- * Build dynamic SEO metadata for the Homepage
+ * Normalizes canonical URLs by enforcing HTTPS absolute URL, removing trailing slashes (except root),
+ * and stripping marketing/tracking query parameters (utm_*, fbclid, gclid, etc.).
+ */
+export const buildCanonicalUrl = (pathWithParams?: string): string => {
+  const base = SITE_URL.replace(/\/+$/, '');
+  if (!pathWithParams || pathWithParams === '/' || pathWithParams === '') {
+    return `${base}/`;
+  }
+
+  try {
+    const full = pathWithParams.startsWith('http') ? pathWithParams : `${base}${pathWithParams.startsWith('/') ? '' : '/'}${pathWithParams}`;
+    const parsed = new URL(full);
+    
+    // Strip common tracking and session parameters
+    const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'msclkid', 'ref', 'source'];
+    trackingParams.forEach(p => parsed.searchParams.delete(p));
+
+    // Normalize path: remove trailing slash if not root
+    let cleanPath = parsed.pathname;
+    if (cleanPath.length > 1 && cleanPath.endsWith('/')) {
+      cleanPath = cleanPath.slice(0, -1);
+    }
+
+    const query = parsed.searchParams.toString();
+    return `${base}${cleanPath}${query ? `?${query}` : ''}`;
+  } catch {
+    return `${base}${pathWithParams.startsWith('/') ? '' : '/'}${pathWithParams}`;
+  }
+};
+
+/**
+ * Build dynamic SEO metadata for the Storefront Homepage
  */
 export const buildHomepageSeo = (): SeoMetadata => {
-  const origin = typeof window !== 'undefined' ? window.location.origin : SITE_URL;
+  const canonicalUrl = buildCanonicalUrl('/');
 
   const organizationSchema = {
     '@context': 'https://schema.org',
-    '@type': 'Organization',
-    '@id': `${origin}/#organization`,
-    name: 'Korean Skin Food Bangladesh',
-    alternateName: 'Korean Skin Food BD',
-    url: origin,
-    logo: `${origin}/logo.png`,
-    description: DEFAULT_DESCRIPTION,
+    '@type': 'OnlineStore',
+    '@id': `${SITE_URL}/#organization`,
+    name: 'Korean Skin Food BD',
+    alternateName: ['Korean Skin Food Bangladesh', 'KSF BD'],
+    url: SITE_URL,
+    logo: `${SITE_URL}/icon.svg`,
+    description: DEFAULT_HOMEPAGE_DESCRIPTION,
+    priceRange: '৳৳',
     sameAs: [
       'https://www.facebook.com/koreanskinfoodbd',
       'https://www.instagram.com/koreanskinfoodbd',
-      'https://wa.me/8801755837545'
+      'https://wa.me/8801755837545',
+      'https://share.google/lEQv5trQv88b0w8WT'
     ],
     contactPoint: {
       '@type': 'ContactPoint',
       telephone: '+8801755837545',
-      contactType: 'Customer Service',
+      contactType: 'customer service',
       areaServed: 'BD',
       availableLanguage: ['Bengali', 'English']
+    },
+    address: {
+      '@type': 'PostalAddress',
+      streetAddress: 'Banani Road 11',
+      addressLocality: 'Dhaka',
+      postalCode: '1213',
+      addressCountry: 'BD'
     }
   };
 
   const websiteSchema = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    '@id': `${origin}/#website`,
-    url: origin,
-    name: 'Korean Skin Food Bangladesh',
+    '@id': `${SITE_URL}/#website`,
+    url: SITE_URL,
+    name: 'Korean Skin Food BD',
     publisher: {
-      '@id': `${origin}/#organization`
+      '@id': `${SITE_URL}/#organization`
     },
     potentialAction: {
       '@type': 'SearchAction',
-      target: `${origin}/shop?search={search_term_string}`,
+      target: `${SITE_URL}/shop?search={search_term_string}`,
       'query-input': 'required name=search_term_string'
     }
   };
 
-  const localBusinessSchema = {
-    '@context': 'https://schema.org',
-    '@type': 'Store',
-    '@id': `${origin}/#store`,
-    name: 'Korean Skin Food Bangladesh',
-    image: DEFAULT_OG_IMAGE,
-    url: origin,
-    telephone: '+8801755837545',
-    priceRange: '৳৳',
-    address: {
-      '@type': 'PostalAddress',
-      addressLocality: 'Dhaka',
-      addressCountry: 'BD'
-    },
-    geo: {
-      '@type': 'GeoCoordinates',
-      latitude: 23.8103,
-      longitude: 90.4125
-    },
-    openingHoursSpecification: [
-      {
-        '@type': 'OpeningHoursSpecification',
-        dayOfWeek: [
-          'Monday',
-          'Tuesday',
-          'Wednesday',
-          'Thursday',
-          'Friday',
-          'Saturday',
-          'Sunday'
-        ],
-        opens: '09:00',
-        closes: '22:00'
-      }
-    ]
-  };
-
   return {
-    title: 'Korean Skin Food Bangladesh - Authentic K-Beauty & Cosmeceuticals',
-    description: DEFAULT_DESCRIPTION,
-    canonicalUrl: `${origin}/`,
+    title: DEFAULT_HOMEPAGE_TITLE,
+    description: DEFAULT_HOMEPAGE_DESCRIPTION,
+    canonicalUrl,
     keywords: [
       'Korean Skincare Bangladesh',
       'Authentic K-Beauty Dhaka',
       'Korean Skin Food BD',
       'COSRX Bangladesh',
       'Beauty of Joseon BD',
+      'SKIN1004 Bangladesh',
       'Seoul imported cosmetics',
-      'Korean moisturizer Dhaka',
-      'Korean Sunscreen Bangladesh'
+      'Korean Sunscreen Bangladesh',
+      'Korean moisturizer Dhaka'
     ],
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
-    ogImageAlt: 'Korean Skin Food Bangladesh Authentic Korean Cosmetics',
+    ogImageAlt: 'Korean Skin Food BD Authentic Korean Skincare in Bangladesh',
     twitterCard: 'summary_large_image',
-    jsonLd: [organizationSchema, websiteSchema, localBusinessSchema]
+    jsonLd: [organizationSchema, websiteSchema]
   };
 };
 
 /**
- * Extract saved custom SEO from a Product object
- */
-export const extractCustomProductSeo = (product: Product): Partial<SeoMetadata> | null => {
-  let customTitle = product.seoTitle || product.metaTitle;
-  let customDesc = product.metaDescription;
-  let customKeywords: string[] | undefined;
-  let customSchema: any = null;
-
-  if (product.generatedSeoContent) {
-    try {
-      const parsed = typeof product.generatedSeoContent === 'string'
-        ? JSON.parse(product.generatedSeoContent)
-        : product.generatedSeoContent;
-
-      if (parsed.seoTitle && !customTitle) customTitle = parsed.seoTitle;
-      if (parsed.metaDescription && !customDesc) customDesc = parsed.metaDescription;
-      if (parsed.keywords) {
-        customKeywords = typeof parsed.keywords === 'string'
-          ? parsed.keywords.split(',').map((k: string) => k.trim())
-          : parsed.keywords;
-      }
-      if (parsed.jsonLdSchema) {
-        customSchema = parsed.jsonLdSchema;
-      }
-    } catch {
-      // Ignore JSON parse errors
-    }
-  }
-
-  if (customTitle || customDesc || customKeywords || customSchema) {
-    return {
-      title: customTitle,
-      description: customDesc,
-      keywords: customKeywords,
-      jsonLd: customSchema
-    };
-  }
-
-  return null;
-};
-
-/**
  * Build dynamic SEO metadata for a Product Details Page
+ * Format prescribed:
+ * Title: {Product Name} {Size} | Price in Bangladesh | Korean Skin Food BD
+ * Description: Discover {Product Name} at Korean Skin Food BD. Explore product details, ingredients, skin compatibility, directions for use, and current availability in Bangladesh.
  */
 export const buildProductSeo = (product: Product): SeoMetadata => {
-  const origin = typeof window !== 'undefined' ? window.location.origin : SITE_URL;
-  const canonicalUrl = `${origin}/product/${product.id}`;
-  const custom = extractCustomProductSeo(product);
+  const canonicalUrl = buildCanonicalUrl(`/product/${product.id}`);
 
-  // Dynamic automated title fallback
-  const dynamicTitle = `${product.name} | ${product.brand} - Authentic K-Beauty Bangladesh`;
-  const title = custom?.title || dynamicTitle;
+  // Compose exact title according to prompt guidelines
+  const sizeSuffix = product.ml && product.ml.trim() ? ` ${product.ml.trim()}` : '';
+  const standardTitle = `${product.name}${sizeSuffix} | Price in Bangladesh | Korean Skin Food BD`;
+  const title = (product.seoTitle || product.metaTitle)?.trim() || standardTitle;
 
-  // Dynamic automated description fallback
-  const priceDisplay = product.discountPrice || product.retailPrice || product.price;
-  const brandName = product.brand || 'Korean';
-  const categoryName = product.category || 'Skincare';
+  // Compose exact description according to prompt guidelines
+  const standardDesc = `Discover ${product.name} at Korean Skin Food BD. Explore product details, ingredients, skin compatibility, directions for use, and current availability in Bangladesh.`;
+  const description = sanitizeMetaText(product.metaDescription || standardDesc);
 
-  const dynamicDesc = sanitizeMetaText(
-    `Buy authentic ${brandName} ${product.name} (${categoryName}) in Bangladesh for ৳${priceDisplay}. 100% genuine Seoul-imported K-Beauty with fast Dhaka & all BD delivery. Cash on Delivery available.`
-  );
-  const description = custom?.description || dynamicDesc;
+  // Price determination: use retail/discount price in BDT
+  const regularPrice = typeof product.price === 'number' ? product.price : (product.retailPrice || 0);
+  const salePrice = typeof product.discountPrice === 'number' && product.discountPrice > 0 
+    ? product.discountPrice 
+    : (typeof product.discountRetailPrice === 'number' && product.discountRetailPrice > 0 ? product.discountRetailPrice : regularPrice);
+  const activePrice = salePrice > 0 ? salePrice : regularPrice;
 
-  // Keywords
-  const dynamicKeywords = [
-    product.name,
-    product.brand,
-    `${product.brand} Bangladesh`,
-    `${product.category} BD`,
-    'Korean Skincare Bangladesh',
-    'Authentic K-Beauty Dhaka',
-    'Buy ' + product.name
-  ];
-  if (product.keyIngredients && product.keyIngredients.length > 0) {
-    dynamicKeywords.push(...product.keyIngredients);
-  }
-  const keywords = custom?.keywords || dynamicKeywords;
-
-  // OpenGraph Image
-  const ogImage = product.image || (product.images && product.images[0]) || DEFAULT_OG_IMAGE;
-  const ogImageAlt = product.imageAltText || product.altText || `${product.name} by ${product.brand} - Korean Skin Food`;
-
-  // Schema.org Structured Data
-  const productPrice = product.discountPrice || product.retailPrice || product.price;
   const isAvailable = (product.stock ?? 0) > 0;
+  const brandName = product.brand || 'Korean Skin Food BD';
+  const ogImage = product.image || (product.images && product.images[0]) || DEFAULT_OG_IMAGE;
+  const ogImageAlt = product.imageAltText || product.altText || `${product.name} ${brandName} authentic Korean skincare in Bangladesh`;
 
+  // Product Schema.org JSON-LD
   const productSchema: Record<string, any> = {
     '@context': 'https://schema.org',
     '@type': 'Product',
@@ -228,38 +179,40 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
     image: [product.image, ...(product.images || [])].filter(Boolean),
     description: sanitizeMetaText(product.description || description),
     sku: product.sku || product.barcode || product.id,
-    mpn: product.barcode || product.id,
     brand: {
       '@type': 'Brand',
-      name: product.brand
+      name: brandName
     },
     offers: {
       '@type': 'Offer',
       url: canonicalUrl,
       priceCurrency: 'BDT',
-      price: productPrice,
-      priceValidUntil: '2027-12-31',
+      price: activePrice,
+      priceValidUntil: '2028-12-31',
       itemCondition: 'https://schema.org/NewCondition',
       availability: isAvailable ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       seller: {
         '@type': 'Organization',
-        name: 'Korean Skin Food Bangladesh'
+        name: 'Korean Skin Food BD'
       }
     }
   };
 
-  // Add AggregateRating if ratings exist
-  if (product.rating && product.rating > 0) {
+  // Only include aggregateRating if real rating and review counts exist in Firestore
+  if (product.rating && product.rating > 0 && product.reviewsCount && product.reviewsCount > 0) {
     productSchema.aggregateRating = {
       '@type': 'AggregateRating',
       ratingValue: Number(product.rating.toFixed(1)),
-      reviewCount: Math.max(product.reviewsCount || 1, 1),
+      reviewCount: product.reviewsCount,
       bestRating: '5',
       worstRating: '1'
     };
   }
 
-  // Breadcrumb Schema
+  // Breadcrumb Hierarchy Schema (Home -> Category -> Brand -> Product)
+  const categorySlug = encodeURIComponent(product.category || 'All');
+  const brandSlug = encodeURIComponent(product.brand || 'Korean');
+
   const breadcrumbSchema = {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
@@ -268,19 +221,19 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: `${origin}/`
+        item: `${SITE_URL}/`
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: product.category || 'Skincare',
-        item: `${origin}/shop?category=${encodeURIComponent(product.category || 'All')}`
+        item: `${SITE_URL}/shop?category=${categorySlug}`
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: product.brand,
-        item: `${origin}/shop?brand=${encodeURIComponent(product.brand)}`
+        item: `${SITE_URL}/brand/${product.brand.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
       },
       {
         '@type': 'ListItem',
@@ -291,14 +244,16 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
     ]
   };
 
-  // If admin provided custom valid schema, combine or prioritize
-  const schemas: any[] = [productSchema, breadcrumbSchema];
-  if (custom?.jsonLd) {
-    if (Array.isArray(custom.jsonLd)) {
-      schemas.push(...custom.jsonLd);
-    } else {
-      schemas.push(custom.jsonLd);
-    }
+  const keywords = [
+    product.name,
+    brandName,
+    `${brandName} Bangladesh`,
+    `${product.name} price in Bangladesh`,
+    `${product.category || 'Skincare'} BD`,
+    'Korean Skincare Bangladesh'
+  ];
+  if (product.keyIngredients && product.keyIngredients.length > 0) {
+    keywords.push(...product.keyIngredients);
   }
 
   return {
@@ -310,71 +265,69 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
     ogImage,
     ogImageAlt,
     twitterCard: 'summary_large_image',
-    jsonLd: schemas
+    jsonLd: [productSchema, breadcrumbSchema]
   };
 };
 
 /**
- * Build dynamic SEO metadata for Category / Brand / Search Catalog pages
+ * Build dynamic SEO metadata for Category Pages or Filtered Shop views
  */
-export const buildCategorySeo = (params: {
+export const buildCategorySeo = (paramsOrCategory: string | {
   category?: string;
   brand?: string;
-  search?: string;
   skinType?: string;
   concern?: string;
+  search?: string;
 }): SeoMetadata => {
-  const origin = typeof window !== 'undefined' ? window.location.origin : SITE_URL;
-  const { category, brand, search, skinType, concern } = params;
+  const categoryName: string | undefined = typeof paramsOrCategory === 'string' ? paramsOrCategory : paramsOrCategory?.category;
+  const brandName: string | undefined = typeof paramsOrCategory === 'object' && paramsOrCategory !== null ? paramsOrCategory.brand : undefined;
+  const skinType: string | undefined = typeof paramsOrCategory === 'object' && paramsOrCategory !== null ? paramsOrCategory.skinType : undefined;
+  const concern: string | undefined = typeof paramsOrCategory === 'object' && paramsOrCategory !== null ? paramsOrCategory.concern : undefined;
+  const search: string | undefined = typeof paramsOrCategory === 'object' && paramsOrCategory !== null ? paramsOrCategory.search : undefined;
 
-  let title = 'Shop Authentic Korean Skincare in Bangladesh | Korean Skin Food';
-  let description = 'Explore 100% authentic Seoul-sourced Korean skincare products in Bangladesh. Shop cleansers, toners, serums, sunscreens, and creams with fast nationwide delivery.';
-  const keywords = ['Korean Skincare BD', 'K-Beauty Bangladesh', 'Buy Authentic Korean Cosmetics'];
+  let title = 'Shop Authentic Korean Skincare in Bangladesh | Korean Skin Food BD';
+  let description = 'Shop authentic Korean skincare in Bangladesh. Explore cleansers, toners, serums, sunscreens, and creams with fast nationwide delivery.';
+  let queryParams = new URLSearchParams();
 
-  const breadcrumbsList: Array<{ name: string; url: string }> = [
-    { name: 'Home', url: `${origin}/` },
-    { name: 'Shop', url: `${origin}/shop` }
-  ];
-
-  if (brand && category && category !== 'All') {
-    title = `${brand} ${category} in Bangladesh - Authentic K-Beauty | Korean Skin Food`;
-    description = `Buy authentic ${brand} ${category} online in Bangladesh. 100% genuine Seoul imports. Best prices in BDT with Cash on Delivery across Dhaka & all districts.`;
-    keywords.push(`${brand} ${category} BD`, `${brand} Bangladesh`, `${category} BD`);
-    breadcrumbsList.push({ name: brand, url: `${origin}/shop?brand=${encodeURIComponent(brand)}` });
-    breadcrumbsList.push({ name: category, url: `${origin}/shop?brand=${encodeURIComponent(brand)}&category=${encodeURIComponent(category)}` });
-  } else if (brand) {
-    title = `${brand} Bangladesh - 100% Original Products | Korean Skin Food`;
-    description = `Explore top authentic ${brand} skincare products imported directly from South Korea. Verified authentic cosmeceuticals with doorstep delivery across Bangladesh.`;
-    keywords.push(`${brand} BD`, `${brand} price in Bangladesh`, `${brand} official BD`);
-    breadcrumbsList.push({ name: brand, url: `${origin}/shop?brand=${encodeURIComponent(brand)}` });
-  } else if (category && category !== 'All') {
-    title = `Korean ${category} in Bangladesh - Top Authentic Brands | Korean Skin Food`;
-    description = `Discover best Korean ${category} formulas for glowing, healthy skin in Bangladesh. Authentic COSRX, Beauty of Joseon, Anua, Skin1004 & more. Fast shipping.`;
-    keywords.push(`Korean ${category} BD`, `Best ${category} Bangladesh`, `${category} K-Beauty`);
-    breadcrumbsList.push({ name: category, url: `${origin}/shop?category=${encodeURIComponent(category)}` });
-  } else if (skinType) {
-    title = `Korean Skincare for ${skinType} Skin in Bangladesh | Korean Skin Food`;
-    description = `Shop authentic Korean skincare tailored specifically for ${skinType} skin. Dermatologist-approved K-Beauty routines delivered across Dhaka & all Bangladesh.`;
-    keywords.push(`${skinType} skin routine BD`, `Korean skincare for ${skinType} skin`);
-    breadcrumbsList.push({ name: `${skinType} Skin`, url: `${origin}/shop?skinType=${encodeURIComponent(skinType)}` });
-  } else if (concern) {
-    title = `Korean Skincare for ${concern} in Bangladesh | Korean Skin Food`;
-    description = `Effective Korean cosmeceuticals and treatments formulated to target ${concern}. Fast delivery in Bangladesh.`;
-    keywords.push(`${concern} treatment BD`, `Korean skincare for ${concern}`);
-    breadcrumbsList.push({ name: concern, url: `${origin}/shop?concern=${encodeURIComponent(concern)}` });
-  } else if (search) {
-    title = `Search Results for "${search}" | Korean Skin Food Bangladesh`;
-    description = `Search results for authentic Korean skincare products matching "${search}". Guaranteed Seoul-sourced cosmetics delivered to your doorstep.`;
+  if (categoryName && categoryName !== 'All') {
+    queryParams.set('category', categoryName);
+    title = `Korean ${categoryName} in Bangladesh | Korean Skin Food BD`;
+    description = `Shop authentic Korean ${categoryName} in Bangladesh. Explore trusted K-Beauty brands, verified ingredients, skin benefits, and fast nationwide delivery.`;
   }
 
-  // Build canonical URL
-  const searchParams = new URLSearchParams();
-  if (category && category !== 'All') searchParams.set('category', category);
-  if (brand) searchParams.set('brand', brand);
-  if (skinType) searchParams.set('skinType', skinType);
-  if (concern) searchParams.set('concern', concern);
-  const queryStr = searchParams.toString();
-  const canonicalUrl = queryStr ? `${origin}/shop?${queryStr}` : `${origin}/shop`;
+  if (brandName && brandName !== 'All') {
+    queryParams.set('brand', brandName);
+    title = categoryName && categoryName !== 'All' 
+      ? `${brandName} ${categoryName} in Bangladesh | Korean Skin Food BD`
+      : `${brandName} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
+  }
+
+  if (skinType && skinType !== 'All') {
+    queryParams.set('skinType', skinType);
+    title = `Korean Skincare for ${skinType} Skin in Bangladesh | Korean Skin Food BD`;
+  }
+
+  if (concern && concern !== 'All') {
+    queryParams.set('concern', concern);
+    title = `Korean Skincare for ${concern} in Bangladesh | Korean Skin Food BD`;
+  }
+
+  if (search) {
+    queryParams.set('search', search);
+    title = `Search Results for "${search}" | Korean Skin Food BD`;
+  }
+
+  const queryStr = queryParams.toString();
+  const canonicalUrl = buildCanonicalUrl(queryStr ? `/shop?${queryStr}` : '/shop');
+
+  const breadcrumbsList: Array<{ name: string; url: string }> = [
+    { name: 'Home', url: `${SITE_URL}/` },
+    { name: 'Shop', url: `${SITE_URL}/shop` }
+  ];
+
+  if (categoryName && categoryName !== 'All') {
+    breadcrumbsList.push({ name: categoryName, url: canonicalUrl });
+  }
 
   const breadcrumbSchema = {
     '@context': 'https://schema.org',
@@ -387,29 +340,25 @@ export const buildCategorySeo = (params: {
     }))
   };
 
-  const collectionSchema = {
-    '@context': 'https://schema.org',
-    '@type': 'CollectionPage',
-    name: title,
-    description,
-    url: canonicalUrl
-  };
-
   return {
     title,
     description,
     canonicalUrl,
-    keywords,
+    keywords: [
+      categoryName ? `Korean ${categoryName} Bangladesh` : 'Korean Skincare BD',
+      brandName ? `${brandName} Bangladesh` : 'K-Beauty Dhaka',
+      'Authentic K-Beauty Bangladesh'
+    ],
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
     ogImageAlt: title,
     twitterCard: 'summary_large_image',
-    jsonLd: [breadcrumbSchema, collectionSchema]
+    jsonLd: [breadcrumbSchema]
   };
 };
 
 /**
- * Build dynamic SEO metadata for static/content pages
+ * Build dynamic SEO metadata for static informational pages (About Us, Contact Us, Privacy, Terms)
  */
 export const buildStaticPageSeo = (
   pageTitle: string,
@@ -417,94 +366,276 @@ export const buildStaticPageSeo = (
   path: string,
   keywords: string[] = []
 ): SeoMetadata => {
-  const origin = typeof window !== 'undefined' ? window.location.origin : SITE_URL;
-  const canonicalUrl = `${origin}${path}`;
+  const canonicalUrl = buildCanonicalUrl(path);
+
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      {
+        '@type': 'ListItem',
+        position: 1,
+        name: 'Home',
+        item: `${SITE_URL}/`
+      },
+      {
+        '@type': 'ListItem',
+        position: 2,
+        name: pageTitle,
+        item: canonicalUrl
+      }
+    ]
+  };
+
+  const webPageSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: pageTitle,
+    description: pageDescription,
+    url: canonicalUrl
+  };
 
   return {
-    title: `${pageTitle} | Korean Skin Food Bangladesh`,
+    title: `${pageTitle} | Korean Skin Food BD`,
     description: pageDescription,
     canonicalUrl,
     keywords: [
       ...keywords,
-      'Korean Skin Food Bangladesh',
+      'Korean Skin Food BD',
       'Authentic K-Beauty Dhaka',
-      'Korean Skincare BD'
+      'Korean Skincare Bangladesh'
     ],
     ogType: 'website',
     ogImage: DEFAULT_OG_IMAGE,
     ogImageAlt: pageTitle,
     twitterCard: 'summary_large_image',
-    jsonLd: {
-      '@context': 'https://schema.org',
-      '@type': 'WebPage',
-      name: pageTitle,
-      description: pageDescription,
-      url: canonicalUrl
-    }
+    jsonLd: [breadcrumbSchema, webPageSchema]
   };
 };
 
 /**
- * Apply SEO metadata directly to the HTML document head
+ * Build dynamic SEO metadata for Brand Landing Pages
+ */
+export const buildBrandSeo = (brandProfile: BrandSeoProfile): SeoMetadata => {
+  const canonicalUrl = buildCanonicalUrl(`/brand/${brandProfile.slug}`);
+  const title = `${brandProfile.name} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
+  const description = `Shop 100% authentic ${brandProfile.name} skincare in Bangladesh. Direct Seoul imports, genuine ingredients, verified batch standards, and fast nationwide delivery.`;
+
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      {
+        '@type': 'ListItem',
+        position: 1,
+        name: 'Home',
+        item: `${SITE_URL}/`
+      },
+      {
+        '@type': 'ListItem',
+        position: 2,
+        name: 'Brands',
+        item: `${SITE_URL}/brands`
+      },
+      {
+        '@type': 'ListItem',
+        position: 3,
+        name: brandProfile.name,
+        item: canonicalUrl
+      }
+    ]
+  };
+
+  const schemas: any[] = [breadcrumbSchema];
+
+  // If brand has FAQs, inject FAQPage schema
+  if (brandProfile.faqs && brandProfile.faqs.length > 0) {
+    schemas.push({
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: brandProfile.faqs.map(faq => ({
+        '@type': 'Question',
+        name: faq.question,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: faq.answer
+        }
+      }))
+    });
+  }
+
+  return {
+    title,
+    description,
+    canonicalUrl,
+    keywords: [
+      `${brandProfile.name} Bangladesh`,
+      `${brandProfile.name} price in BD`,
+      `Buy authentic ${brandProfile.name} Dhaka`,
+      'Korean skincare brands Bangladesh'
+    ],
+    ogType: 'website',
+    ogImage: brandProfile.heroImage || DEFAULT_OG_IMAGE,
+    ogImageAlt: `${brandProfile.name} authentic Korean skincare in Bangladesh`,
+    twitterCard: 'summary_large_image',
+    jsonLd: schemas
+  };
+};
+
+/**
+ * Build dynamic SEO metadata for Educational Skincare Guides
+ */
+export const buildGuideSeo = (guide: SkincareGuide): SeoMetadata => {
+  const canonicalUrl = buildCanonicalUrl(`/guide/${guide.slug}`);
+  const title = `${guide.title} | Korean Skin Food BD`;
+  const description = sanitizeMetaText(guide.excerpt);
+
+  const articleSchema: Record<string, any> = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    '@id': `${canonicalUrl}#article`,
+    headline: guide.title,
+    description,
+    image: [guide.heroImage],
+    datePublished: guide.publishedDate,
+    dateModified: guide.lastUpdatedDate || guide.publishedDate,
+    inLanguage: ['en', 'bn'],
+    author: {
+      '@type': 'Organization',
+      name: guide.author?.name || 'Korean Skin Food BD Editorial Team',
+      url: SITE_URL
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: 'Korean Skin Food BD',
+      logo: {
+        '@type': 'ImageObject',
+        url: `${SITE_URL}/icon.svg`
+      }
+    },
+    mainEntityOfPage: {
+      '@type': 'WebPage',
+      '@id': canonicalUrl
+    }
+  };
+
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      {
+        '@type': 'ListItem',
+        position: 1,
+        name: 'Home',
+        item: `${SITE_URL}/`
+      },
+      {
+        '@type': 'ListItem',
+        position: 2,
+        name: 'Skincare Guides',
+        item: `${SITE_URL}/guides`
+      },
+      {
+        '@type': 'ListItem',
+        position: 3,
+        name: guide.title,
+        item: canonicalUrl
+      }
+    ]
+  };
+
+  const schemas: any[] = [articleSchema, breadcrumbSchema];
+
+  if (guide.faqs && guide.faqs.length > 0) {
+    schemas.push({
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: guide.faqs.map(f => ({
+        '@type': 'Question',
+        name: f.question,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: f.answer
+        }
+      }))
+    });
+  }
+
+  return {
+    title,
+    description,
+    canonicalUrl,
+    keywords: [
+      ...guide.keyIngredients,
+      ...guide.targetSkinTypes,
+      'Korean skincare routine Bangladesh',
+      'K-Beauty advice Dhaka'
+    ],
+    ogType: 'article',
+    ogImage: guide.heroImage,
+    ogImageAlt: guide.imageAltText || guide.title,
+    twitterCard: 'summary_large_image',
+    jsonLd: schemas
+  };
+};
+
+/**
+ * Apply SEO metadata directly to the HTML document head in client-side React
  */
 export const applySeoMetadata = (metadata: SeoMetadata): void => {
   if (typeof document === 'undefined') return;
 
-  // 1. Title
+  // Title
   if (metadata.title) {
     document.title = metadata.title;
   }
 
-  // Helper to upsert meta tags
-  const setMetaTag = (attributeName: 'name' | 'property', attributeValue: string, content?: string) => {
+  const setMeta = (attr: 'name' | 'property', attrVal: string, content?: string) => {
     if (!content) return;
-    let element = document.querySelector(`meta[${attributeName}="${attributeValue}"]`) as HTMLMetaElement;
-    if (!element) {
-      element = document.createElement('meta');
-      element.setAttribute(attributeName, attributeValue);
-      document.head.appendChild(element);
+    let el = document.querySelector(`meta[${attr}="${attrVal}"]`) as HTMLMetaElement;
+    if (!el) {
+      el = document.createElement('meta');
+      el.setAttribute(attr, attrVal);
+      document.head.appendChild(el);
     }
-    element.setAttribute('content', content);
+    el.setAttribute('content', content);
   };
 
-  // 2. Standard Meta Tags
+  // Standard Meta Tags
   if (metadata.description) {
-    setMetaTag('name', 'description', metadata.description);
+    setMeta('name', 'description', metadata.description);
   }
 
   if (metadata.keywords && metadata.keywords.length > 0) {
-    setMetaTag('name', 'keywords', metadata.keywords.join(', '));
+    setMeta('name', 'keywords', metadata.keywords.join(', '));
   }
 
   if (metadata.noindex) {
-    setMetaTag('name', 'robots', 'noindex, nofollow');
+    setMeta('name', 'robots', 'noindex, nofollow');
   } else {
-    setMetaTag('name', 'robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+    setMeta('name', 'robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
   }
 
-  // 3. OpenGraph Tags
-  setMetaTag('property', 'og:title', metadata.title);
-  setMetaTag('property', 'og:description', metadata.description);
-  setMetaTag('property', 'og:site_name', SITE_NAME);
-  setMetaTag('property', 'og:type', metadata.ogType || 'website');
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : SITE_URL;
-  const currentUrl = metadata.canonicalUrl || (typeof window !== 'undefined' ? window.location.href : origin);
-  setMetaTag('property', 'og:url', currentUrl);
+  // Open Graph Tags
+  setMeta('property', 'og:title', metadata.title);
+  setMeta('property', 'og:description', metadata.description);
+  setMeta('property', 'og:site_name', SITE_NAME);
+  setMeta('property', 'og:type', metadata.ogType || 'website');
+  setMeta('property', 'og:url', metadata.canonicalUrl || (typeof window !== 'undefined' ? window.location.href : SITE_URL));
 
   const ogImage = metadata.ogImage || DEFAULT_OG_IMAGE;
-  setMetaTag('property', 'og:image', ogImage);
+  setMeta('property', 'og:image', ogImage);
   if (metadata.ogImageAlt) {
-    setMetaTag('property', 'og:image:alt', metadata.ogImageAlt);
+    setMeta('property', 'og:image:alt', metadata.ogImageAlt);
   }
 
-  // 4. Twitter Card Tags
-  setMetaTag('name', 'twitter:card', metadata.twitterCard || 'summary_large_image');
-  setMetaTag('name', 'twitter:title', metadata.title);
-  setMetaTag('name', 'twitter:description', metadata.description);
-  setMetaTag('name', 'twitter:image', ogImage);
+  // Twitter Cards
+  setMeta('name', 'twitter:card', metadata.twitterCard || 'summary_large_image');
+  setMeta('name', 'twitter:title', metadata.title);
+  setMeta('name', 'twitter:description', metadata.description);
+  setMeta('name', 'twitter:image', ogImage);
 
-  // 5. Canonical Link
+  // Canonical Link
   let canonicalLink = document.querySelector('link[rel="canonical"]') as HTMLLinkElement;
   if (metadata.canonicalUrl) {
     if (!canonicalLink) {
@@ -517,17 +648,17 @@ export const applySeoMetadata = (metadata: SeoMetadata): void => {
     canonicalLink.remove();
   }
 
-  // 6. JSON-LD Structured Data
-  let scriptElement = document.getElementById('seo-json-ld') as HTMLScriptElement;
+  // JSON-LD Structured Data
+  let scriptEl = document.getElementById('seo-json-ld') as HTMLScriptElement;
   if (metadata.jsonLd) {
-    if (!scriptElement) {
-      scriptElement = document.createElement('script');
-      scriptElement.id = 'seo-json-ld';
-      scriptElement.type = 'application/ld+json';
-      document.head.appendChild(scriptElement);
+    if (!scriptEl) {
+      scriptEl = document.createElement('script');
+      scriptEl.id = 'seo-json-ld';
+      scriptEl.type = 'application/ld+json';
+      document.head.appendChild(scriptEl);
     }
-    scriptElement.textContent = JSON.stringify(metadata.jsonLd);
-  } else if (scriptElement) {
-    scriptElement.remove();
+    scriptEl.textContent = JSON.stringify(metadata.jsonLd);
+  } else if (scriptEl) {
+    scriptEl.remove();
   }
 };

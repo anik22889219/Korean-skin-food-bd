@@ -7,7 +7,7 @@ import {
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
-  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2
+  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2, Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -105,6 +105,7 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/business-finance', label: 'Business Banking & Dues', badge: 'Finance', icon: Landmark },
     { to: '/admin/payments-due', label: 'Due Payments', badge: 'Receivables', icon: Receipt },
     { to: '/admin/reports', label: 'All Reports & Analytics', badge: 'Reports', icon: FileText },
+    { to: '/admin/analytics', label: 'Analytics & Tracking', badge: 'Health', icon: Activity },
     { to: '/admin/creators', label: 'Creators Hub', badge: 'Hub', icon: Sparkles },
     { to: '/admin/users', label: 'User Management', badge: 'HR', icon: Users },
     { to: '/admin/ai-agents', label: 'AI Agent Manager', badge: 'AI', icon: Bot },
@@ -136,6 +137,7 @@ export const AdminLayout: React.FC = () => {
     '/admin/combos',
     '/admin/taxonomies',
     '/admin/reports',
+    '/admin/analytics',
     '/admin/orders',
     '/admin/discounts',
     '/admin/meta-catalog',

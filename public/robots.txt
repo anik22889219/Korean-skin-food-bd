@@ -1,0 +1,27 @@
+# robots.txt for Korean Skin Food BD (https://koreanskinfood.web.app/)
+User-agent: *
+Allow: /
+Allow: /shop
+Allow: /brand/
+Allow: /brands
+Allow: /guides
+Allow: /guide/
+Allow: /about-us
+Allow: /contact-us
+Allow: /privacy-policy
+Allow: /terms-of-service
+Allow: /become-a-creator
+
+# Block administrative, private user, and internal POS paths
+Disallow: /admin/
+Disallow: /login
+Disallow: /profile
+Disallow: /wholesale/profile
+Disallow: /wholesale/checkout
+Disallow: /wholesale/cart
+Disallow: /creator/dashboard
+Disallow: /creator/reels/upload
+Disallow: /pos/
+Disallow: /api/
+
+Sitemap: https://koreanskinfood.web.app/sitemap.xml
