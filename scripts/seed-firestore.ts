@@ -27,8 +27,10 @@ try {
   console.warn('Could not connect to Firestore emulator, writing directly to Firestore:', error);
 }
 
-// 1. Products (Demo products removed)
-const products: any[] = [];
+import { INITIAL_PRODUCTS } from '../src/data/allProducts';
+
+// 1. Products
+const products = INITIAL_PRODUCTS;
 
 
 // 2. 8 Sample Orders with diverse statuses and Bangladeshi details

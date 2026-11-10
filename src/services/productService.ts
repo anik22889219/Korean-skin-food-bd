@@ -9,11 +9,11 @@ import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import { posOfflineStorage } from './posOfflineStorage';
 
-// Ensure initial products cache starts empty, but immediately hydrate from persistent offline storage
-let productsCache: Product[] = [];
+// Ensure products cache starts with INITIAL_PRODUCTS for instant availability
+let productsCache: Product[] = INITIAL_PRODUCTS;
 if (typeof window !== 'undefined') {
   posOfflineStorage.getCachedProducts().then((cached) => {
-    if (cached && cached.length > 0 && productsCache.length === 0) {
+    if (cached && cached.length > 0) {
       productsCache = cached;
       notifySubscribers();
       try {

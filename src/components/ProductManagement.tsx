@@ -3277,9 +3277,46 @@ export const ProductManagement: React.FC = () => {
                     <Globe size={14} className="text-indigo-600" />
                     <span>SEO Meta Title, Meta Description & Image Alt Text</span>
                   </span>
-                  <span className="text-[10px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                    Search & Google SEO
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!editingProduct) return;
+                        const name = editingProduct.name || 'Korean Skincare Product';
+                        const brand = editingProduct.brand || 'COSRX';
+                        const category = editingProduct.category || 'Essence & Serum';
+                        const autoTitle = `${name} | Korean Skin Food BD`;
+                        const autoDesc = `Shop authentic ${name} by ${brand} at Korean Skin Food BD. Premium Korean skincare with proven efficacy and fast delivery across Bangladesh.`;
+                        const autoAlt = `${name} bottle packaging front view`;
+                        const autoDescFull = `Authentic ${name} imported directly from South Korea. Formulated to provide optimal hydration, soothing care, and skin barrier protection suitable for daily skincare routines in Bangladesh.`;
+                        const autoDescBn = `দক্ষিণ কোরিয়া থেকে আমদানিকৃত ১০০% অথেন্টিক ${name}। যা ত্বকের গভীর আর্দ্রতা ও সুরক্ষা নিশ্চিত করে।`;
+                        
+                        setEditingProduct({
+                          ...editingProduct,
+                          brand: brand,
+                          category: category,
+                          metaTitle: autoTitle,
+                          seoTitle: autoTitle,
+                          metaDescription: autoDesc,
+                          imageAltText: autoAlt,
+                          altText: autoAlt,
+                          description: editingProduct.description || autoDescFull,
+                          descriptionBN: editingProduct.descriptionBN || autoDescBn,
+                          routineStep: editingProduct.routineStep || 'Essence / Serum',
+                          skinTypes: ['All Skin Types', 'Sensitive Skin', 'Dehydrated Skin', 'Combination Skin'],
+                          concerns: ['Dehydration', 'Dullness', 'Skin Barrier Damage', 'Redness & Irritation'],
+                          benefits: ['Deep Hydration', 'Moisture Retention', 'Skin Barrier Support', 'Soothing & Calming'],
+                          keyIngredients: ['Centella Asiatica Extract', 'Hyaluronic Acid', 'Niacinamide', 'Panthenol']
+                        });
+                      }}
+                      className="text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2.5 py-1 rounded-lg transition shadow-sm flex items-center gap-1"
+                    >
+                      ✨ Auto-Generate SEO & All Fields
+                    </button>
+                    <span className="text-[10px] text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                      Search & Google SEO
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
