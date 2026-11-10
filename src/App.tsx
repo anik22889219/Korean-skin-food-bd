@@ -39,6 +39,7 @@ import { AdminReportsPage } from './components/AdminReportsPage';
 import AdminBusinessFinance from './components/AdminBusinessFinance';
 import AdminPaymentsDue from './components/AdminPaymentsDue';
 import { AdminAnalyticsHealth } from './components/AdminAnalyticsHealth';
+import { AdminShipments } from './components/AdminShipments';
 import { CreatorRoute } from './components/CreatorRoute';
 import { CreatorLayout } from './components/CreatorLayout';
 import { CreatorDashboard } from './components/CreatorDashboard';
@@ -244,6 +245,7 @@ export default function App() {
                   <Route path="discounts" element={<AdminDiscounts />} />
                   <Route path="theme-editor" element={<AdminThemeEditor />} />
                   <Route path="pos" element={<PosRegisterRouteWrapper />} />
+                  <Route path="shipments" element={<AdminShipments />} />
                   <Route path="products" element={<ProductManagement />} />
                   <Route path="combos" element={<AdminComboPackages />} />
                   <Route path="combo-packages" element={<AdminComboPackages />} />

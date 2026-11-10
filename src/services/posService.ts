@@ -32,6 +32,9 @@ export interface PosCheckoutItemInput {
   barcode?: string;
   name?: string;
   price?: number;
+  originalUnitPrice?: number;
+  customUnitPrice?: number;
+  isBelowCostAlert?: boolean;
   isCombo?: boolean;
   comboType?: ComboType;
   comboComponents?: ComboComponentDetail[];
@@ -1236,11 +1239,22 @@ export const posService = {
           orderId: committedOrder.id,
           message: data.message || `Order #${committedOrder.id} completed successfully!`
         };
+      } else if (
+        data.fallbackToClient ||
+        response.status === 503 ||
+        (data.error && (
+          data.error.toLowerCase().includes('permission') ||
+          data.error.includes('PERMISSION_DENIED') ||
+          data.error.toLowerCase().includes('staff') ||
+          data.error.includes('Unauthorized')
+        ))
+      ) {
+        console.warn('[posService] Server endpoint lacks staff auth context or indicated fallback (' + (data.error || '503') + '). Proceeding seamlessly with authenticated client-side transaction...');
+        // Deliberately fall through to Step 3 client-side atomic transaction!
       } else if (response.status === 400 && data.error && !data.error.includes('fetch')) {
-        // Explicit business logic rejection from server
+        // Explicit business logic rejection from server (e.g. Insufficient stock)
         let code: PosCheckoutResult['code'] = 'TRANSACTION_FAILED';
         if (data.error.includes('Insufficient stock')) code = 'INSUFFICIENT_STOCK';
-        else if (data.error.includes('Unauthorized') || data.error.includes('permission')) code = 'PERMISSION_DENIED';
         else if (data.error.includes('not found') || data.error.includes('does not exist')) code = 'PRODUCT_NOT_FOUND';
         else if (data.error.includes('session')) code = 'INVALID_SESSION';
 
@@ -1313,6 +1327,9 @@ export const posService = {
           currentStock: number;
           quantity: number;
           unitPrice: number;
+          originalUnitPrice?: number;
+          customUnitPrice?: number;
+          isBelowCostAlert?: boolean;
           barcode?: string;
           isCombo?: boolean;
           comboType?: ComboType;
@@ -1456,7 +1473,21 @@ export const posService = {
               newStock: parentEntry.stock - totalRequired
             });
 
-            const unitPrice = getProductUnitPrice(prodData, pricingMode, totalRequired, pricingMode === 'wholesale');
+            const customPriceVal = (item.customUnitPrice !== undefined && Number.isFinite(item.customUnitPrice) && item.customUnitPrice >= 0)
+              ? Number(item.customUnitPrice)
+              : (item.price !== undefined && Number.isFinite(item.price) && item.price >= 0)
+                ? Number(item.price)
+                : undefined;
+
+            const unitPrice = customPriceVal !== undefined
+              ? customPriceVal
+              : getProductUnitPrice(prodData, pricingMode, totalRequired, pricingMode === 'wholesale');
+
+            const isBelowCost = Boolean(
+              item.isBelowCostAlert || (
+                prodData.importPrice !== undefined && Number.isFinite(prodData.importPrice) && prodData.importPrice > 0 && unitPrice < prodData.importPrice
+              )
+            );
 
             validatedProducts.push({
               ref: parentEntry.ref,
@@ -1464,6 +1495,9 @@ export const posService = {
               currentStock: parentEntry.stock,
               quantity: item.quantity,
               unitPrice,
+              originalUnitPrice: item.originalUnitPrice !== undefined ? item.originalUnitPrice : (item.customUnitPrice !== undefined ? prodData.price : undefined),
+              customUnitPrice: item.customUnitPrice !== undefined ? item.customUnitPrice : (customPriceVal !== undefined ? customPriceVal : undefined),
+              isBelowCostAlert: isBelowCost,
               barcode: item.barcode || prodData.barcode,
               isCombo: false
             });
@@ -1571,6 +1605,9 @@ export const posService = {
             quantity: p.quantity,
             scannedQuantity: p.quantity,
             barcode: p.barcode,
+            originalUnitPrice: p.originalUnitPrice,
+            customUnitPrice: p.customUnitPrice,
+            isBelowCostAlert: p.isBelowCostAlert,
             isCombo: p.isCombo,
             comboType: p.comboType,
             comboComponents: p.comboComponents

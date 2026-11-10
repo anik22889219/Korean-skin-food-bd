@@ -1,231 +1,180 @@
-# Dynamic Analytics & Tracking Health Architecture
+# POS Custom Pricing, Enhanced Stock Intake & Admin Shipments System
 
-A comprehensive, production-grade system to transform the **Analytics & Tracking Health Center** (`/admin/analytics-health`) into a fully dynamic, site-wide configuration engine for **Korean Skin Food BD**. Configuring or updating tracking identifiers, toggles, or Meta CAPI credentials directly in the admin dashboard will automatically persist to Firestore, sync to the server, and immediately apply across the entire storefront and checkout flow without requiring code redeployments or server restarts.
+Comprehensive implementation plan to introduce per-item custom unit pricing with import cost margin warnings in the POS register, extend stock receiving with product-level import prices, expiry dates, and shipment invoice image attachments, and deploy a dedicated Admin Shipments management dashboard with receiver and date filtering.
 
----
+***
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following architectural decisions and user configurations are aligned:
+> The following technical and UX choices were confirmed during Phase 1 clarification:
 
-- **Confirmed Decision 1 (User-Specified Google Tag Manager ID)**: The primary Google Tag Manager Container ID is configured to **`GTM-T2SWSLZ8`**. This container ID will be set as the initial default and verified in HTML `<head>`, `index.html` `<noscript>`, and Firestore `settings/tracking`.
-- **Confirmed Decision 2 (Managed Integrations Suite)**: Full dynamic control for:
-  - **Google Tag Manager (GTM)**: Container ID `GTM-T2SWSLZ8` (editable, toggleable).
-  - **Google Analytics 4 (GA4)**: Measurement ID (e.g. `G-8DXKFYM3YQ`, editable, toggleable).
-  - **Meta Pixel**: Pixel ID (e.g. `1181966473667367`, editable, toggleable).
-  - **Meta Conversions API (CAPI)**: Server-side purchase dispatching with token management, test event code, and durable idempotency.
-- **Confirmed Decision 3 (Storage & Real-Time Propagation)**: Persisted in Cloud Firestore under `/settings/tracking` with real-time subscription (`onSnapshot`) on the client and server-side synchronization. When an administrator saves changes, active browser sessions and backend CAPI dispatchers adopt the updated configuration instantly.
-- **Confirmed Decision 4 (Input Validation & Test Event Simulator)**: Built-in syntax and format validation for all IDs (GA4 `G-XXXXXXXXXX`, GTM `GTM-XXXXXXX`, Meta Pixel 15–16 numeric digits, and Meta CAPI access token). Includes interactive live event simulation (PageView, ViewItem, AddToCart, Purchase) with live payload inspection and Meta Test Event Code dispatching.
-- **Confirmed Decision 5 (Zero-Regret Fallback Safety)**: Existing environment variables and verified fallbacks (`GTM-T2SWSLZ8`, `G-8DXKFYM3YQ`, `1181966473667367`) serve as safe boot values if Firestore is momentarily unreachable, guaranteeing zero downtime or tracking drop-off.
+- **Confirmed Decision 1 (Custom Price Entry)**: Cashiers will edit the **custom unit price per item** directly in the cart row, which automatically recalculates line subtotal and overall cart totals in real time.
+- **Confirmed Decision 2 (Margin Guard Warning)**: When a custom price drops below the product's import cost (`importPrice` or `costPrice`), the POS will display a prominent amber margin warning badge on the item row without hard-blocking checkout, ensuring speed while maintaining audit visibility.
+- **Confirmed Decision 3 (Receiver Population)**: The "Received By" dropdown in POS Stock Intake and Admin Shipments filter will be dynamically merged from registered system staff/admin accounts and past shipment receiver records, with searchable typing.
 
----
+***
 
 ## 1. Overview & Core Concept
 
-### What It Delivers
-1. **Dynamic Admin Configuration Studio**: An intuitive, hardened configuration interface inside `/admin/analytics-health` allowing store managers to view current health status, update GTM Container ID (`GTM-T2SWSLZ8`), GA4 Measurement ID, Meta Pixel ID, Meta CAPI Access Token, and Meta Test Event Code, and toggle each tracking channel on or off.
-2. **Instant Site-Wide Propagation**: A centralized tracking subscriber that dynamically loads configuration from Firestore doc `settings/tracking`. When updated in Admin, the client-side `analyticsService` re-initializes tracking scripts in the DOM on-the-fly across all storefront pages (`/`, `/shop`, `/product/:id`, `/checkout`, etc.).
-3. **Server-Side Meta CAPI Dynamic Credentials**: The Express backend (`server.ts`) dynamically resolves the Meta Pixel ID and CAPI Access Token from Firestore rather than relying exclusively on static environment variables, ensuring server-side purchase conversions always fire with valid credentials.
-4. **Resilient DOM Script Injector**: Dynamic insertion and hot-swapping of Google Tag Manager `<script>`/`<noscript>` (`GTM-T2SWSLZ8`), Google Analytics 4 `gtag.js`, and Meta Pixel `fbevents.js` with proper deduplication, preventing duplicate tags or script leaks when IDs are updated.
-5. **Real-Time Health & Diagnostic Center**: Instant diagnostic badges verifying whether each script is loaded, whether dataLayer is receiving pushes, whether Meta Pixel is initialized, and whether the server CAPI proxy is ready.
-6. **Live Event Dispatch Simulator**: Interactive testing buttons for `page_view`, `view_item`, `add_to_cart`, and `purchase` with Meta Test Event Code integration and live JSON payload inspection.
+- **What It Does**: 
+  1. Equips the POS checkout register with flexible custom unit pricing per line item, with automated live subtotals and real-time warnings whenever pricing falls below import cost.
+  2. Upgrades the In-Store Stock Receiving / Intake system to capture item-specific import prices, product expiry dates, and an optional physical invoice photo/document upload.
+  3. Introduces a dedicated **Shipments** page in the Admin Dashboard that lists all historical stock intake receipts with date, supplier, batch number, receiver, items breakdown, invoice image lightbox, and multi-criteria filtering by receiver staff and date ranges.
+- **Target Audience / Persona**: Store cashiers, inventory managers, warehouse staff, and business administrators managing Korean SkinFood retail and wholesale operations.
+- **Key Value**: Prevents accidental loss-making discounts through automated margin alerts, preserves batch traceability (expiry dates and original paper invoice photos), and gives business owners immediate auditability over inventory intake by staff and timeline.
 
-### Target Audience & Persona
-- **Store Administrator & Marketing Lead**: Manages ad campaigns, sets up new Meta Pixels or GA4 properties, rotates CAPI access tokens, updates GTM containers, and tests conversion tracking without developer assistance.
-- **Storefront Visitors & Customers**: Experience fast, seamless browsing with privacy-respectful, deduplicated e-commerce event tracking.
-- **Platform Developers**: Clean, decoupled architecture with strict TypeScript types, ABAC security rules, and unified error handling.
-
----
+***
 
 ## 2. User Experience & Visual Design
 
-Following the universal **SaaS & Dashboard guidelines** (`references/3_saas_dashboard.md`) and anti-AI-slop principles:
-
-### Visual Identity & Theme
-- **Dominant Neutral Canvas (60%)**: Pure white (`bg-white`) in light mode and deep neutral slate (`bg-slate-900` / `bg-slate-950`) in dark mode with refined surface boundaries.
-- **Structural Surfaces (30%)**: Clean, flat cards with subtle 1px hairline borders (`border-slate-200 dark:border-slate-800`), avoiding nested cards within cards.
-- **Accent Budget (10%)**: Seoul Rose (`#E91E8C`) concentrated strictly on primary save actions, active tabs, and focused inputs.
-- **Zero-Pill Discipline**: Status indicators and metadata rendered as clean, unboxed typography with typographic separators (`·`, `/`) instead of colored candy pills.
-- **Tabular Figures**: All timestamps, event counts, IDs, and payload metrics formatted with `font-mono tabular-nums`.
-
 ### Key User Flows
 
-#### A. Health Center Dashboard & Configuration Studio (`/admin/analytics-health`)
+1. **POS Custom Pricing & Margin Guard Flow**:
+   - Cashier scans or adds a product to the cart.
+   - In the cart row, next to the standard price (e.g. ৳1,450), cashier clicks "Custom Price" or taps the price field.
+   - Cashier enters the agreed custom unit price (e.g. ৳900).
+   - If the entered price is less than the product's import price (e.g. import price is ৳1,050):
+     - An amber warning banner appears beneath the item: `⚠ Below Import Cost (Cost: ৳1,050 | Loss: -৳150/unit)`.
+     - The line subtotal and grand total update automatically.
+     - Cashier can still proceed with checkout without breaking terminal flow.
+   - On completed sale receipt, the custom rate is stamped alongside any applied variance for accounting.
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ Admin / Integrations / Analytics & Tracking Health Center                   │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ ┌──────────────────┐ ┌──────────────────┐ ┌───────────────┐ ┌──────────────┐ │
-│ │ Tag Manager(GTM) │ │ Google Analytics │ │ Meta Pixel    │ │ Server CAPI  │ │
-│ │ GTM-T2SWSLZ8     │ │ G-8DXKFYM3YQ     │ │ 118196647366..│ │ Connected    │ │
-│ │ Status: Active   │ │ Status: Active   │ │ Status: Active│ │ Graph v19.0  │ │
-│ └──────────────────┘ └──────────────────┘ └───────────────┘ └──────────────┘ │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ [ EDIT TRACKING SETTINGS & CREDENTIALS ]                                     │
-│                                                                              │
-│ Google Tag Manager (GTM):                                                    │
-│ [x] Enable GTM Container                                                     │
-│ Container ID:   [ GTM-T2SWSLZ8           ] (Format: GTM-XXXXXXX)            │
-│                                                                              │
-│ Google Analytics 4 (GA4):                                                    │
-│ [x] Enable GA4 Tracking                                                      │
-│ Measurement ID: [ G-8DXKFYM3YQ           ] (Format: G-XXXXXXXXXX)           │
-│                                                                              │
-│ Meta Pixel:                                                                  │
-│ [x] Enable Meta Browser Pixel                                                │
-│ Pixel ID:       [ 1181966473667367       ] (15-16 Digits)                   │
-│                                                                              │
-│ Meta Conversions API (CAPI - Server Side):                                   │
-│ [x] Enable Server-Side CAPI Purchase Dispatch                                │
-│ Access Token:   [ EAAG...••••••••••••••• ] [ Show / Hide ]                   │
-│ Test Event Code:[ TEST89421              ] (Optional for Events Manager)    │
-│                                                                              │
-│ [ Cancel ]                               [ Save & Apply Live to Website ]    │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ LIVE EVENT DISPATCH SIMULATOR                                                │
-│ [ Simulate PageView ] [ Simulate ViewItem ] [ AddToCart ] [ Purchase ]      │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ LIVE SESSION DISPATCH STREAM TABLE                                           │
-│ Event Type    │ Event ID           │ Targets          │ Time     │ Action    │
-│ purchase      │ test_purchase_17.. │ GTM, GA4, CAPI   │ 10:24:12 │ [Inspect] │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+2. **Enhanced Stock Receiving (POS Stock-In) Flow**:
+   - Warehouse receiver enters the POS Stock In tab.
+   - Scans barcodes or searches products to populate the intake queue.
+   - In each queue row:
+     - Adjusts quantity (step buttons or direct input).
+     - Sets **Import Price / Unit Cost (৳)** (pre-filled with current import price, editable for batch changes).
+     - Sets **Expiry Date** (calendar picker or standard date input).
+   - In the **Shipment & Intake Audit Metadata** section:
+     - Selects **Received By** from a searchable combobox containing staff members and recent receivers, or types a custom name.
+     - Fills Supplier and Batch/Invoice #.
+     - Uses the **Invoice Image Upload** field: clicks to upload photo of supplier invoice or paper slip (with thumbnail preview, remove button, and full-size zoom).
+   - Submits intake: atomically updates stock counts, updates product import prices and expiry tracking, creates inventory audit logs, and stores the completed stock receipt voucher.
 
-#### B. Inspection Modal
-- Full formatted JSON preview of dispatched dataLayer and CAPI payloads.
-- Quick "Copy JSON" and "Copy Event ID" actions.
-- Verification notes explaining deduplication (`eventID` parity between Meta Pixel and server CAPI).
+3. **Admin Shipments Management Flow**:
+   - Admin navigates to `/admin/shipments` via the Admin sidebar (tagged with a warehouse crate icon and count badge).
+   - Top summary KPI cards display: Total Shipments Logged, Total Intake Units Received, Total Purchase Value (৳), and Active Receivers.
+   - Filter bar allows:
+     - Selecting **Staff / Receiver** (searchable dropdown).
+     - Selecting **Date Range** (All Time, Today, Last 7 Days, This Month, or Custom Start/End Date).
+     - Search query by Voucher #, Supplier, or Batch #.
+   - Data Table displays: Receipt #, Date & Time, Supplier, Batch #, Total Items & Units, Total Cost, Received By, and Invoice Image thumbnail.
+   - Clicking an invoice thumbnail opens a high-resolution lightbox view.
+   - Clicking any shipment row expands a detailed product breakdown: item photo, brand, title, barcode, previous stock, added quantity, resulting stock, unit cost, and expiry date.
 
----
+### Visual Identity & Theme
+- **Aesthetic Direction**: Utilitarian, high-density enterprise dashboard and POS styling consistent with Korean SkinFood design tokens (`#1E293B` slate cards, `#E91E8C` pink POS accents, emerald `#10B981` receiving accents, and amber `#F59E0B` margin warning banners).
+- **Typography**: Display headlines in `Plus Jakarta Sans`, body text in `DM Sans`, and all financial metrics, batch numbers, and dates strictly formatted with `font-mono tabular-nums`.
+- **Zero-Pill Discipline**: Metadata displayed using clean typographic separators (`·`) without static pill sandwich enclosures. Functional filter tabs styled as clean segmented buttons.
+
+***
 
 ## 3. Key Product Decisions & Trade-Offs
 
-| Decision | Chosen Approach | Why | Alternatives Considered |
-|---|---|---|---|
-| **GTM Container ID** | Default to user-specified `GTM-T2SWSLZ8` with dynamic override | Accurately targets the user's active Google Tag Manager container across `index.html`, client runtime, and Firestore. | Hardcoding old container ID or waiting for manual configuration. |
-| **Configuration Storage** | Firestore doc `settings/tracking` with real-time `onSnapshot` | Instant live updates across all active visitor sessions without needing a build, redeploy, or container restart. | Storing only in `.env` (requires developer rebuild) or localStorage (only affects single device). |
-| **Server Synchronization** | Express server reads from Firestore cache + admin sync route | Ensures server-side CAPI purchase conversions use newly configured tokens immediately. | Polling Firestore on every purchase request (adds latency) or manual server restart (disruptive). |
-| **Script Hot-Swapping** | Safe DOM injection manager in `analyticsService` | When tracking ID changes, dynamically replaces `<script>` tag and re-initializes `gtag('config')` and `fbq('init')`. | Requiring a hard reload of the website or leaving duplicate tags in `<head>`. |
-| **Validation Architecture** | Client-side pre-validation + Server schema guard | Prevents malformed IDs (e.g. invalid prefix, truncated tokens) from breaking tracking in production. | Saving raw unvalidated strings which could silently kill conversion tracking. |
-| **Allow-List & Deduplication** | Strict `order_source === 'WEBSITE'` + deterministic `purchase_{orderId}` eventId | Prevents duplicate purchase reporting between browser pixel and server CAPI, while keeping POS orders separate. | Blind dispatching on both channels causing 200% over-reported ad conversion revenue. |
+- **Decision 1: Custom Unit Price vs Line Subtotal**:
+  - *Chosen Approach*: Cashier enters the custom unit price per item; line subtotal is computed as `customUnitPrice * quantity`.
+  - *Why*: Eliminates rounding anomalies on multi-unit sales and aligns with tax, margin, and discount reporting formulas.
+- **Decision 2: Non-Blocking Margin Warning vs Strict Block**:
+  - *Chosen Approach*: Prominent amber badge warning with exact loss-per-unit preview, allowing sale execution without hard termination.
+  - *Why*: Prevents retail register paralysis during authorized clearance sales, damaged box write-downs, or store manager discretionary deals.
+- **Decision 3: Invoice Image Storage via Dedicated Cloudinary Cloud Integration**:
+  - *Chosen Approach*: Primary direct upload to Cloudinary under the `kbeauty_invoices` folder with live upload progress tracking, auto-cataloging in Firestore Media Library (`cloudinary_images`), and server-side Cloudinary proxy fallback (`/api/cloudinary/upload-invoice`). Includes inline quick settings for custom Cloudinary cloud name and unsigned upload preset.
+  - *Why*: Ensures high-speed global CDN delivery, avoids Firestore 1MB single-document limits, and keeps all supplier invoices organized in the business's Cloudinary storage.
+- **Decision 4: Receiver Combobox Architecture**:
+  - *Chosen Approach*: Dynamic union of active Firestore users (`admin`, `inventory_manager`, `hr`, etc.) and distinct receiver names extracted from existing `stock_receipts` collections.
+  - *Why*: Guarantees zero friction for existing team members while accommodating external drivers or temporary warehouse assistants.
 
----
+***
 
 ## 4. Technical Architecture & Data Strategy
 
-### Technical Architecture Diagram
-
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                 ADMIN HEALTH CENTER (/admin/analytics-health)               │
-│  - View live status of GTM (GTM-T2SWSLZ8), GA4, Meta Pixel, and CAPI        │
-│  - Edit IDs, Access Tokens, and Enable/Disable Toggles                      │
-│  - Run Live Event Simulations with payload inspection                        │
-└──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
-                                       ▼ (Save Settings Mutation)
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     FIRESTORE DATABASE (/settings/tracking)                 │
-│  {                                                                          │
-│    gtm: { enabled: true, containerId: "GTM-T2SWSLZ8" },                     │
-│    ga4: { enabled: true, measurementId: "G-8DXKFYM3YQ" },                   │
-│    metaPixel: { enabled: true, pixelId: "1181966473667367" },               │
-│    metaCapi: { enabled: true, accessToken: "...", testEventCode: "" },      │
-│    updatedAt: "2026-11-07T...", updatedBy: "admin@koreanskinfoodbd.com"     │
-│  }                                                                          │
-└──────────────────────┬──────────────────────────────────────┬───────────────┘
-                       │                                      │
-        (Real-Time onSnapshot Sync)            (Server Cache & Validation)
-                       ▼                                      ▼
-┌──────────────────────────────────────────┐ ┌────────────────────────────────┐
-│          CLIENT ANALYTICS SERVICE        │ │       EXPRESS SERVER (server.ts│
-│            (analyticsService.ts)         │ │                                │
-│  - Injects GTM-T2SWSLZ8 & tags           │ │  - GET /api/tracking/settings  │
-│  - Powers all Storefront & Checkout tags │ │  - POST /api/tracking/settings │
-│  - Respects integration enable toggles   │ │  - Server CAPI Purchase uses   │
-│  - Standardizes e-commerce payloads      │ │    live Pixel ID & Token       │
-└──────────────────────────────────────────┘ └────────────────────────────────┘
-```
-
-### Data Schema (`settings/tracking`)
-
-```typescript
-export interface TrackingSettings {
-  gtm: {
-    enabled: boolean;
-    containerId: string; // e.g. "GTM-T2SWSLZ8"
-  };
-  ga4: {
-    enabled: boolean;
-    measurementId: string; // e.g. "G-8DXKFYM3YQ"
-  };
-  metaPixel: {
-    enabled: boolean;
-    pixelId: string; // e.g. "1181966473667367"
-  };
-  metaCapi: {
-    enabled: boolean;
-    accessToken?: string;
-    testEventCode?: string;
-  };
-  customScripts?: {
-    headerScript?: string;
-    bodyScript?: string;
-  };
-  updatedAt?: string;
-  updatedBy?: string;
-}
+┌────────────────────────────────────────────────────────────────────────┐
+│                          USER INTERFACE LAYER                          │
+├──────────────────────────┬─────────────────────────┬───────────────────┤
+│    POS Sales Register    │   POS Stock Receiving   │  Admin Shipments  │
+│  - Custom Unit Price     │ - Import Cost Input     │ - Filter by Staff │
+│  - Below-Cost Amber Warn │ - Expiry Date Picker    │ - Filter by Date  │
+│  - Realtime Subtotals    │ - Invoice Image Upload  │ - Batch Breakdown │
+│  - Cart Item Metadata    │ - Receiver Combobox     │ - Image Lightbox  │
+└────────────┬─────────────┴────────────┬────────────┴─────────┬─────────┘
+             │                          │                      │
+             ▼                          ▼                      ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        SERVICE & CLIENT LAYER                          │
+├──────────────────────────┬─────────────────────────┬───────────────────┤
+│      posService.ts       │    productService.ts    │   userService.ts  │
+│ - checkoutWithPOS()      │ - processStockInBatch() │ - getUsers()      │
+│ - pricingMode & variance │ - getStockReceipts()    │ - staff directory │
+│ - custom price tracking  │ - subscribeReceipts()   │ - roles lookup    │
+└────────────┬─────────────┴────────────┬────────────┴─────────┬─────────┘
+             │                          │                      │
+             ▼                          ▼                      ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                       FIRESTORE PERSISTENCE                            │
+├──────────────────────────┬─────────────────────────┬───────────────────┤
+│      orders (POS)        │     stock_receipts      │     products      │
+│ - customUnitPrice        │ - items[].importCost    │ - importPrice     │
+│ - originalUnitPrice      │ - items[].expiryDate    │ - expiryDate      │
+│ - isBelowCostAlert       │ - invoiceImageUrl       │ - stock count     │
+│                          │ - receivedBy, supplier  │ - inventory_logs  │
+└──────────────────────────┴─────────────────────────┴───────────────────┘
 ```
 
----
+### Data Model Enhancements
 
-## 5. Phased Implementation Roadmap
+1. **`CartItem` & `OrderItem`**:
+   - `customUnitPrice?: number`
+   - `originalUnitPrice?: number`
+   - `isBelowCost?: boolean`
 
-### Phase 1: Static Fallback & HTML Alignment
-- Update `index.html` to reference `GTM-T2SWSLZ8` in both `<head>` and `<body>` `<noscript>`.
-- Set default GTM container ID to `GTM-T2SWSLZ8` in all analytics fallback constants.
+2. **`StockInQueueItem` & `StockReceiptItem`**:
+   - `importCost?: number`
+   - `expiryDate?: string` (ISO format `YYYY-MM-DD`)
 
-### Phase 2: Tracking Settings Service & Firestore Persistence
-- Create `src/services/trackingSettingsService.ts` to manage fetching, updating, and listening (`onSnapshot`) to `/settings/tracking`.
-- Include safe fallbacks to `GTM-T2SWSLZ8`, `G-8DXKFYM3YQ`, and `1181966473667367`.
-- Add strict validation functions:
-  - `validateGtmId(id: string)`: matches `^GTM-[A-Z0-9]+$`
-  - `validateGa4Id(id: string)`: matches `^G-[A-Z0-9]+$`
-  - `validatePixelId(id: string)`: matches `^\d{12,20}$`
+3. **`StockReceipt`**:
+   - `invoiceImageUrl?: string`
+   - `receivedBy: string`
+   - `supplier?: string`
+   - `batchNumber?: string`
+   - `notes?: string`
+   - `items: StockReceiptItem[]`
 
-### Phase 3: Dynamic Analytics Service Engine (`analyticsService.ts`)
-- Upgrade `AnalyticsService` to subscribe to `trackingSettingsService` in real time.
-- Implement dynamic script mounting/updating:
-  - If GTM Container ID changes or is toggled, update `<script>` and `<iframe>` noscript tags for `GTM-T2SWSLZ8`.
-  - If GA4 Measurement ID changes or is toggled on/off, update `<script>` tag and call `gtag('config', id)`.
-  - If Meta Pixel ID changes or is toggled, update `fbq('init', id)`.
-- Respect `enabled` flags on all tracking methods (`trackPageView`, `trackViewItem`, `trackAddToCart`, `trackPurchase`, etc.).
+### Component & Navigation Updates
 
-### Phase 4: Server-Side Dynamic CAPI Resolution (`server.ts`)
-- Add `GET /api/tracking/settings` and `POST /api/tracking/settings` with staff/admin authentication.
-- Update `/api/tracking/meta-capi` to resolve the current active Pixel ID and Access Token from the cached Firestore `settings/tracking` doc before dispatching to Meta Graph API v19.0.
-- Ensure the server test status endpoint `/api/tracking/meta-capi/status` reflects the live Firestore settings.
+- **POS Register & Cart**:
+  - Add editable custom unit price button/input inside each product row.
+  - Calculate `isBelowCost = (customUnitPrice < (item.product.importPrice || item.product.costPrice || 0))`.
+  - Render an amber warning indicator with cost comparison.
+- **POS Stock-In**:
+  - Add inline inputs in each queue row for `Import Cost (৳)` and `Expiry Date`.
+  - Add invoice photo uploader in `Shipment & Intake Audit Metadata` with image compression and preview.
+  - Implement searchable receiver combobox with system staff users and previous receivers.
+- **Admin Layout & Navigation**:
+  - Add **Shipments** route (`/admin/shipments`) under Admin layout with icon and badge.
+  - Build `AdminShipments.tsx` featuring KPIs, multi-filter toolbar, responsive data table, product details drawer, and full-resolution invoice modal.
 
-### Phase 5: Overhaul Health Center UI (`AdminAnalyticsHealth.tsx`)
-- Display updated active container `GTM-T2SWSLZ8` in the diagnostics grid.
-- Add **Edit Tracking Settings** drawer/section with:
-  - GTM, GA4, Meta Pixel, and Meta CAPI input fields and enable/disable toggles.
-  - Real-time format validation with clear inline hints.
-  - Password-masked token input with show/hide toggle for CAPI Access Token.
-  - Meta Test Event Code input.
-  - "Save & Apply Live to Entire Website" button with loading state and success/error feedback.
-- Retain and enhance the **Diagnostics Grid**:
-  - Live probe of `gtag.js`, `dataLayer`, `fbevents.js`, and CAPI server status.
-  - Indicator showing whether settings were loaded from Firestore or fallback.
-- Retain and enhance the **Interactive Live Event Simulator**:
-  - Simulate PageView, ViewItem, AddToCart, Purchase with payload inspector modal.
+***
 
-### Phase 6: Verification & Quality Assurance
-- Run `compile_applet` and `lint_applet` to ensure zero compilation or syntax errors.
-- Test changing an ID in Admin and verify that:
-  - It saves to Firestore.
-  - The browser `dataLayer` and `fbq` reflect the change without page refresh.
-  - The live simulator successfully fires events with the new configuration.
-- Verify storefront product view, cart, and checkout flow remain unaffected and functional.
+## 5. Verification & Testing Plan
+
+1. **POS Custom Price & Margin Warning Test**:
+   - Add product with known `importPrice` (e.g., ৳1,000) to POS cart.
+   - Enter custom price above cost (e.g. ৳1,200): verify subtotal calculates accurately and no warning appears.
+   - Enter custom price below cost (e.g. ৳800): verify amber warning badge appears displaying cost delta.
+   - Complete POS sale: verify receipt and stored order record reflect custom price and audit tags.
+2. **Stock Receiving Test**:
+   - Add multiple items to intake queue, set custom import costs and expiry dates for each.
+   - Upload invoice image: verify image upload preview and clear button.
+   - Select receiver from dropdown: verify suggestions filter as typed.
+   - Confirm intake: verify stock increments, product import price updates, and stock receipt record contains invoice URL and item expiry dates.
+3. **Admin Shipments Page Test**:
+   - Navigate to `/admin/shipments`. Verify newly created stock receipt appears at the top.
+   - Test receiver filter: filter by selected staff member.
+   - Test date filter: filter by "Today", "Last 7 Days", and custom date ranges.
+   - Click invoice thumbnail: verify full-size modal preview.
+   - Expand item details: verify all product rows, stock transitions, import costs, and expiry dates are visible.
+4. **Compilation & Linting**:
+   - Run `compile_applet` and `lint_applet` concurrently to verify clean TypeScript compilation and zero unresolved imports.

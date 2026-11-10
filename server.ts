@@ -43,6 +43,65 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
+// UPLOADS & MEDIA ASSETS SERVING & ENDPOINTS
+// ==========================================
+const uploadsDir = path.join(process.cwd(), "public", "uploads");
+const invoicesDir = path.join(uploadsDir, "invoices");
+try {
+  if (!fs.existsSync(invoicesDir)) {
+    fs.mkdirSync(invoicesDir, { recursive: true });
+  }
+} catch (e) {
+  console.warn("Could not create invoices upload directory:", e);
+}
+app.use("/uploads", express.static(uploadsDir));
+
+app.post("/api/upload/invoice", async (req, res) => {
+  try {
+    const { dataUrl, fileName } = req.body;
+    if (!dataUrl || typeof dataUrl !== 'string') {
+      return res.status(400).json({ success: false, error: "Missing dataUrl string" });
+    }
+
+    // Match data URI format: data:image/[png/jpeg/webp...];base64,...
+    const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+    if (!matches) {
+      return res.status(400).json({ success: false, error: "Invalid base64 image data URL format" });
+    }
+
+    let ext = matches[1].toLowerCase();
+    if (ext === 'jpeg') ext = 'jpg';
+    if (!['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+      ext = 'jpg';
+    }
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    if (buffer.length > 15 * 1024 * 1024) {
+      return res.status(413).json({ success: false, error: "Image file exceeds 15MB limit" });
+    }
+
+    if (!fs.existsSync(invoicesDir)) {
+      fs.mkdirSync(invoicesDir, { recursive: true });
+    }
+
+    const safeName = `invoice-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    const filePath = path.join(invoicesDir, safeName);
+    await fs.promises.writeFile(filePath, buffer);
+
+    const publicUrl = `/uploads/invoices/${safeName}`;
+    return res.json({
+      success: true,
+      url: publicUrl,
+      sizeBytes: buffer.length
+    });
+  } catch (err: any) {
+    console.error("Error saving invoice upload:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to save invoice image" });
+  }
+});
+
+// ==========================================
 // RATE LIMITING PROTECTION (ANTI-DOS & ANTI-DENIAL-OF-WALLET)
 // ==========================================
 interface RateLimitRecord {
@@ -2261,7 +2320,8 @@ app.delete("/api/admin/reels/:id", verifyAdminAuth, async (req, res) => {
 // CLOUDINARY CONFIG & SIGNATURE ENDPOINTS
 // GET Public Cloudinary Config (Safe, no secrets exposed)
 app.get("/api/cloudinary/config", (req, res) => {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const rawCloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const cloudName = rawCloudName ? String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') : '';
   const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || '';
   const hasApiKey = Boolean(process.env.CLOUDINARY_API_KEY);
   const hasSecret = Boolean(process.env.CLOUDINARY_API_SECRET);
@@ -2277,7 +2337,8 @@ app.get("/api/cloudinary/config", (req, res) => {
 
 // POST Generate Signed Cloudinary Signature (Keep API Secret 100% on server, require authenticated user/creator/staff)
 app.post("/api/cloudinary/sign", verifyUserOrStaffAuth, (req, res) => {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const rawCloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const cloudName = rawCloudName ? String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') : '';
   const apiKey = process.env.CLOUDINARY_API_KEY || '';
   const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
   const defaultPreset = process.env.CLOUDINARY_UPLOAD_PRESET || '';
@@ -2336,6 +2397,74 @@ app.post("/api/cloudinary/sign", verifyUserOrStaffAuth, (req, res) => {
     configured: false,
     error: "Cloudinary credentials not found in server environment. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET (or CLOUDINARY_UPLOAD_PRESET).",
   });
+});
+
+// POST Server-side direct Cloudinary upload for Stock-In invoices & media
+app.post("/api/cloudinary/upload-invoice", async (req, res) => {
+  try {
+    const { dataUrl, fileName, folder = 'kbeauty_invoices', cloudName: customCloudName, uploadPreset: customPreset } = req.body;
+    if (!dataUrl || typeof dataUrl !== 'string') {
+      return res.status(400).json({ success: false, error: "Missing dataUrl image payload" });
+    }
+
+    const rawCloudName = customCloudName || process.env.CLOUDINARY_CLOUD_NAME || 'dxvmfaxeh';
+    const cloudName = String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'dxvmfaxeh';
+    const apiKey = process.env.CLOUDINARY_API_KEY || '';
+    const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
+    const defaultPreset = customPreset || process.env.CLOUDINARY_UPLOAD_PRESET || 'ml_default';
+
+    const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+    const bodyParams: Record<string, string> = {
+      file: dataUrl,
+      folder
+    };
+
+    if (apiKey && apiSecret) {
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      bodyParams.timestamp = timestamp;
+      bodyParams.api_key = apiKey;
+
+      const paramsToSign: Record<string, string> = { folder, timestamp };
+      const sortedKeys = Object.keys(paramsToSign).sort();
+      const stringToSign = sortedKeys.map((k) => `${k}=${paramsToSign[k]}`).join('&');
+      const signature = crypto.createHash('sha1').update(stringToSign + apiSecret).digest('hex');
+      bodyParams.signature = signature;
+    } else {
+      bodyParams.upload_preset = defaultPreset;
+    }
+
+    const upstreamRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyParams)
+    });
+
+    const upstreamData: any = await upstreamRes.json();
+    if (upstreamRes.ok && upstreamData.secure_url) {
+      return res.json({
+        success: true,
+        secureUrl: upstreamData.secure_url,
+        publicId: upstreamData.public_id,
+        format: upstreamData.format,
+        bytes: upstreamData.bytes,
+        width: upstreamData.width,
+        height: upstreamData.height,
+        cloudName
+      });
+    }
+
+    console.warn("[Cloudinary Server Upload] Upstream error:", upstreamData);
+    return res.status(400).json({
+      success: false,
+      error: upstreamData.error?.message || "Failed to upload invoice to Cloudinary"
+    });
+  } catch (err: any) {
+    console.error("[Cloudinary Server Upload] Server exception:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Internal server error uploading to Cloudinary"
+    });
+  }
 });
 
 // POST Apply for Creator (Public user registration/application)
@@ -5731,9 +5860,17 @@ app.post("/api/functions/posCheckout", async (req, res) => {
         }
 
         let unitPrice = Number(item.price);
-        if (!unitPrice || unitPrice <= 0) {
+        if (item.customUnitPrice !== undefined && Number.isFinite(Number(item.customUnitPrice)) && Number(item.customUnitPrice) >= 0) {
+          unitPrice = Number(item.customUnitPrice);
+        } else if (!unitPrice || unitPrice <= 0) {
           unitPrice = pricingMode === 'wholesale' && prodData.wholesalePrice ? Number(prodData.wholesalePrice) : Number(prodData.price || 0);
         }
+
+        const isBelowCost = Boolean(
+          item.isBelowCostAlert || (
+            prodData.importPrice !== undefined && Number.isFinite(prodData.importPrice) && prodData.importPrice > 0 && unitPrice < prodData.importPrice
+          )
+        );
 
         const itemSubtotal = unitPrice * itemQty;
         calculatedSubtotal += itemSubtotal;
@@ -5745,6 +5882,9 @@ app.post("/api/functions/posCheckout", async (req, res) => {
           newStock: currentStock - itemQty,
           quantity: itemQty,
           unitPrice,
+          originalUnitPrice: item.originalUnitPrice !== undefined ? Number(item.originalUnitPrice) : (item.customUnitPrice !== undefined ? Number(prodData.price || 0) : undefined),
+          customUnitPrice: item.customUnitPrice !== undefined ? Number(item.customUnitPrice) : undefined,
+          isBelowCostAlert: isBelowCost,
           barcode: item.barcode || prodData.barcode
         });
       }
@@ -5771,6 +5911,9 @@ app.post("/api/functions/posCheckout", async (req, res) => {
         nameBN: p.data.nameBN || p.data.name,
         quantity: p.quantity,
         price: p.unitPrice,
+        originalUnitPrice: p.originalUnitPrice,
+        customUnitPrice: p.customUnitPrice,
+        isBelowCostAlert: p.isBelowCostAlert,
         image: p.data.image || 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=150&auto=format&fit=crop'
       }));
 
@@ -5901,10 +6044,19 @@ app.post("/api/functions/posCheckout", async (req, res) => {
       message: `Order #${committedOrder.id} created successfully!`
     });
   } catch (err: any) {
+    const errMsg = String(err?.message || err);
+    const isPermissionError = errMsg.toLowerCase().includes('permission') || err?.code === 7 || err?.code === 'permission-denied';
     console.error("Error processing POS checkout server-side:", err);
+    if (isPermissionError) {
+      return res.status(503).json({
+        success: false,
+        fallbackToClient: true,
+        error: "Server lacks client staff credentials. Falling back to authenticated client transaction."
+      });
+    }
     return res.status(400).json({
       success: false,
-      error: err.message || "Failed to process POS checkout"
+      error: errMsg || "Failed to process POS checkout"
     });
   }
 });

@@ -12,12 +12,14 @@ export interface CartItem {
   product: Product;
   quantity: number;
   docIds: string[];
+  customUnitPrice?: number;
 }
 
 export interface StockInQueueItem {
   product: Product;
   quantity: number;
   importCost?: number;
+  expiryDate?: string;
 }
 
 export interface ScannerConnectionInfo {

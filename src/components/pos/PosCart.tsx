@@ -14,6 +14,7 @@ interface PosCartProps {
   onRemove: (productId: string, docIds: string[]) => void;
   onClearCart?: () => void;
   onOpenScanner?: () => void;
+  onUpdateCustomPrice?: (productId: string, customPrice: number | undefined) => void;
   editingQty: Record<string, string>;
   setEditingQty: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   customerName: string;
@@ -44,6 +45,7 @@ export const PosCart: React.FC<PosCartProps> = ({
   onRemove,
   onClearCart,
   onOpenScanner,
+  onUpdateCustomPrice,
   editingQty,
   setEditingQty,
   customerName,
@@ -65,9 +67,15 @@ export const PosCart: React.FC<PosCartProps> = ({
 }) => {
   const totalItemsCount = cartItems.reduce((sum, it) => sum + it.quantity, 0);
 
+  const getItemEffectivePrice = (item: CartItem) => {
+    if (item.customUnitPrice !== undefined && Number.isFinite(item.customUnitPrice) && item.customUnitPrice >= 0) {
+      return item.customUnitPrice;
+    }
+    return getProductUnitPrice(item.product, pricingMode, item.quantity);
+  };
+
   const subtotal = cartItems.reduce((sum, it) => {
-    const unitPrice = getProductUnitPrice(it.product, pricingMode, it.quantity);
-    return sum + unitPrice * it.quantity;
+    return sum + getItemEffectivePrice(it) * it.quantity;
   }, 0);
 
   const deliveryCharge = deliveryArea === 'inside' ? 60 : deliveryArea === 'outside' ? 120 : 0;
@@ -172,79 +180,98 @@ export const PosCart: React.FC<PosCartProps> = ({
         ) : (
           <div className="space-y-3 max-h-80 overflow-y-auto pr-1 divide-y divide-pink-50/60">
             {cartItems.map((item) => {
-              const price = getProductUnitPrice(item.product, pricingMode, item.quantity);
-              const itemSubtotal = price * item.quantity;
+              const standardPrice = getProductUnitPrice(item.product, pricingMode, item.quantity);
+              const effectivePrice = item.customUnitPrice !== undefined && Number.isFinite(item.customUnitPrice) && item.customUnitPrice >= 0
+                ? item.customUnitPrice
+                : standardPrice;
+              const itemSubtotal = effectivePrice * item.quantity;
               const isMaxStock = item.quantity >= item.product.stock;
+              const importCost = item.product.importPrice || item.product.costPrice || 0;
+              const isBelowCost = importCost > 0 && effectivePrice < importCost;
+              const lossPerUnit = isBelowCost ? (importCost - effectivePrice) : 0;
 
               return (
                 <div
                   key={item.product.id}
-                  className="pt-3 first:pt-0 flex items-center justify-between text-xs transition gap-3"
+                  className="pt-3 first:pt-0 flex flex-col gap-2 text-xs transition"
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <img
-                      src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
-                      alt={item.product.name}
-                      className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-2xs shrink-0"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">
-                          {item.product.brand}
-                        </span>
-                        {item.product.isCombo && (
-                          <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200">
-                            {item.product.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo'}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <img
+                        src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
+                        alt={item.product.name}
+                        className="w-12 h-12 object-cover rounded-xl border border-pink-100 shadow-2xs shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[9px] uppercase font-bold text-pink-600 block truncate">
+                            {item.product.brand}
                           </span>
-                        )}
-                      </div>
-                      <h4 className="font-bold text-gray-900 truncate text-xs">{item.product.name}</h4>
-                      
-                      {item.product.isCombo && item.product.comboConfig?.items && (
-                        <div className="text-[10px] text-purple-700 mt-0.5 line-clamp-1">
-                          Contains: {item.product.comboConfig.items.map(ci => {
-                            return `${ci.quantity}x item`;
-                          }).join(', ')}
+                          {item.product.isCombo && (
+                            <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200">
+                              {item.product.comboConfig?.type === 'customizable' ? 'Custom Set' : 'Combo'}
+                            </span>
+                          )}
                         </div>
-                      )}
+                        <h4 className="font-bold text-gray-900 truncate text-xs">{item.product.name}</h4>
+                        
+                        {item.product.isCombo && item.product.comboConfig?.items && (
+                          <div className="text-[10px] text-purple-700 mt-0.5 line-clamp-1">
+                            Contains: {item.product.comboConfig.items.map(ci => {
+                              return `${ci.quantity}x item`;
+                            }).join(', ')}
+                          </div>
+                        )}
 
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="text-[#E91E8C] font-extrabold font-mono text-xs">৳{price}</span>
-                        {pricingMode === 'wholesale' && (
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                              item.quantity >= 50
-                                ? 'bg-purple-100 text-purple-700 border border-purple-200'
-                                : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                            }`}
-                          >
-                            {item.quantity >= 50
-                              ? `Tier 50+ (৳${item.product.wholesalePrice50Plus ?? item.product.wholesalePrice})`
-                              : `Tier 1-49 (৳${item.product.wholesalePrice ?? item.product.retailPrice})`}
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <span className={`font-extrabold font-mono text-xs ${item.customUnitPrice !== undefined ? 'text-purple-700' : 'text-[#E91E8C]'}`}>
+                            ৳{effectivePrice}
                           </span>
-                        )}
-                        {pricingMode === 'cash' && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-0.5">
-                            <Banknote size={10} />
-                            <span>Cash Rate {item.product.cashPrice ? `(৳${item.product.cashPrice})` : '(Retail Rate)'}</span>
+                          {item.customUnitPrice !== undefined && (
+                            <span className="text-[10px] text-gray-400 line-through font-mono">
+                              ৳{standardPrice}
+                            </span>
+                          )}
+                          {pricingMode === 'wholesale' && item.customUnitPrice === undefined && (
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                item.quantity >= 50
+                                  ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              }`}
+                            >
+                              {item.quantity >= 50
+                                ? `Tier 50+ (৳${item.product.wholesalePrice50Plus ?? item.product.wholesalePrice})`
+                                : `Tier 1-49 (৳${item.product.wholesalePrice ?? item.product.retailPrice})`}
+                            </span>
+                          )}
+                          {pricingMode === 'cash' && item.customUnitPrice === undefined && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-0.5">
+                              <Banknote size={10} />
+                              <span>Cash Rate {item.product.cashPrice ? `(৳${item.product.cashPrice})` : '(Retail Rate)'}</span>
+                            </span>
+                          )}
+                          <span className="text-[10px] text-gray-400">
+                            {item.product.isCombo ? 'Dynamic Stock' : `Stock: ${item.product.stock}`}
                           </span>
-                        )}
-                        <span className="text-[10px] text-gray-400">
-                          {item.product.isCombo ? 'Dynamic Stock' : `Stock: ${item.product.stock}`}
-                        </span>
+                          {importCost > 0 && (
+                            <span className="text-[10px] text-gray-500 font-mono">
+                              Cost: ৳{importCost}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                    {/* Row Subtotal */}
-                    <div className="text-right font-mono hidden sm:block">
-                      <span className="text-[10px] text-gray-400 block">Subtotal</span>
-                      <span className="font-extrabold text-gray-800 text-xs">৳{itemSubtotal}</span>
-                    </div>
+                    <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                      {/* Row Subtotal */}
+                      <div className="text-right font-mono hidden sm:block">
+                        <span className="text-[10px] text-gray-400 block">Subtotal</span>
+                        <span className="font-extrabold text-gray-800 text-xs">৳{itemSubtotal.toLocaleString()}</span>
+                      </div>
 
-                    {/* Numeric Input & Step Buttons */}
+                      {/* Numeric Input & Step Buttons */}
                     <div className="flex items-center bg-white border border-pink-200 rounded-xl shadow-2xs overflow-hidden focus-within:border-[#E91E8C] focus-within:ring-2 focus-within:ring-[#E91E8C]/20 transition">
                       <button
                         type="button"
@@ -304,8 +331,70 @@ export const PosCart: React.FC<PosCartProps> = ({
                     </button>
                   </div>
                 </div>
-              );
-            })}
+
+                {/* Custom Unit Price & Margin Warning */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-dashed border-gray-100">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-semibold text-gray-500">Custom Unit Price:</span>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-2 text-[11px] font-mono font-bold text-gray-400 pointer-events-none">৳</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        placeholder={String(standardPrice)}
+                        value={item.customUnitPrice !== undefined ? item.customUnitPrice : ''}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          if (val === '') {
+                            onUpdateCustomPrice?.(item.product.id, undefined);
+                          } else {
+                            const parsed = parseFloat(val);
+                            if (!isNaN(parsed) && parsed >= 0) {
+                              onUpdateCustomPrice?.(item.product.id, parsed);
+                            }
+                          }
+                        }}
+                        className={`w-24 pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border outline-none transition ${
+                          isBelowCost
+                            ? 'border-amber-400 bg-amber-50 text-amber-900 focus:ring-2 focus:ring-amber-300'
+                            : item.customUnitPrice !== undefined
+                            ? 'border-purple-300 bg-purple-50 text-purple-900 focus:ring-2 focus:ring-purple-300'
+                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300 focus:bg-white focus:border-pink-500'
+                        }`}
+                        title="Set custom unit price for this product"
+                      />
+                    </div>
+                    {item.customUnitPrice !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() => onUpdateCustomPrice?.(item.product.id, undefined)}
+                        className="text-[10px] text-gray-500 hover:text-red-600 font-bold px-2 py-1 rounded bg-gray-100 hover:bg-red-50 transition cursor-pointer"
+                        title="Reset to default price"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    {item.customUnitPrice !== undefined && (
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-100/60 px-2 py-0.5 rounded font-mono">
+                        Subtotal: ৳{itemSubtotal.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Below Import Cost Warning Alert */}
+                  {isBelowCost && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-300 rounded-lg text-amber-800 text-[11px] font-semibold animate-fadeIn">
+                      <AlertCircle size={13} className="text-amber-600 shrink-0" />
+                      <span>
+                        <strong>Warning:</strong> Price ৳{effectivePrice} is below import cost ৳{importCost} (-৳{lossPerUnit}/unit)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
           </div>
         )}
       </div>

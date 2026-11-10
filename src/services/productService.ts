@@ -586,11 +586,12 @@ export const productService = {
   },
 
   async processStockInBatch(payload: {
-    items: { productId: string; quantity: number; importCost?: number }[];
+    items: { productId: string; quantity: number; importCost?: number; expiryDate?: string }[];
     supplier?: string;
     batchNumber?: string;
     notes?: string;
     receivedBy: string;
+    invoiceImageUrl?: string;
     receiptId?: string;
   }): Promise<{ success: boolean; message: string; receipt?: StockReceipt }> {
     if (!payload.items || !Array.isArray(payload.items) || payload.items.length === 0) {
@@ -598,7 +599,7 @@ export const productService = {
     }
 
     // Strict validation of incoming items
-    const validItems: { productId: string; canonicalId: string; quantity: number; importCost?: number }[] = [];
+    const validItems: { productId: string; canonicalId: string; quantity: number; importCost?: number; expiryDate?: string }[] = [];
     for (const rawItem of payload.items) {
       if (!rawItem || !rawItem.productId) continue;
       const rawQty = rawItem.quantity;
@@ -618,11 +619,16 @@ export const productService = {
         ? Number(rawItem.importCost)
         : undefined;
 
+      const expiryDate = rawItem.expiryDate && typeof rawItem.expiryDate === 'string' && rawItem.expiryDate.trim()
+        ? rawItem.expiryDate.trim()
+        : undefined;
+
       validItems.push({
         productId: rawItem.productId.trim(),
         canonicalId,
         quantity: Math.round(quantity),
-        importCost
+        importCost,
+        expiryDate
       });
     }
 
@@ -697,7 +703,8 @@ export const productService = {
             quantity: item.quantity,
             previousStock: currentStock,
             newStock,
-            importCost: itemCost
+            importCost: itemCost,
+            expiryDate: item.expiryDate
           });
 
           // 1. Update Product Document
@@ -707,6 +714,9 @@ export const productService = {
           };
           if (item.importCost !== undefined && item.importCost > 0) {
             productUpdate.importPrice = item.importCost;
+          }
+          if (item.expiryDate) {
+            productUpdate.expiryDate = item.expiryDate;
           }
           transaction.update(prodRef, productUpdate);
 
@@ -745,6 +755,15 @@ export const productService = {
         }
 
         // 4. Write Stock Receipt Voucher
+        let safeInvoiceUrl = payload.invoiceImageUrl?.trim() || undefined;
+        if (safeInvoiceUrl && safeInvoiceUrl.startsWith('data:')) {
+          // If a base64 string exceeds 350KB, strip it to avoid exceeding Firestore's 1,048,576 byte document limit
+          if (safeInvoiceUrl.length > 350000) {
+            console.warn('[ProductService] Invoice data URL exceeds 350KB safety limit; omitting raw payload to prevent document size error.');
+            safeInvoiceUrl = undefined;
+          }
+        }
+
         const receiptData: StockReceipt = {
           id: receiptId,
           receiptNumber,
@@ -756,6 +775,7 @@ export const productService = {
           totalItemsCount: receiptItems.length,
           totalCost: totalCost > 0 ? totalCost : undefined,
           items: receiptItems,
+          invoiceImageUrl: safeInvoiceUrl,
           createdAt: nowIso,
           status: 'completed'
         };
@@ -770,6 +790,7 @@ export const productService = {
         if (cached) {
           cached.stock = ri.newStock;
           if (ri.importCost) cached.importPrice = ri.importCost;
+          if (ri.expiryDate) cached.expiryDate = ri.expiryDate;
         }
       });
       stockReceiptsCache = [committedReceipt, ...stockReceiptsCache.filter(r => r.id !== committedReceipt.id)];

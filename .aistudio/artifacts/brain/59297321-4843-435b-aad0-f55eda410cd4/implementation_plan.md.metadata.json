@@ -1,6 +1,6 @@
 {
-  "summary":  "Updated implementation plan incorporating the user-specified Google Tag Manager container ID 'GTM-T2SWSLZ8'. Outlines the dynamic configuration, Firestore persistence, server-side CAPI resolution, and site-wide real-time synchronization.",
-  "updatedAt":  "2026-11-07T10:45:03.077219362Z",
+  "summary":  "Implementation plan for POS Custom Unit Pricing with import price warning, Stock Receiving enhancements with import price, expiry date and invoice image upload, and a dedicated Admin Shipments management page with receiver and date filtering.",
+  "updatedAt":  "2026-11-10T13:01:26.358674520Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

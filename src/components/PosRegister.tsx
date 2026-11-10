@@ -157,6 +157,20 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   // Direct quantity typing buffer
   const [editingQty, setEditingQty] = useState<{ [productId: string]: string }>({});
 
+  // Custom Unit Price overrides per product ID
+  const [customUnitPrices, setCustomUnitPrices] = useState<{ [productId: string]: number | undefined }>({});
+
+  const handleUpdateCustomPrice = (productId: string, customPrice: number | undefined) => {
+    setCustomUnitPrices((prev) => {
+      if (customPrice === undefined || isNaN(customPrice)) {
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      }
+      return { ...prev, [productId]: customPrice };
+    });
+  };
+
   // Online / Offline Connectivity & Offline Queue State
   const [isOnline, setIsOnline] = useState<boolean>(() => posOfflineStorage.isOnline());
   const [pendingOfflineScans, setPendingOfflineScans] = useState<OfflineScanRecord[]>([]);
@@ -430,10 +444,11 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             image: 'https://images.unsplash.com/photo-1608248597481-496100c8c836?w=150&auto=format&fit=crop'
           } as Product),
         quantity: counts[pId].count,
-        docIds: counts[pId].docIds
+        docIds: counts[pId].docIds,
+        customUnitPrice: customUnitPrices[pId]
       };
     });
-  }, [scans, products, pendingOfflineScans]);
+  }, [scans, products, pendingOfflineScans, customUnitPrices]);
 
   // Sync live cart items & scan count to pos_sessions Firestore doc for live admin monitoring
   useEffect(() => {
@@ -661,6 +676,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     // Instant optimistic clearing on single click
     setScans([]);
     setEditingQty({});
+    setCustomUnitPrices({});
 
     if (!sessionId) return;
 
@@ -710,13 +726,25 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
     setIsSubmitting(true);
     try {
-      const checkoutItems = cartItems.map((item) => ({
-        productId: item.product.id,
-        quantity: item.quantity,
-        barcode: item.product.barcode,
-        name: item.product.name,
-        price: getProductUnitPrice(item.product, pricingMode, item.quantity)
-      }));
+      const checkoutItems = cartItems.map((item) => {
+        const standardPrice = getProductUnitPrice(item.product, pricingMode, item.quantity);
+        const effectivePrice = item.customUnitPrice !== undefined && Number.isFinite(item.customUnitPrice) && item.customUnitPrice >= 0
+          ? item.customUnitPrice
+          : standardPrice;
+        const importCost = item.product.importPrice || item.product.costPrice || 0;
+        const isBelowCost = importCost > 0 && effectivePrice < importCost;
+
+        return {
+          productId: item.product.id,
+          quantity: item.quantity,
+          barcode: item.product.barcode,
+          name: item.product.name,
+          price: effectivePrice,
+          customUnitPrice: item.customUnitPrice,
+          originalUnitPrice: standardPrice,
+          isBelowCostAlert: isBelowCost
+        };
+      });
 
       const result = await posService.processPosCheckout({
         sessionId,
@@ -758,6 +786,8 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     setPaymentNotes('');
     setPaymentMethod('CASH');
     setScans([]);
+    setEditingQty({});
+    setCustomUnitPrices({});
   };
 
   const totalCartCount = cartItems.reduce((sum, it) => sum + it.quantity, 0);
@@ -1212,6 +1242,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                     }}
                     editingQty={editingQty}
                     setEditingQty={setEditingQty}
+                    onUpdateCustomPrice={handleUpdateCustomPrice}
                     customerName={customerName}
                     setCustomerName={setCustomerName}
                     customerPhone={customerPhone}
@@ -1252,6 +1283,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 }}
                 editingQty={editingQty}
                 setEditingQty={setEditingQty}
+                onUpdateCustomPrice={handleUpdateCustomPrice}
                 customerName={customerName}
                 setCustomerName={setCustomerName}
                 customerPhone={customerPhone}

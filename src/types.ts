@@ -48,6 +48,7 @@ export interface Product {
   benefits?: string[];
   routineStep?: string;
   keyIngredients?: string[];
+  expiryDate?: string;
 }
 
 export type TaxonomyDimensionType =
@@ -130,6 +131,9 @@ export interface OrderItem {
   isCombo?: boolean;
   comboType?: ComboType;
   comboComponents?: ComboComponentDetail[];
+  customUnitPrice?: number;
+  originalUnitPrice?: number;
+  isBelowCostAlert?: boolean;
 }
 
 export interface CourierData {
@@ -452,6 +456,7 @@ export interface StockReceiptItem {
   previousStock: number;
   newStock: number;
   importCost?: number;
+  expiryDate?: string;
 }
 
 export interface StockReceipt {
@@ -465,6 +470,7 @@ export interface StockReceipt {
   totalItemsCount: number;
   totalCost?: number;
   items: StockReceiptItem[];
+  invoiceImageUrl?: string;
   createdAt: string;
   status: 'completed' | 'cancelled';
 }

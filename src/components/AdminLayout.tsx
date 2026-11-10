@@ -7,7 +7,8 @@ import {
   LogOut, Menu, X, Eye, Crown, ChevronRight, Store, ShieldCheck, 
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
-  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2, Activity
+  Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2, Activity,
+  PackageCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -119,10 +120,11 @@ export const AdminLayout: React.FC = () => {
       icon: CreditCard,
       highlight: isAdminOrSuperAdmin && activePosCount > 0
     },
+    { to: '/admin/shipments', label: 'Shipments & Intake', badge: 'Intake', icon: PackageCheck },
     { to: '/admin/products', label: 'Single Products', badge: 'Stock', icon: Boxes },
     { to: '/admin/combos', label: 'Combo Packages', badge: 'Bundles', icon: Layers },
     { to: '/admin/taxonomies', label: 'Taxonomies & Filters', badge: 'Filters', icon: SlidersHorizontal },
-    { to: '/admin/testimonials', label: 'Testimonials & Reviews', badge: '4.9â˜…', icon: MessageSquareQuote },
+    { to: '/admin/testimonials', label: 'Testimonials & Reviews', badge: '4.9★', icon: MessageSquareQuote },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/meta-catalog', label: 'Meta Catalog', badge: 'Sync', icon: Share2 },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },
@@ -133,6 +135,7 @@ export const AdminLayout: React.FC = () => {
   // Role-Specific Navigation & Access Control Matrices
   const inventoryManagerAllowedPaths = [
     '/admin',
+    '/admin/shipments',
     '/admin/products',
     '/admin/combos',
     '/admin/taxonomies',

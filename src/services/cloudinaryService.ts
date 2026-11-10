@@ -129,6 +129,8 @@ export async function uploadFileToCloudinary(
     folder?: string;
     onProgress?: (percent: number) => void;
     tags?: string;
+    cloudName?: string;
+    uploadPreset?: string;
   } = {}
 ): Promise<CloudinaryUploadResult> {
   const resourceType = options.resourceType === 'auto'
@@ -159,8 +161,9 @@ export async function uploadFileToCloudinary(
   const localCloudName = typeof localStorage !== 'undefined' ? localStorage.getItem('cloudinary_cloud_name')?.trim() : '';
   const localPreset = typeof localStorage !== 'undefined' ? localStorage.getItem('cloudinary_upload_preset')?.trim() : '';
 
-  const cloudName = signData?.cloudName || localCloudName || 'dxvmfaxeh';
-  const uploadPreset = signData?.uploadPreset || localPreset || 'ml_default';
+  const rawCloudName = options.cloudName || signData?.cloudName || localCloudName || 'dxvmfaxeh';
+  const cloudName = String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'dxvmfaxeh';
+  const uploadPreset = options.uploadPreset || signData?.uploadPreset || localPreset || 'ml_default';
 
   // Step 2: Build FormData with actual File (NEVER Base64 Data URL)
   const formData = new FormData();
@@ -289,4 +292,80 @@ export const cloudinaryService = {
     }
   }
 };
+
+/**
+ * Dedicated upload function for Stock-In Invoice images to Cloudinary.
+ * Uploads directly to Cloudinary or falls back to server-side Cloudinary proxy,
+ * and records the image in the Cloudinary media library in Firestore.
+ */
+export async function uploadInvoiceImageToCloudinary(
+  fileOrBlob: File | Blob,
+  fileName = 'invoice.jpg',
+  options: {
+    folder?: string;
+    cloudName?: string;
+    uploadPreset?: string;
+    onProgress?: (percent: number) => void;
+  } = {}
+): Promise<{ success: boolean; secureUrl: string; publicId?: string }> {
+  const folder = options.folder || 'kbeauty_invoices';
+
+  const file = fileOrBlob instanceof File
+    ? fileOrBlob
+    : new File([fileOrBlob], fileName, { type: fileOrBlob.type || 'image/jpeg' });
+
+  // 1. Direct client-side Cloudinary upload
+  try {
+    const directRes = await uploadFileToCloudinary(file, {
+      resourceType: 'image',
+      folder,
+      cloudName: options.cloudName,
+      uploadPreset: options.uploadPreset,
+      onProgress: options.onProgress
+    });
+
+    if (directRes?.secureUrl) {
+      cloudinaryService.uploadImage(`Invoice-${fileName.replace(/\.[^/.]+$/, "")}`, directRes.secureUrl, 'image').catch(console.warn);
+      return {
+        success: true,
+        secureUrl: directRes.secureUrl,
+        publicId: directRes.publicId
+      };
+    }
+  } catch (directErr) {
+    console.warn('[CloudinaryService] Direct client-side Cloudinary upload error, trying server proxy:', directErr);
+  }
+
+  // 2. Server-side Cloudinary proxy upload
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const srvRes = await fetch('/api/cloudinary/upload-invoice', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dataUrl,
+      fileName,
+      folder,
+      cloudName: options.cloudName,
+      uploadPreset: options.uploadPreset
+    })
+  });
+
+  const srvData = await srvRes.json();
+  if (srvRes.ok && srvData.success && srvData.secureUrl) {
+    cloudinaryService.uploadImage(`Invoice-${fileName.replace(/\.[^/.]+$/, "")}`, srvData.secureUrl, 'image').catch(console.warn);
+    return {
+      success: true,
+      secureUrl: srvData.secureUrl,
+      publicId: srvData.publicId
+    };
+  }
+
+  throw new Error(srvData.error || 'Failed to upload invoice to Cloudinary.');
+}
 
