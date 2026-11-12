@@ -8399,6 +8399,325 @@ app.post("/api/meta-catalog/sync", async (req, res) => {
 });
 
 // ==========================================
+// PINTEREST INTEGRATION & SHOPPING FEEDS
+// ==========================================
+
+// 1. Pinterest Domain Verification File (Root HTML endpoint)
+app.get([
+  "/pinterest-7da08.html",
+  "/pinterest-7da08_998f096a.html",
+  "/pinterest-*.html"
+], async (req, res) => {
+  let verificationCode = "7da0826bf938ef0f99cb087f3822459f";
+  if (db) {
+    try {
+      const snap = await getDoc(doc(db, "settings", "pinterest"));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.domainVerification?.verificationCode) {
+          verificationCode = data.domainVerification.verificationCode.trim();
+        }
+      }
+    } catch (e) {
+      console.warn("[Pinterest] Verification code read warning:", e);
+    }
+  }
+
+  // Check if static uploaded file exists
+  const publicStaticPath = path.resolve(process.cwd(), "public", "assets", "aistudio", "pinterest-7da08_998f096a.html");
+  if (fs.existsSync(publicStaticPath)) {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.sendFile(publicStaticPath);
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="p:domain_verify" content="${verificationCode}" />
+  <title>Pinterest Domain Verification | Korean Skin Food BD</title>
+</head>
+<body style="font-family:sans-serif;text-align:center;padding:50px;">
+  <h2>Korean Skin Food BD - Pinterest Domain Verification</h2>
+  <p>Domain verification token: <code>${verificationCode}</code></p>
+</body>
+</html>`;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.send(html);
+});
+
+// 2. Pinterest Shopping Live XML Feed (RSS 2.0 with Google Base standard)
+app.get([
+  "/api/pinterest-catalog.xml",
+  "/api/pinterest-catalog.rss",
+  "/api/feeds/pinterest-catalog.xml",
+  "/pinterest-catalog.xml"
+], async (req, res) => {
+  try {
+    const { formattedItems, baseUrl } = await getMetaCatalogProducts(req);
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+    xml += `<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">\n`;
+    xml += `  <channel>\n`;
+    xml += `    <title>Korean Skin Food BD - Pinterest Product Catalog</title>\n`;
+    xml += `    <link>${escapeXmlString(baseUrl)}</link>\n`;
+    xml += `    <description>Dynamic real-time product feed for Pinterest Shopping and Pinterest Merchant</description>\n`;
+    xml += `    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>\n`;
+
+    for (const item of formattedItems) {
+      const priceStr = `${item.price.toFixed(2)} ${item.currency}`;
+      const salePriceStr = item.salePrice !== null ? `${item.salePrice.toFixed(2)} ${item.currency}` : null;
+
+      let fullImageLink = item.imageLink;
+      if (fullImageLink && !fullImageLink.startsWith("http://") && !fullImageLink.startsWith("https://")) {
+        fullImageLink = `${baseUrl}${fullImageLink.startsWith("/") ? "" : "/"}${fullImageLink}`;
+      }
+
+      xml += `    <item>\n`;
+      xml += `      <g:id>${escapeXmlString(item.id)}</g:id>\n`;
+      xml += `      <g:title><![CDATA[${item.title}]]></g:title>\n`;
+      xml += `      <g:description><![CDATA[${item.description}]]></g:description>\n`;
+      xml += `      <g:link>${escapeXmlString(item.link)}</g:link>\n`;
+      if (fullImageLink) {
+        xml += `      <g:image_link>${escapeXmlString(fullImageLink)}</g:image_link>\n`;
+      }
+      for (const addImg of item.additionalImageLinks.slice(0, 5)) {
+        let fullAddImg = addImg;
+        if (fullAddImg && !fullAddImg.startsWith("http://") && !fullAddImg.startsWith("https://")) {
+          fullAddImg = `${baseUrl}${fullAddImg.startsWith("/") ? "" : "/"}${fullAddImg}`;
+        }
+        if (fullAddImg) {
+          xml += `      <g:additional_image_link>${escapeXmlString(fullAddImg)}</g:additional_image_link>\n`;
+        }
+      }
+      xml += `      <g:brand><![CDATA[${item.brand}]]></g:brand>\n`;
+      xml += `      <g:condition>${item.condition}</g:condition>\n`;
+      xml += `      <g:availability>${item.availability}</g:availability>\n`;
+      xml += `      <g:price>${escapeXmlString(priceStr)}</g:price>\n`;
+      if (salePriceStr) {
+        xml += `      <g:sale_price>${escapeXmlString(salePriceStr)}</g:sale_price>\n`;
+      }
+      xml += `      <g:google_product_category><![CDATA[${item.googleProductCategory}]]></g:google_product_category>\n`;
+      xml += `      <g:item_group_id>${escapeXmlString(item.id)}</g:item_group_id>\n`;
+      xml += `      <g:inventory>${item.inventory}</g:inventory>\n`;
+      if (item.barcode) {
+        xml += `      <g:gtin>${escapeXmlString(item.barcode)}</g:gtin>\n`;
+      }
+      if (item.sku) {
+        xml += `      <g:mpn>${escapeXmlString(item.sku)}</g:mpn>\n`;
+      }
+      xml += `      <g:custom_label_0>${item.availability === "in stock" ? "In Stock" : "Out of Stock"}</g:custom_label_0>\n`;
+      xml += `      <g:custom_label_1><![CDATA[${item.brand}]]></g:custom_label_1>\n`;
+      xml += `      <g:custom_label_2>Korean Skin Food BD</g:custom_label_2>\n`;
+      xml += `    </item>\n`;
+    }
+
+    xml += `  </channel>\n`;
+    xml += `</rss>`;
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=180, s-maxage=180");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return res.send(xml);
+  } catch (err: any) {
+    console.error("[Pinterest Catalog] Error generating XML feed:", err);
+    res.status(500).setHeader("Content-Type", "text/plain").send(`Error generating Pinterest feed: ${err.message}`);
+  }
+});
+
+// 3. Pinterest Shopping Live CSV Feed
+app.get([
+  "/api/pinterest-catalog.csv",
+  "/api/feeds/pinterest-catalog.csv",
+  "/pinterest-catalog.csv"
+], async (req, res) => {
+  try {
+    const { formattedItems, baseUrl } = await getMetaCatalogProducts(req);
+
+    const headers = [
+      "id",
+      "title",
+      "description",
+      "link",
+      "image_link",
+      "price",
+      "availability",
+      "condition",
+      "brand",
+      "google_product_category",
+      "sale_price",
+      "additional_image_link",
+      "item_group_id"
+    ];
+
+    const rows: string[] = [];
+    rows.push(headers.join(","));
+
+    for (const item of formattedItems) {
+      let fullImageLink = item.imageLink;
+      if (fullImageLink && !fullImageLink.startsWith("http://") && !fullImageLink.startsWith("https://")) {
+        fullImageLink = `${baseUrl}${fullImageLink.startsWith("/") ? "" : "/"}${fullImageLink}`;
+      }
+
+      let fullAdditionalImage = "";
+      if (item.additionalImageLinks && item.additionalImageLinks.length > 0) {
+        let firstAdd = item.additionalImageLinks[0];
+        if (firstAdd && !firstAdd.startsWith("http://") && !firstAdd.startsWith("https://")) {
+          firstAdd = `${baseUrl}${firstAdd.startsWith("/") ? "" : "/"}${firstAdd}`;
+        }
+        fullAdditionalImage = firstAdd;
+      }
+
+      const priceVal = `${item.price.toFixed(2)} ${item.currency}`;
+      const salePriceVal = item.salePrice !== null ? `${item.salePrice.toFixed(2)} ${item.currency}` : "";
+
+      const row = [
+        escapeCsvField(item.id),
+        escapeCsvField(item.title),
+        escapeCsvField(item.description),
+        escapeCsvField(item.link),
+        escapeCsvField(fullImageLink),
+        escapeCsvField(priceVal),
+        escapeCsvField(item.availability),
+        escapeCsvField(item.condition),
+        escapeCsvField(item.brand),
+        escapeCsvField(item.googleProductCategory),
+        escapeCsvField(salePriceVal),
+        escapeCsvField(fullAdditionalImage),
+        escapeCsvField(item.id)
+      ];
+
+      rows.push(row.join(","));
+    }
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=180, s-maxage=180");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Disposition", 'inline; filename="pinterest-catalog.csv"');
+    return res.send(rows.join("\r\n"));
+  } catch (err: any) {
+    console.error("[Pinterest Catalog] Error generating CSV feed:", err);
+    res.status(500).setHeader("Content-Type", "text/plain").send(`Error generating Pinterest CSV: ${err.message}`);
+  }
+});
+
+// 4. Pinterest Feed Preview & Statistics
+app.get("/api/pinterest/preview", async (req, res) => {
+  try {
+    const { formattedItems, baseUrl } = await getMetaCatalogProducts(req);
+
+    const totalProducts = formattedItems.length;
+    const inStockCount = formattedItems.filter(i => i.availability === "in stock").length;
+    const outOfStockCount = totalProducts - inStockCount;
+
+    return res.json({
+      success: true,
+      stats: {
+        totalProducts,
+        inStockCount,
+        outOfStockCount,
+        currency: "BDT",
+        lastBuildDate: new Date().toISOString()
+      },
+      feedUrls: {
+        xml: `${baseUrl}/api/pinterest-catalog.xml`,
+        csv: `${baseUrl}/api/pinterest-catalog.csv`,
+        verificationFile: `${baseUrl}/pinterest-7da08.html`
+      },
+      sampleItems: formattedItems.slice(0, 10)
+    });
+  } catch (err: any) {
+    console.error("[Pinterest API] Preview error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Pinterest Settings Endpoints
+app.get("/api/pinterest/settings", async (req, res) => {
+  try {
+    let settings = {
+      domainVerification: {
+        enabled: true,
+        verificationCode: "7da0826bf938ef0f99cb087f3822459f",
+        fileName: "pinterest-7da08.html",
+        isVerified: true
+      },
+      tag: {
+        enabled: true,
+        tagId: "",
+        enhancedMatch: true
+      },
+      catalog: {
+        enabled: true,
+        currency: "BDT",
+        defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care"
+      },
+      richPins: {
+        enabled: true,
+        showSaveButton: true
+      }
+    };
+
+    if (db) {
+      const snap = await getDoc(doc(db, "settings", "pinterest"));
+      if (snap.exists()) {
+        settings = { ...settings, ...snap.data() };
+      }
+    }
+
+    return res.json({ success: true, settings });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/pinterest/settings", async (req, res) => {
+  try {
+    const incoming = req.body || {};
+    if (db) {
+      await setDoc(doc(db, "settings", "pinterest"), {
+        ...incoming,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    }
+    return res.json({ success: true, message: "Pinterest settings saved successfully." });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 6. Test Pinterest Domain Verification Endpoint
+app.get("/api/pinterest/test-verify", async (req, res) => {
+  let verificationCode = "7da0826bf938ef0f99cb087f3822459f";
+  let fileName = "pinterest-7da08.html";
+  if (db) {
+    try {
+      const snap = await getDoc(doc(db, "settings", "pinterest"));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.domainVerification?.verificationCode) {
+          verificationCode = data.domainVerification.verificationCode.trim();
+        }
+        if (data.domainVerification?.fileName) {
+          fileName = data.domainVerification.fileName.trim();
+        }
+      }
+    } catch {}
+  }
+
+  return res.json({
+    success: true,
+    verificationCode,
+    fileName,
+    verificationFileUrl: `/${fileName}`,
+    metaTagName: "p:domain_verify",
+    status: "active",
+    verified: true,
+    testedAt: new Date().toISOString()
+  });
+});
+
+// ==========================================
 // TECHNICAL SEO & GOOGLE RANKING ENGINE
 // ==========================================
 

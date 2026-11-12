@@ -10,6 +10,7 @@ import { getStoredAttribution } from './attributionService';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from './firebase';
 import { trackingSettingsService, TrackingSettings, DEFAULT_TRACKING_SETTINGS } from './trackingSettingsService';
+import { initPinterestTag, trackPinterestEvent } from './pinterestTag';
 
 /// <reference types="vite/client" />
 
@@ -145,6 +146,9 @@ class AnalyticsService {
 
     this.isInitialized = true;
     window.__KSF_ANALYTICS_INITIALIZED__ = true;
+
+    // Initialize Pinterest Tag
+    initPinterestTag();
 
     // Ensure window.dataLayer & window.gtag are always accessible
     window.dataLayer = window.dataLayer || [];
@@ -308,6 +312,9 @@ class AnalyticsService {
         window.fbq('track', 'PageView');
       }
     }
+
+    // Pinterest Tag
+    trackPinterestEvent('pagevisit');
   }
 
   /**
@@ -479,6 +486,20 @@ class AnalyticsService {
         currency: 'BDT',
       });
     }
+
+    // Pinterest Tag AddToCart
+    trackPinterestEvent('addtocart', {
+      value: totalValue,
+      order_quantity: quantity,
+      currency: 'BDT',
+      line_items: [{
+        product_id: product.id,
+        product_name: product.name,
+        product_category: product.category,
+        product_price: price,
+        product_quantity: quantity,
+      }],
+    });
   }
   public add_to_cart = this.trackAddToCart.bind(this);
 
@@ -813,6 +834,20 @@ class AnalyticsService {
         logDebug('CAPI prep notice', capiErr?.message || capiErr);
       }
     }
+
+    // 4. Dispatch Pinterest Tag Checkout
+    trackPinterestEvent('checkout', {
+      value: grandTotal,
+      order_quantity: numItems,
+      currency: 'BDT',
+      order_id: order.id,
+      line_items: (order.items || []).map(i => ({
+        product_id: i.productId,
+        product_name: i.name,
+        product_price: i.price,
+        product_quantity: i.quantity,
+      })),
+    });
   }
   public purchase = this.trackPurchase.bind(this);
 
