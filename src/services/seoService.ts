@@ -1,6 +1,7 @@
 import { Product } from '../types';
 import { SkincareGuide } from '../data/skincareGuides';
 import { BrandSeoProfile } from '../data/brandProfiles';
+import { DEFAULT_SITE_URL, getSiteUrl } from '../utils/siteUrl';
 
 export interface SeoMetadata {
   title: string;
@@ -16,7 +17,7 @@ export interface SeoMetadata {
 }
 
 export const SITE_NAME = 'Korean Skin Food BD';
-export const SITE_URL = 'https://koreanskinfood.web.app';
+export const SITE_URL = getSiteUrl() || DEFAULT_SITE_URL;
 export const DEFAULT_OG_IMAGE = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80';
 export const DEFAULT_HOMEPAGE_TITLE = 'Korean Skin Food BD | Authentic Korean Skincare in Bangladesh';
 export const DEFAULT_HOMEPAGE_DESCRIPTION = 'Shop authentic Korean skincare products in Bangladesh at Korean Skin Food BD. Explore trusted Korean beauty brands, skincare essentials, product information and convenient nationwide delivery.';
@@ -37,7 +38,7 @@ export const sanitizeMetaText = (text?: string): string => {
  * and stripping marketing/tracking query parameters (utm_*, fbclid, gclid, etc.).
  */
 export const buildCanonicalUrl = (pathWithParams?: string): string => {
-  const base = SITE_URL.replace(/\/+$/, '');
+  const base = getSiteUrl().replace(/\/+$/, '');
   if (!pathWithParams || pathWithParams === '/' || pathWithParams === '') {
     return `${base}/`;
   }
@@ -67,16 +68,17 @@ export const buildCanonicalUrl = (pathWithParams?: string): string => {
  * Build dynamic SEO metadata for the Storefront Homepage
  */
 export const buildHomepageSeo = (): SeoMetadata => {
+  const siteUrl = getSiteUrl();
   const canonicalUrl = buildCanonicalUrl('/');
 
   const organizationSchema = {
     '@context': 'https://schema.org',
     '@type': 'OnlineStore',
-    '@id': `${SITE_URL}/#organization`,
+    '@id': `${siteUrl}/#organization`,
     name: 'Korean Skin Food BD',
     alternateName: ['Korean Skin Food Bangladesh', 'KSF BD'],
-    url: SITE_URL,
-    logo: `${SITE_URL}/icon.svg`,
+    url: siteUrl,
+    logo: `${siteUrl}/icon.svg`,
     description: DEFAULT_HOMEPAGE_DESCRIPTION,
     priceRange: '৳৳',
     sameAs: [
@@ -104,15 +106,15 @@ export const buildHomepageSeo = (): SeoMetadata => {
   const websiteSchema = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    '@id': `${SITE_URL}/#website`,
-    url: SITE_URL,
+    '@id': `${siteUrl}/#website`,
+    url: siteUrl,
     name: 'Korean Skin Food BD',
     publisher: {
-      '@id': `${SITE_URL}/#organization`
+      '@id': `${siteUrl}/#organization`
     },
     potentialAction: {
       '@type': 'SearchAction',
-      target: `${SITE_URL}/shop?search={search_term_string}`,
+      target: `${siteUrl}/shop?search={search_term_string}`,
       'query-input': 'required name=search_term_string'
     }
   };
@@ -210,8 +212,8 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
   }
 
   // Breadcrumb Hierarchy Schema (Home -> Category -> Brand -> Product)
+  const siteUrl = getSiteUrl();
   const categorySlug = encodeURIComponent(product.category || 'All');
-  const brandSlug = encodeURIComponent(product.brand || 'Korean');
 
   const breadcrumbSchema = {
     '@context': 'https://schema.org',
@@ -221,19 +223,19 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: `${SITE_URL}/`
+        item: `${siteUrl}/`
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: product.category || 'Skincare',
-        item: `${SITE_URL}/shop?category=${categorySlug}`
+        item: `${siteUrl}/shop?category=${categorySlug}`
       },
       {
         '@type': 'ListItem',
         position: 3,
         name: product.brand,
-        item: `${SITE_URL}/brand/${product.brand.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+        item: `${siteUrl}/brand/${product.brand.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
       },
       {
         '@type': 'ListItem',
@@ -320,9 +322,10 @@ export const buildCategorySeo = (paramsOrCategory: string | {
   const queryStr = queryParams.toString();
   const canonicalUrl = buildCanonicalUrl(queryStr ? `/shop?${queryStr}` : '/shop');
 
+  const siteUrl = getSiteUrl();
   const breadcrumbsList: Array<{ name: string; url: string }> = [
-    { name: 'Home', url: `${SITE_URL}/` },
-    { name: 'Shop', url: `${SITE_URL}/shop` }
+    { name: 'Home', url: `${siteUrl}/` },
+    { name: 'Shop', url: `${siteUrl}/shop` }
   ];
 
   if (categoryName && categoryName !== 'All') {
@@ -366,6 +369,7 @@ export const buildStaticPageSeo = (
   path: string,
   keywords: string[] = []
 ): SeoMetadata => {
+  const siteUrl = getSiteUrl();
   const canonicalUrl = buildCanonicalUrl(path);
 
   const breadcrumbSchema = {
@@ -376,7 +380,7 @@ export const buildStaticPageSeo = (
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: `${SITE_URL}/`
+        item: `${siteUrl}/`
       },
       {
         '@type': 'ListItem',
@@ -417,6 +421,7 @@ export const buildStaticPageSeo = (
  * Build dynamic SEO metadata for Brand Landing Pages
  */
 export const buildBrandSeo = (brandProfile: BrandSeoProfile): SeoMetadata => {
+  const siteUrl = getSiteUrl();
   const canonicalUrl = buildCanonicalUrl(`/brand/${brandProfile.slug}`);
   const title = `${brandProfile.name} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
   const description = `Shop 100% authentic ${brandProfile.name} skincare in Bangladesh. Direct Seoul imports, genuine ingredients, verified batch standards, and fast nationwide delivery.`;
@@ -429,13 +434,13 @@ export const buildBrandSeo = (brandProfile: BrandSeoProfile): SeoMetadata => {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: `${SITE_URL}/`
+        item: `${siteUrl}/`
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Brands',
-        item: `${SITE_URL}/brands`
+        item: `${siteUrl}/brands`
       },
       {
         '@type': 'ListItem',
@@ -486,6 +491,7 @@ export const buildBrandSeo = (brandProfile: BrandSeoProfile): SeoMetadata => {
  * Build dynamic SEO metadata for Educational Skincare Guides
  */
 export const buildGuideSeo = (guide: SkincareGuide): SeoMetadata => {
+  const siteUrl = getSiteUrl();
   const canonicalUrl = buildCanonicalUrl(`/guide/${guide.slug}`);
   const title = `${guide.title} | Korean Skin Food BD`;
   const description = sanitizeMetaText(guide.excerpt);
@@ -503,14 +509,14 @@ export const buildGuideSeo = (guide: SkincareGuide): SeoMetadata => {
     author: {
       '@type': 'Organization',
       name: guide.author?.name || 'Korean Skin Food BD Editorial Team',
-      url: SITE_URL
+      url: siteUrl
     },
     publisher: {
       '@type': 'Organization',
       name: 'Korean Skin Food BD',
       logo: {
         '@type': 'ImageObject',
-        url: `${SITE_URL}/icon.svg`
+        url: `${siteUrl}/icon.svg`
       }
     },
     mainEntityOfPage: {
@@ -527,13 +533,13 @@ export const buildGuideSeo = (guide: SkincareGuide): SeoMetadata => {
         '@type': 'ListItem',
         position: 1,
         name: 'Home',
-        item: `${SITE_URL}/`
+        item: `${siteUrl}/`
       },
       {
         '@type': 'ListItem',
         position: 2,
         name: 'Skincare Guides',
-        item: `${SITE_URL}/guides`
+        item: `${siteUrl}/guides`
       },
       {
         '@type': 'ListItem',
@@ -621,7 +627,7 @@ export const applySeoMetadata = (metadata: SeoMetadata): void => {
   setMeta('property', 'og:description', metadata.description);
   setMeta('property', 'og:site_name', SITE_NAME);
   setMeta('property', 'og:type', metadata.ogType || 'website');
-  setMeta('property', 'og:url', metadata.canonicalUrl || (typeof window !== 'undefined' ? window.location.href : SITE_URL));
+  setMeta('property', 'og:url', metadata.canonicalUrl || (typeof window !== 'undefined' ? window.location.href : getSiteUrl()));
 
   const ogImage = metadata.ogImage || DEFAULT_OG_IMAGE;
   setMeta('property', 'og:image', ogImage);

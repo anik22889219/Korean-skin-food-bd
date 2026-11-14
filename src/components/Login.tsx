@@ -1,6 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { LoginPageThemeSettings } from '../types/theme';
 import { Wand2, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -8,6 +10,13 @@ export const Login: React.FC = () => {
   const { user, signInWithGoogle, loading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [pageTheme, setPageTheme] = useState<LoginPageThemeSettings>(DEFAULT_PAGES_THEME.login);
+
+  useEffect(() => {
+    return themeService.subscribePages((p) => {
+      if (p?.login) setPageTheme(p.login);
+    });
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -39,9 +48,9 @@ export const Login: React.FC = () => {
 
         {/* Title & Desc */}
         <div className="space-y-2">
-          <h2 className="text-2xl font-black text-gray-900 tracking-tight">Welcome to Korean Skin Food BD</h2>
+          <h2 className="text-2xl font-black text-gray-900 tracking-tight">{pageTheme.title}</h2>
           <p className="text-sm text-gray-500">
-            Sign in to access your custom e-commerce profile, view previous orders, and enjoy personalized K-Beauty recommendations.
+            {pageTheme.subtitle}
           </p>
         </div>
 
@@ -70,15 +79,15 @@ export const Login: React.FC = () => {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            <span>{loading ? 'Signing in...' : 'Continue with Google'}</span>
+            <span>{loading ? 'Signing in...' : pageTheme.googleButtonText}</span>
           </button>
         </div>
 
         {/* Footer info */}
         <div className="border-t border-pink-50 pt-4 flex justify-between items-center text-[11px] text-gray-400">
-          <span>100% Secure Auth</span>
-          <span className="flex items-center gap-1 text-[#E91E8C] font-semibold cursor-pointer" onClick={() => navigate('/')}>
-            Back to Shop <ArrowRight size={10} />
+          <span>{pageTheme.securityBadgeText}</span>
+          <span className="flex items-center gap-1 text-[#E91E8C] font-semibold cursor-pointer" onClick={() => navigate(pageTheme.backToShopLink || '/')}>
+            {pageTheme.backToShopLabel} <ArrowRight size={10} />
           </span>
         </div>
       </motion.div>

@@ -13,6 +13,7 @@ import {
   MetaConnectionTestResult,
   MetaSyncResult 
 } from '../services/metaCatalogService';
+import { getSiteUrl, resolveConfiguredDomainUrl } from '../utils/siteUrl';
 
 export const AdminMetaCatalog: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
@@ -28,7 +29,7 @@ export const AdminMetaCatalog: React.FC = () => {
     hasAccessToken: false,
     pixelId: '',
     currency: 'BDT',
-    domainUrl: 'https://koreanskinfood.web.app',
+    domainUrl: getSiteUrl(),
     defaultCategory: 'Health & Beauty > Personal Care > Cosmetics > Skin Care',
     lastSyncAt: null,
     lastSyncStatus: 'idle',
@@ -40,7 +41,7 @@ export const AdminMetaCatalog: React.FC = () => {
   const [accessTokenInput, setAccessTokenInput] = useState<string>('');
   const [showToken, setShowToken] = useState<boolean>(false);
   const [pixelIdInput, setPixelIdInput] = useState<string>('');
-  const [domainUrlInput, setDomainUrlInput] = useState<string>('https://koreanskinfood.web.app');
+  const [domainUrlInput, setDomainUrlInput] = useState<string>(() => getSiteUrl());
   const [currencyInput, setCurrencyInput] = useState<string>('BDT');
 
   // Action states
@@ -70,10 +71,11 @@ export const AdminMetaCatalog: React.FC = () => {
       setSummary(data.summary || null);
       setBaseUrl(data.baseUrl || (typeof window !== 'undefined' ? window.location.origin : ''));
       if (data.settings) {
-        setSettings(data.settings);
+        const resolvedDomain = resolveConfiguredDomainUrl(data.settings.domainUrl || data.baseUrl);
+        setSettings({ ...data.settings, domainUrl: resolvedDomain });
         setCatalogIdInput(data.settings.catalogId || '');
         setPixelIdInput(data.settings.pixelId || '');
-        setDomainUrlInput(data.settings.domainUrl || data.baseUrl || '');
+        setDomainUrlInput(resolvedDomain);
         setCurrencyInput(data.settings.currency || 'BDT');
       }
     } catch (err: any) {
@@ -200,11 +202,7 @@ export const AdminMetaCatalog: React.FC = () => {
     }
   };
 
-  const effectiveBaseUrl = (settings.domainUrl && settings.domainUrl.trim())
-    ? settings.domainUrl.trim().replace(/\/+$/, '')
-    : (domainUrlInput && domainUrlInput.trim())
-      ? domainUrlInput.trim().replace(/\/+$/, '')
-      : 'https://koreanskinfood.web.app';
+  const effectiveBaseUrl = resolveConfiguredDomainUrl(settings.domainUrl || domainUrlInput);
   const xmlFeedUrl = `${effectiveBaseUrl}/meta-catalog.xml`;
   const csvFeedUrl = `${effectiveBaseUrl}/meta-catalog.csv`;
 

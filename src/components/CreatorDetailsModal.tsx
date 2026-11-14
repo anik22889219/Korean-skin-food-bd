@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { 
   X, CheckCircle2, XCircle, Clock, ShieldAlert, Award, Zap, Eye, Heart, 
-  MessageSquare, Video, ExternalLink, Globe, Play, Phone, Mail, Calendar, UserCheck
+  MessageSquare, Video, ExternalLink, Globe, Play, Phone, Mail, Calendar, UserCheck, Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CreatorProfile, CreatorStatus, CreatorReel, ReelMetricAuditLog } from '../types';
+import { isYouTubeUrl } from '../utils/youtubeUrl';
 
 interface CreatorDetailsModalProps {
   creator: CreatorProfile | null;
@@ -302,17 +303,33 @@ export const CreatorDetailsModal: React.FC<CreatorDetailsModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-[11px]">
-                        <a
-                          href={reel.facebookPostUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-bold text-blue-600 hover:underline"
-                        >
-                          <Globe size={12} />
-                          <span>View Facebook Reel</span>
-                          <ExternalLink size={10} />
-                        </a>
+                      <div className="flex items-center justify-between text-[11px] gap-2 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          {(reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl)) && (
+                            <a
+                              href={reel.videoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 font-bold text-red-600 hover:underline"
+                            >
+                              <Youtube size={12} />
+                              <span>YouTube</span>
+                              <ExternalLink size={10} />
+                            </a>
+                          )}
+                          {reel.facebookPostUrl && (
+                            <a
+                              href={reel.facebookPostUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 font-bold text-blue-600 hover:underline"
+                            >
+                              <Globe size={12} />
+                              <span>View Facebook Reel</span>
+                              <ExternalLink size={10} />
+                            </a>
+                          )}
+                        </div>
 
                         {reel.videoUrl && onPreviewVideo && (
                           <button

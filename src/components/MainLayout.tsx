@@ -27,22 +27,14 @@ import { getProductUnitPrice } from '../utils/pricing';
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, signOut, isAdmin, signInWithGoogle, creatorProfile } = useAuth();
+  const { user, profile, signOut, isAdmin, creatorProfile } = useAuth();
   const { 
-    cart, isSubmitting, isCartOpen, setIsCartOpen, language, setLanguage, 
-    checkoutStep, setCheckoutStep, checkoutForm, setCheckoutForm,
-    lastCreatedOrder, calculateCartSubtotal, calculateShipping, 
-    handleCheckoutSubmit, activeTranslations, updateCartQty, removeFromCart,
-    useLoyaltyPoints, setUseLoyaltyPoints, availablePoints, pointsDiscount,
-    appliedCoupon, couponDiscount, couponError, isFreeDelivery, applyCoupon, removeCoupon,
-    calculateGrandTotal, calculatePointsEarned, addToCart
+    cart, isCartOpen, setIsCartOpen, language, setLanguage, 
+    checkoutStep, setCheckoutStep, calculateCartSubtotal, 
+    activeTranslations, updateCartQty, removeFromCart, addToCart
   } = useCart();
   const { cart: wholesaleCart, totalUnits: wholesaleTotalUnits } = useWholesaleCart();
   const isWholesaleUser = profile?.wholesaleAccess === true;
-
-  const [couponInput, setCouponInput] = useState('');
-  const [couponLoading, setCouponLoading] = useState(false);
-  const [couponNotice, setCouponNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -604,433 +596,110 @@ export const MainLayout: React.FC = () => {
 
               {/* Drawer Body content */}
               <div className="p-4 overflow-y-auto flex-1 space-y-4 bg-white">
-                {checkoutStep === 'cart' && (
-                  <>
-                    {cart.length === 0 ? (
-                      <div className="py-24 text-center text-gray-500 space-y-3">
-                        <ShoppingBag size={42} className="mx-auto opacity-20 text-gray-400" />
-                        <p className="text-xs font-bold text-gray-600">Your skincare basket is empty.</p>
-                        <button 
-                          onClick={() => setIsCartOpen(false)} 
-                          className="px-4 py-2 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-sm"
-                        >
-                          Start Shopping
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {profile?.wholesaleAccess && (
-                          <div className="bg-amber-500/10 border border-amber-300/80 p-2.5 rounded-xl flex items-center gap-2 text-[11px] font-bold text-amber-900">
-                            <Sparkles size={14} className="text-amber-600 shrink-0" />
-                            <span>Wholesale Pricing Active: Quantity-based tiers (1–49 & 50+) apply automatically.</span>
-                          </div>
-                        )}
-                        {cart.map(item => {
-                          const isWholesale = profile?.wholesaleAccess === true;
-                          const unitPrice = getProductUnitPrice(item.product, isWholesale ? 'wholesale' : 'retail', item.quantity);
-                          const tierLabel = isWholesale ? (item.quantity >= 50 ? 'Wholesale (50+)' : 'Wholesale (1-49)') : null;
-                          return (
-                            <div key={item.product.id} className="bg-pink-50/20 p-3 rounded-2xl border border-pink-100/50 flex items-center justify-between text-xs">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <img src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <h4 className="font-bold text-gray-800 leading-tight truncate">
-                                      {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
-                                    </h4>
-                                    {item.product.isCombo && (
-                                      <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200">
-                                        Combo
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                    <span className="text-[#E91E8C] font-extrabold font-mono">
-                                      ৳{unitPrice.toLocaleString()}
-                                    </span>
-                                    {tierLabel && (
-                                      <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-1.5 py-0.2 rounded border border-amber-200">
-                                        {tierLabel}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {/* Combo Components Breakdown */}
-                                  {item.comboComponents && item.comboComponents.length > 0 && (
-                                    <div className="mt-1 space-y-0.5 text-[10px] text-slate-500 pl-2 border-l-2 border-purple-200">
-                                      {item.comboComponents.map((comp, cIdx) => (
-                                        <div key={cIdx} className="truncate text-slate-600">
-                                          • {comp.quantity}x {comp.name}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3 shrink-0">
-                                <div className="flex items-center bg-white rounded-lg border border-pink-100">
-                                  <button onClick={() => updateCartQty(item.product.id, -1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
-                                    <Minus size={11} />
-                                  </button>
-                                  <span className="px-1.5 text-gray-800 font-mono font-bold text-[11px]">{item.quantity}</span>
-                                  <button onClick={() => updateCartQty(item.product.id, 1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
-                                    <Plus size={11} />
-                                  </button>
-                                </div>
-
-                                <button onClick={() => removeFromCart(item.product.id)} className="text-gray-400 hover:text-red-600 cursor-pointer p-1">
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                {cart.length === 0 ? (
+                  <div className="py-24 text-center text-gray-500 space-y-3">
+                    <ShoppingBag size={42} className="mx-auto opacity-20 text-gray-400" />
+                    <p className="text-xs font-bold text-gray-600">
+                      {language === 'bn' ? 'আপনার স্কিনকেয়ার কার্টটি খালি।' : 'Your skincare basket is empty.'}
+                    </p>
+                    <button 
+                      onClick={() => setIsCartOpen(false)} 
+                      className="px-4 py-2 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-sm"
+                    >
+                      {language === 'bn' ? 'শপিং শুরু করুন' : 'Start Shopping'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {profile?.wholesaleAccess && (
+                      <div className="bg-amber-500/10 border border-amber-300/80 p-2.5 rounded-xl flex items-center gap-2 text-[11px] font-bold text-amber-900">
+                        <Sparkles size={14} className="text-amber-600 shrink-0" />
+                        <span>Wholesale Pricing Active: Quantity-based tiers (1–49 & 50+) apply automatically.</span>
                       </div>
                     )}
-                  </>
-                )}
-
-                {/* Shipping Details form */}
-                {checkoutStep === 'details' && (
-                  !user ? (
-                    <div className="py-8 px-4 text-center space-y-5 bg-pink-50/30 rounded-3xl border border-pink-100 my-2">
-                      <div className="w-14 h-14 bg-[#E91E8C]/10 border border-[#E91E8C]/20 rounded-full flex items-center justify-center mx-auto text-[#E91E8C] shadow-xs">
-                        <Lock size={26} />
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <h4 className="font-extrabold text-gray-900 text-sm">
-                          {activeTranslations.loginToOrder}
-                        </h4>
-                        <p className="text-xs text-gray-600 leading-relaxed max-w-xs mx-auto font-medium">
-                          {activeTranslations.loginToOrderDesc}
-                        </p>
-                      </div>
-
-                      <div className="space-y-2.5 pt-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await signInWithGoogle();
-                            } catch (err) {
-                              console.error('Google sign-in error:', err);
-                            }
-                          }}
-                          className="w-full py-3.5 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-md shadow-pink-100/50 flex items-center justify-center gap-2"
-                        >
-                          <svg className="h-4 w-4 bg-white rounded-full p-0.5" viewBox="0 0 24 24">
-                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z"/>
-                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                          </svg>
-                          <span>{activeTranslations.loginToOrderBtn}</span>
-                        </button>
-
-                        <Link
-                          to="/login"
-                          onClick={() => setIsCartOpen(false)}
-                          className="w-full py-2.5 bg-white hover:bg-pink-50 text-gray-700 rounded-xl text-xs font-bold text-center block transition border border-pink-200"
-                        >
-                          {language === 'bn' ? 'লগইন পেজে যান' : 'Go to Login Page'}
-                        </Link>
-                      </div>
-
-                      <div className="pt-2">
-                        <button
-                          type="button"
-                          onClick={() => setCheckoutStep('cart')}
-                          className="text-xs text-[#E91E8C] hover:underline font-bold cursor-pointer"
-                        >
-                          {language === 'bn' ? '← কার্টে ফিরে যান' : '← Back to Cart Items'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <form onSubmit={handleCheckoutSubmit} className="space-y-4 text-xs">
-                      <div className="space-y-1">
-                        <span className="text-[#E91E8C] font-black uppercase text-xs tracking-wider block">{activeTranslations.billingInfo}</span>
-                        <p className="text-[10px] text-gray-500 font-semibold">Cash on Delivery details inside Bangladesh</p>
-                      </div>
-
-                      <div>
-                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.fullName}</label>
-                        <input 
-                          type="text" 
-                          required
-                          value={checkoutForm.name}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, name: e.target.value })}
-                          placeholder="e.g., Sadia Anjum"
-                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.phone}</label>
-                        <input 
-                          type="tel" 
-                          required
-                          value={checkoutForm.phone}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, phone: e.target.value })}
-                          placeholder="017XXXXXXXX"
-                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C]"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.deliveryCity}</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCheckoutForm({ ...checkoutForm, area: 'dhaka' });
-                              analytics.trackAddShippingInfo('dhaka', 80, cart, calculateGrandTotal());
-                            }}
-                            className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                              checkoutForm.area === 'dhaka'
-                                ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
-                                : 'bg-white text-gray-700 border-pink-100 hover:bg-pink-50'
-                            }`}
-                          >
-                            Inside Dhaka (৳80)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCheckoutForm({ ...checkoutForm, area: 'outside' });
-                              analytics.trackAddShippingInfo('outside', 150, cart, calculateGrandTotal());
-                            }}
-                            className={`py-2 px-3 rounded-xl border text-xs font-bold transition cursor-pointer ${
-                              checkoutForm.area === 'outside'
-                                ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
-                                : 'bg-white text-gray-700 border-pink-100 hover:bg-pink-50'
-                            }`}
-                          >
-                            Outside Dhaka (৳150)
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-gray-500 font-bold mb-1">{activeTranslations.address}</label>
-                        <textarea 
-                          rows={2} 
-                          required
-                          value={checkoutForm.address}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, address: e.target.value })}
-                          placeholder="House, Road, Area, Ward/Thana..."
-                          className="w-full bg-pink-50/10 text-gray-800 px-3.5 py-2.5 rounded-xl border border-pink-100 outline-none focus:border-[#E91E8C] resize-none"
-                        />
-                      </div>
-
-                      {/* Promo / Coupon Code Section */}
-                      <div className="bg-slate-50/90 p-3.5 rounded-2xl border border-slate-200/80 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-gray-700 flex items-center gap-1.5">
-                            <Tag size={13} className="text-[#E91E8C]" />
-                            <span>{language === 'bn' ? 'প্রমো কোড / কুপন' : 'Promo / Discount Code'}</span>
-                          </span>
-                          {appliedCoupon && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                removeCoupon();
-                                setCouponNotice({ type: 'error', message: 'Coupon removed' });
-                                setTimeout(() => setCouponNotice(null), 2500);
-                              }}
-                              className="text-[10px] text-red-600 hover:underline font-bold cursor-pointer"
-                            >
-                              {language === 'bn' ? 'মুছে ফেলুন' : 'Remove'}
-                            </button>
-                          )}
-                        </div>
-
-                        {appliedCoupon ? (
-                          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className="bg-emerald-600 text-white font-mono font-bold px-2 py-0.5 rounded text-[11px] uppercase tracking-wide">
-                                {appliedCoupon.code}
-                              </span>
-                              <span className="text-emerald-800 font-semibold text-[11px]">
-                                {appliedCoupon.discountType === 'free_delivery'
-                                  ? (language === 'bn' ? 'ফ্রি ডেলিভারি সক্রিয়!' : 'Free Delivery Activated!')
-                                  : `৳${couponDiscount} discount applied`}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={removeCoupon}
-                              className="text-gray-400 hover:text-red-500 cursor-pointer p-0.5"
-                              title="Remove coupon"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={couponInput}
-                              onChange={(e) => {
-                                setCouponInput(e.target.value.toUpperCase());
-                                if (couponNotice) setCouponNotice(null);
-                              }}
-                              placeholder={language === 'bn' ? 'কুপন কোড লিখুন...' : 'Enter promo code (e.g. FREEDELIVERY)'}
-                              className="flex-1 bg-white text-gray-800 uppercase tracking-wider font-mono px-3 py-2 rounded-xl border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
-                            />
-                            <button
-                              type="button"
-                              disabled={couponLoading || !couponInput.trim()}
-                              onClick={async () => {
-                                if (!couponInput.trim()) return;
-                                setCouponLoading(true);
-                                setCouponNotice(null);
-                                const res = await applyCoupon(couponInput.trim());
-                                setCouponLoading(false);
-                                if (res.success) {
-                                  setCouponInput('');
-                                  setCouponNotice({ type: 'success', message: res.message });
-                                } else {
-                                  setCouponNotice({ type: 'error', message: res.message });
-                                }
-                              }}
-                              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold rounded-xl text-xs cursor-pointer transition shrink-0"
-                            >
-                              {couponLoading ? '...' : (language === 'bn' ? 'প্রয়োগ' : 'Apply')}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Coupon notification / validation error */}
-                        {(couponNotice || couponError) && (
-                          <p className={`text-[11px] font-medium ${
-                            couponNotice?.type === 'success' ? 'text-emerald-600' : 'text-rose-600'
-                          }`}>
-                            {couponNotice?.message || couponError}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Loyalty Points Redemption Box */}
-                      {user && availablePoints > 0 && (
-                        <div className="bg-gradient-to-r from-pink-50/80 to-purple-50/80 p-3.5 rounded-2xl border border-pink-200/80 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Sparkles size={16} className="text-[#E91E8C]" />
-                              <div>
-                                <span className="font-extrabold text-gray-900 block text-xs">Glow Loyalty Balance</span>
-                                <span className="text-[10px] text-gray-500 font-semibold">{availablePoints} Available Points</span>
+                    {cart.map(item => {
+                      const isWholesale = profile?.wholesaleAccess === true;
+                      const unitPrice = getProductUnitPrice(item.product, isWholesale ? 'wholesale' : 'retail', item.quantity);
+                      const tierLabel = isWholesale ? (item.quantity >= 50 ? 'Wholesale (50+)' : 'Wholesale (1-49)') : null;
+                      return (
+                        <div key={item.product.id} className="bg-pink-50/20 p-3 rounded-2xl border border-pink-100/50 flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img src={item.product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-12 h-12 object-cover rounded-xl shadow-xs border border-pink-100 shrink-0" referrerPolicy="no-referrer" />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-bold text-gray-800 leading-tight truncate">
+                                  {language === 'en' ? item.product.name : (item.product.nameBN || item.product.name)}
+                                </h4>
+                                {item.product.isCombo && (
+                                  <span className="text-[8px] font-black uppercase text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200">
+                                    Combo
+                                  </span>
+                                )}
                               </div>
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                <span className="text-[#E91E8C] font-extrabold font-mono">
+                                  ৳{unitPrice.toLocaleString()}
+                                </span>
+                                {tierLabel && (
+                                  <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-1.5 py-0.2 rounded border border-amber-200">
+                                    {tierLabel}
+                                  </span>
+                                )}
+                              </div>
+                              {/* Combo Components Breakdown */}
+                              {item.comboComponents && item.comboComponents.length > 0 && (
+                                <div className="mt-1 space-y-0.5 text-[10px] text-slate-500 pl-2 border-l-2 border-purple-200">
+                                  {item.comboComponents.map((comp, cIdx) => (
+                                    <div key={cIdx} className="truncate text-slate-600">
+                                      • {comp.quantity}x {comp.name}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={useLoyaltyPoints} 
-                                onChange={(e) => setUseLoyaltyPoints(e.target.checked)} 
-                                className="sr-only peer" 
-                              />
-                              <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#E91E8C]"></div>
-                            </label>
                           </div>
-                          {useLoyaltyPoints && (
-                            <div className="text-[10px] bg-white p-2 rounded-xl border border-pink-100 text-emerald-700 font-bold flex items-center justify-between">
-                              <span>Instant Loyalty Discount Applied:</span>
-                              <span className="font-mono text-emerald-600 font-black">-৳{pointsDiscount} BDT</span>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="flex items-center bg-white rounded-lg border border-pink-100">
+                              <button onClick={() => updateCartQty(item.product.id, -1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
+                                <Minus size={11} />
+                              </button>
+                              <span className="px-1.5 text-gray-800 font-mono font-bold text-[11px]">{item.quantity}</span>
+                              <button onClick={() => updateCartQty(item.product.id, 1)} className="p-1 text-gray-400 hover:text-pink-600 cursor-pointer">
+                                <Plus size={11} />
+                              </button>
                             </div>
-                          )}
-                        </div>
-                      )}
 
-                      <div className="bg-pink-50/20 p-4 rounded-2xl border border-pink-100/50 space-y-1.5 font-mono text-gray-700">
-                        <div className="flex justify-between font-medium">
-                          <span>{language === 'en' ? 'Subtotal' : 'সাবটোটাল'}</span>
-                          <span>৳{calculateCartSubtotal()}</span>
-                        </div>
-                        <div className="flex justify-between font-medium">
-                          <span>{activeTranslations.shipping}</span>
-                          {isFreeDelivery ? (
-                            <span className="text-emerald-600 font-bold flex items-center gap-1">
-                              <span className="line-through text-gray-400 font-normal">৳{checkoutForm.area === 'dhaka' ? 80 : 150}</span>
-                              <span>৳0 (Free Delivery)</span>
-                            </span>
-                          ) : (
-                            <span>৳{calculateShipping()}</span>
-                          )}
-                        </div>
-                        {couponDiscount > 0 && appliedCoupon && (
-                          <div className="flex justify-between font-bold text-emerald-600">
-                            <span>Coupon ({appliedCoupon.code})</span>
-                            <span>-৳{couponDiscount}</span>
+                            <button onClick={() => removeFromCart(item.product.id)} className="text-gray-400 hover:text-red-600 cursor-pointer p-1">
+                              <Trash2 size={13} />
+                            </button>
                           </div>
-                        )}
-                        {useLoyaltyPoints && pointsDiscount > 0 && (
-                          <div className="flex justify-between font-bold text-emerald-600">
-                            <span>Loyalty Discount</span>
-                            <span>-৳{pointsDiscount}</span>
-                          </div>
-                        )}
-                        <div className="border-t border-pink-100/60 pt-2 flex justify-between text-gray-900 font-extrabold text-sm">
-                          <span>{activeTranslations.grandTotal}</span>
-                          <span className="text-[#E91E8C] font-black">৳{calculateGrandTotal()}</span>
                         </div>
-                        <div className="text-[10px] text-pink-600 font-sans font-bold pt-1 text-right flex items-center justify-end gap-1">
-                          <Wand2 size={11} />
-                          <span>You will earn +{calculatePointsEarned()} Loyalty Points on this order!</span>
-                        </div>
-                      </div>
-
-                      <button 
-                        type="submit" 
-                        disabled={isSubmitting}
-                        className={`w-full py-3 rounded-xl font-bold transition shadow-sm flex items-center justify-center gap-2 ${
-                          isSubmitting 
-                            ? 'bg-gray-400 cursor-not-allowed opacity-80 text-white' 
-                            : 'bg-[#E91E8C] hover:bg-[#FF4B91] text-white cursor-pointer'
-                        }`}
-                      >
-                        {isSubmitting ? (
-                          <>
-                            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                            <span>{language === 'bn' ? 'অর্ডার প্রক্রিয়াধীন...' : 'Processing Order...'}</span>
-                          </>
-                        ) : (
-                          activeTranslations.orderNow
-                        )}
-                      </button>
-                    </form>
-                  )
-                )}
-
-                {/* Successful checkout order */}
-                {checkoutStep === 'success' && lastCreatedOrder && (
-                  <div className="py-12 text-center space-y-4">
-                    <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto text-emerald-600 animate-bounce">
-                      <CheckCircle size={32} />
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="font-extrabold text-gray-900 text-sm">Order Placed Successfully!</h4>
-                      <p className="text-[11px] text-gray-500">Thank you for shopping with Korean Skin Food BD. Track your order under your profile dashboard.</p>
-                    </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
               {/* Drawer Footer CTA */}
-              {cart.length > 0 && checkoutStep === 'cart' && (
+              {cart.length > 0 && (
                 <div className="p-4 border-t border-pink-100 bg-pink-50/10 space-y-3">
                   <div className="flex justify-between text-xs">
-                    <span className="font-bold text-gray-500">Basket Subtotal:</span>
-                    <span className="font-black text-gray-800 font-mono">৳{calculateCartSubtotal()} BDT</span>
+                    <span className="font-bold text-gray-500">
+                      {language === 'bn' ? 'সাবটোটাল:' : 'Basket Subtotal:'}
+                    </span>
+                    <span className="font-black text-gray-800 font-mono tabular-nums">৳{calculateCartSubtotal().toLocaleString()} BDT</span>
                   </div>
                   <button 
                     onClick={() => {
                       analytics.trackBeginCheckout(cart, calculateCartSubtotal());
-                      setCheckoutStep('details');
+                      setCheckoutStep('cart');
+                      setIsCartOpen(false);
+                      navigate('/checkout');
                     }}
                     className="w-full py-3 bg-[#E91E8C] hover:bg-[#FF4B91] text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-sm flex items-center justify-center gap-1.5"
                   >
-                    <span>Proceed to Checkout</span>
+                    <span>{language === 'bn' ? 'চেকআউটে যান' : 'Proceed to Checkout'}</span>
                   </button>
                 </div>
               )}

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Check, Sparkles, ShieldCheck, ArrowRight, Globe, Truck, Award, Heart } from 'lucide-react';
@@ -6,6 +6,8 @@ import { useCart } from '../context/CartContext';
 import { Product } from '../types';
 import { SeoHead } from './SeoHead';
 import { buildStaticPageSeo } from '../services/seoService';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { AboutPageThemeSettings } from '../types/theme';
 
 interface ShowcaseItem {
   id: string;
@@ -188,6 +190,14 @@ export const AboutUs: React.FC = () => {
   const carouselRef = useRef<HTMLDivElement>(null);
   const foundersStoryRef = useRef<HTMLDivElement>(null);
   const [addedItem, setAddedItem] = useState<string | null>(null);
+  const [aboutTheme, setAboutTheme] = useState<AboutPageThemeSettings>(() => themeService.getPagesTheme().about || DEFAULT_PAGES_THEME.about);
+
+  useEffect(() => {
+    const unsub = themeService.subscribePages((pt) => {
+      setAboutTheme(pt.about || DEFAULT_PAGES_THEME.about);
+    });
+    return () => unsub();
+  }, []);
 
   const scrollCarousel = (direction: 'left' | 'right') => {
     if (carouselRef.current) {
@@ -245,13 +255,14 @@ export const AboutUs: React.FC = () => {
       <SeoHead metadata={aboutUsSeo} />
 
       {/* 1. HERO SECTION: The Ritual of Light */}
+      {aboutTheme.showHero && (
       <section className="relative min-h-[820px] lg:min-h-[920px] flex items-center justify-start overflow-hidden">
         <div className="absolute inset-0 z-0 overflow-hidden">
           <motion.img
             initial={{ scale: 1.08, opacity: 0.8 }}
             animate={{ scale: 1.02, opacity: 1 }}
             transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1] }}
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDygV0BUx3FRHwpnDvTSsMsiG1TsjcGBgKWE8vEsaUi5TRYTM-pzc4wgYwMs1-n-Zhv04YeC1al6FBGnOFf_6_JQacp8mUx8Ulk8cq0QFnA00nmiBUQLfC9i-UHYH8n1G4DJHoiA_X068q3nfC_i0QcK_uvJUfOM9DwxqtR7yczoZ1zTqwlvm5NeEUFPH0wHNqWT_LD9F3Xhgc2VREFAublAEJzOmy0z83LwvQ2vyOXHKxK4YZ77Q_Me3PJ_GIUl8BRSicxciMdpqM"
+            src={aboutTheme.heroImageUrl || DEFAULT_PAGES_THEME.about.heroImageUrl}
             alt="The Ritual of Light - Korean Skin Food Partnership"
             className="w-full h-full object-cover object-center"
             referrerPolicy="no-referrer"
@@ -281,22 +292,22 @@ export const AboutUs: React.FC = () => {
               custom={0}
               className="text-xs md:text-sm font-medium tracking-[0.3em] uppercase text-[#5e5f5c]"
             >
-              The Ritual of Light
+              {aboutTheme.heroBadge}
             </motion.p>
             <motion.h1
               variants={fadeInUp}
               custom={1}
               className="font-serif-luxury text-4xl sm:text-6xl md:text-7xl lg:text-[80px] font-normal leading-[1.1] tracking-tight text-[#1e1b18]"
             >
-              Authentic Beauty. <br />
-              <span className="italic font-light">Validated Roots.</span>
+              {aboutTheme.heroTitleLine1} <br />
+              <span className="italic font-light">{aboutTheme.heroTitleHighlight}</span>
             </motion.h1>
             <motion.p
               variants={fadeInUp}
               custom={2}
               className="text-sm md:text-base text-[#454843] font-light leading-relaxed max-w-lg"
             >
-              Bridging Seoul&apos;s timeless botanical wisdom with Bangladesh&apos;s distinct skin rituals through direct manufacturer provenance and certified laboratory integrity.
+              {aboutTheme.heroSubtitle}
             </motion.p>
             <motion.div
               variants={fadeInUp}
@@ -308,21 +319,23 @@ export const AboutUs: React.FC = () => {
                 onClick={scrollToStory}
                 className="border border-[#757873] px-10 py-4 text-xs font-semibold uppercase tracking-widest text-[#1e1b18] hover:bg-[#1e1b18] hover:text-[#fff8f5] transition-all duration-500 cursor-pointer rounded-none"
               >
-                Discover Our Heritage
+                {aboutTheme.heroPrimaryBtnText}
               </button>
               <button
                 id="btn-hero-catalog"
-                onClick={() => navigate('/shop')}
+                onClick={() => navigate(aboutTheme.heroSecondaryBtnLink || '/shop')}
                 className="bg-[#5b6056] text-white px-8 py-4 text-xs font-semibold uppercase tracking-widest hover:bg-[#44483f] transition-all duration-300 cursor-pointer rounded-none shadow-sm"
               >
-                Explore Catalog
+                {aboutTheme.heroSecondaryBtnText}
               </button>
             </motion.div>
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* 2. OUR FOUNDERS' STORY: A Legacy of Love & Light */}
+      {aboutTheme.showFoundersStory && (
       <section ref={foundersStoryRef} className="py-20 lg:py-32 bg-[#fff8f5]">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
@@ -336,7 +349,7 @@ export const AboutUs: React.FC = () => {
             >
               <div className="aspect-[4/5] overflow-hidden border-[10px] md:border-[14px] border-white shadow-2xl relative bg-white">
                 <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuBOzj3L4E3LOsKUDd0DevhbePBhoN3Ar8wYAQm_f5w6DkiNR5L2FUJvU6W-27PQtA2rOxk-v1sV4q3HMHdQGm-j3ilMcval8tFJTyxwscNNsucABHWJbNLEzSdKS2ILYoBSJlaVLJN2SbyIQVdX1bhfh3woUNckwmO8_j8Vn8NdShxGN28-fwVhO2Kko2WnVffR4ROmOGKrLWwk6e-AFvApBzdGE2fX_bcr_xzL7eB6MfDEIHP-LPaeIGxPa89Hq4dqPpC0B7S95Mw"
+                  src={aboutTheme.foundersImageUrl || DEFAULT_PAGES_THEME.about.foundersImageUrl}
                   alt="Founders of Korean Skin Food"
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
@@ -349,7 +362,7 @@ export const AboutUs: React.FC = () => {
                 transition={{ duration: 0.6, delay: 0.3 }}
                 className="absolute -bottom-6 -right-4 md:-bottom-8 md:-right-8 bg-[#5b6056] text-white p-6 md:p-8 shadow-xl"
               >
-                <p className="font-serif-luxury text-xl md:text-2xl italic tracking-wide">Est. 2014</p>
+                <p className="font-serif-luxury text-xl md:text-2xl italic tracking-wide">{aboutTheme.foundersEstYear}</p>
               </motion.div>
             </motion.div>
 
@@ -363,10 +376,10 @@ export const AboutUs: React.FC = () => {
             >
               <motion.div variants={fadeInUp}>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5b6056] mb-3">
-                  Our Founders&apos; Story
+                  {aboutTheme.foundersSubtitle}
                 </p>
                 <h2 className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18] leading-tight">
-                  A Legacy of Love &amp; Light
+                  {aboutTheme.foundersTitle}
                 </h2>
               </motion.div>
 
@@ -375,7 +388,7 @@ export const AboutUs: React.FC = () => {
                 custom={1}
                 className="font-serif-luxury italic text-lg md:text-xl text-[#454843] leading-relaxed border-l-2 border-[#5e5f5c]/30 pl-6 py-1"
               >
-                &ldquo;We didn&apos;t just want to create another skincare brand. We wanted to build a bridge—a way to share the timeless wisdom of Korean botanical traditions with a modern world seeking authenticity.&rdquo;
+                {aboutTheme.foundersQuote}
               </motion.blockquote>
 
               <motion.p
@@ -383,7 +396,7 @@ export const AboutUs: React.FC = () => {
                 custom={2}
                 className="text-sm md:text-base text-[#454843] font-light leading-relaxed"
               >
-                Born from a shared passion for pure ingredients and rigorous standards, Korean Skin Food began as a small initiative to bring high-potency, ethically sourced heritage ingredients to global markets. Today, our founders remain deeply involved in every step of the &apos;Ritual of Light&apos;.
+                {aboutTheme.foundersBody}
               </motion.p>
 
               <motion.div
@@ -393,15 +406,17 @@ export const AboutUs: React.FC = () => {
               >
                 <div className="w-16 h-[1px] bg-[#5e5f5c]/40" />
                 <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[#5e5f5c]">
-                  The Heritage Council
+                  {aboutTheme.foundersCouncilLabel}
                 </span>
               </motion.div>
             </motion.div>
           </div>
         </div>
       </section>
+      )}
 
       {/* 3. HERITAGE FAVORITES: Botanical Essentials */}
+      {aboutTheme.showHeritageEssentials && (
       <section className="py-20 bg-[#fff8f5] border-t border-[#c5c7c1]/30">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <motion.div
@@ -413,10 +428,10 @@ export const AboutUs: React.FC = () => {
           >
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5e5f5c] mb-2">
-                Heritage Favorites
+                {aboutTheme.heritageSubtitle}
               </p>
               <h2 className="font-serif-luxury text-3xl md:text-4xl font-normal text-[#1e1b18]">
-                Botanical Essentials
+                {aboutTheme.heritageTitle}
               </h2>
             </div>
             <div className="flex gap-3">
@@ -489,8 +504,10 @@ export const AboutUs: React.FC = () => {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* 4. QUALITY ASSURANCE: A Global Standard of Integrity */}
+      {aboutTheme.showQualityAssurance && (
       <section className="py-20 lg:py-32 bg-[#fff8f5]">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
@@ -504,10 +521,10 @@ export const AboutUs: React.FC = () => {
             >
               <motion.div variants={fadeInUp}>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5e5f5c] mb-3">
-                  Quality Assurance
+                  {aboutTheme.qaSubtitle}
                 </p>
                 <h2 className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18] leading-tight">
-                  A Global Standard of Integrity
+                  {aboutTheme.qaTitle}
                 </h2>
               </motion.div>
               <motion.p
@@ -515,7 +532,7 @@ export const AboutUs: React.FC = () => {
                 custom={1}
                 className="text-sm md:text-base text-[#454843] font-light leading-relaxed"
               >
-                Beyond formulation, we control every step of the journey. From our certified sorting facilities to climate-controlled transit, we ensure the botanical integrity of our products remains uncompromised from Korea to the world.
+                {aboutTheme.qaDescription}
               </motion.p>
 
               <motion.div
@@ -566,7 +583,7 @@ export const AboutUs: React.FC = () => {
             >
               <div className="aspect-[4/5] overflow-hidden shadow-2xl border border-white/60">
                 <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuDH2LoWWo-SbNTwCqrFgUFpyUtVIC9bOI4Zrj135WguZql4fmOPsK8prr_BbxhLktvvOYy1p5wcEO-eTQ9gubPk5aAVaAjigFYYRbHd3YWd6mJcuyDCq8xe5nPFfIV8ss6_O9l7aGuEyE31MHKopI2hkkbjfu_ZryYj0sTdLmwoWVkbRkUEdUQue37h2ArOZx_BhXszbrBVFJh_upJcr__mTcIGmbqDPZ8ulsEwInSslEAURYbPnhcJzD3WRyfortj_I1smJazHTV8"
+                  src={aboutTheme.qaMainImageUrl || DEFAULT_PAGES_THEME.about.qaMainImageUrl}
                   alt="Logistics Integrity and International Cargo"
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
@@ -582,24 +599,26 @@ export const AboutUs: React.FC = () => {
                 className="hidden sm:block absolute -bottom-8 -left-8 md:-left-12 w-64 md:w-72 glass-card p-6 shadow-xl border border-white/80"
               >
                 <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuCDoVlcveeL6BbwjoPCSbobXaTJNM7TReLGuvKIDqAww26XR9QQRoxioriDwqJX-rz_iYd6RzLU9fpSkmouWRdPs-RxzDBx9KXq6Gw9RaJClhEdfrjxUnbLcn4Leh86-VBAoMo0HU-cXhstTVHf6u9upQQp-6oLgFYn3DBG5gIM__U_j5Tpv4Ro9OlsdMQal2xN_G9_nR1CxbvMd3ImUogiiXR2czFJYcmFDC5DOVa81SzcVALZk7Ow2iCzsJsc_M3UNRjEUNYhZhA"
+                  src={aboutTheme.qaNoteImageUrl || DEFAULT_PAGES_THEME.about.qaNoteImageUrl}
                   alt="Inventory Pallet Precision"
                   className="w-full h-28 object-cover mb-3"
                   referrerPolicy="no-referrer"
                 />
                 <p className="text-[11px] font-semibold italic text-[#5e5f5c] tracking-widest uppercase mb-1">
-                  Operations Note
+                  {aboutTheme.qaNoteTitle}
                 </p>
                 <p className="text-xs text-[#1e1b18] font-light leading-relaxed">
-                  &ldquo;Our reach is global, but our standard is singular. We treat every shipment as a ritual of trust.&rdquo;
+                  {aboutTheme.qaNoteQuote}
                 </p>
               </motion.div>
             </motion.div>
           </div>
         </div>
       </section>
+      )}
 
       {/* 5. PRECISION SCIENCE: Validated Formulations */}
+      {aboutTheme.showValidatedScience && (
       <section className="py-20 lg:py-28 bg-[#fbf2ed]">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <motion.div
@@ -613,21 +632,21 @@ export const AboutUs: React.FC = () => {
               variants={fadeInUp}
               className="text-xs font-semibold uppercase tracking-[0.25em] text-[#5e5f5c]"
             >
-              Precision Science
+              {aboutTheme.validatedSubtitle}
             </motion.p>
             <motion.h2
               variants={fadeInUp}
               custom={1}
               className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18]"
             >
-              Validated Formulations
+              {aboutTheme.validatedTitle}
             </motion.h2>
             <motion.p
               variants={fadeInUp}
               custom={2}
               className="text-xs md:text-sm text-[#454843] font-light"
             >
-              Scientifically proven botanicals tested across environmental gradients for lasting barrier vitality.
+              {aboutTheme.validatedDescription}
             </motion.p>
           </motion.div>
 
@@ -675,8 +694,10 @@ export const AboutUs: React.FC = () => {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* 6. THE HUMAN CONNECTION: Built on Enduring Partnerships */}
+      {aboutTheme.showHumanConnection && (
       <section className="py-20 lg:py-32 bg-[#f5ece7] overflow-hidden">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
@@ -690,7 +711,7 @@ export const AboutUs: React.FC = () => {
             >
               <div className="glass-card p-4 shadow-xl border border-white/60">
                 <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuDgTQaRbZixVhXln6so0dlGREA6GdOxL6yXvgemYepAqppVLtsFcT0lRhGmgb8mpDma_IiHb7ErIK9YUuAZXa8U9kNLaekLj18qSdqCKTaCfeAVxfPF-05iV1Nu3l90UqgsNet-NpGGNXu5KPSvsedYRNoJRT9k5Stmh0y2DcctzfMcWIo9blVPY-pwRvwpbXnAWL3OLX1kyUSTF6AdswBgZ8Dmczc8DTQh0mhesKKKhqlRUpNG8Vz86KG0i9btEXetVjx8yVx1mUo"
+                  src={aboutTheme.humanImageUrl || DEFAULT_PAGES_THEME.about.humanImageUrl}
                   alt="Strategic Partnership between Korea & Bangladesh"
                   className="w-full h-auto object-cover"
                   referrerPolicy="no-referrer"
@@ -708,10 +729,10 @@ export const AboutUs: React.FC = () => {
             >
               <motion.div variants={fadeInUp}>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5e5f5c] mb-3">
-                  The Human Connection
+                  {aboutTheme.humanSubtitle}
                 </p>
                 <h2 className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18] leading-tight">
-                  Built on Enduring Partnerships
+                  {aboutTheme.humanTitle}
                 </h2>
               </motion.div>
 
@@ -721,18 +742,20 @@ export const AboutUs: React.FC = () => {
                 className="relative pl-8 md:pl-12 border-l-2 border-[#5e5f5c]/30 py-2"
               >
                 <p className="font-serif-luxury italic text-lg md:text-xl text-[#454843] leading-relaxed">
-                  &ldquo;KOREAN SKIN FOOD is more than a beauty brand; it&apos;s a bridge between cultures. Our commitment to authentic sourcing and transparent operations is what defines our legacy in the global market.&rdquo;
+                  {aboutTheme.humanQuote}
                 </p>
                 <div className="mt-6 text-xs font-bold uppercase tracking-[0.2em] text-[#1e1b18] not-italic">
-                  — STRATEGIC LEADERSHIP TEAM
+                  {aboutTheme.humanAttribution}
                 </div>
               </motion.div>
             </motion.div>
           </div>
         </div>
       </section>
+      )}
 
       {/* 7. CURATED COLLABORATIONS: The Partnership Selection */}
+      {aboutTheme.showPartnershipSelection && (
       <section className="py-20 lg:py-28 bg-[#fff8f5]">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <motion.div
@@ -743,10 +766,10 @@ export const AboutUs: React.FC = () => {
             className="mb-12"
           >
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5e5f5c] mb-2">
-              Curated Collaborations
+              {aboutTheme.partnershipSubtitle}
             </p>
             <h2 className="font-serif-luxury text-3xl md:text-4xl font-normal text-[#1e1b18]">
-              The Partnership Selection
+              {aboutTheme.partnershipTitle}
             </h2>
           </motion.div>
 
@@ -787,8 +810,10 @@ export const AboutUs: React.FC = () => {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* 8. THE PEOPLE BEHIND THE LIGHT: A Shared Journey of Radiance */}
+      {aboutTheme.showSharedJourney && (
       <section className="py-20 lg:py-28 bg-[#fff8f5] border-t border-[#c5c7c1]/20">
         <motion.div
           initial="hidden"
@@ -801,14 +826,14 @@ export const AboutUs: React.FC = () => {
             variants={fadeInUp}
             className="text-xs font-semibold uppercase tracking-[0.25em] text-[#5e5f5c]"
           >
-            The People Behind the Light
+            {aboutTheme.sharedJourneySubtitle}
           </motion.p>
           <motion.h2
             variants={fadeInUp}
             custom={1}
             className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18]"
           >
-            A Shared Journey of Radiance
+            {aboutTheme.sharedJourneyTitle}
           </motion.h2>
         </motion.div>
 
@@ -859,8 +884,10 @@ export const AboutUs: React.FC = () => {
           </motion.div>
         </motion.div>
       </section>
+      )}
 
       {/* 9. REACH & RELIABILITY: Bridging Continents */}
+      {aboutTheme.showReachReliability && (
       <section className="py-20 lg:py-32 bg-[#fbf2ed]">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
@@ -873,10 +900,10 @@ export const AboutUs: React.FC = () => {
             >
               <motion.div variants={fadeInUp}>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#5e5f5c] mb-3">
-                  Reach &amp; Reliability
+                  {aboutTheme.reachSubtitle}
                 </p>
                 <h2 className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18] leading-tight">
-                  Bridging Continents
+                  {aboutTheme.reachTitle}
                 </h2>
               </motion.div>
               <motion.p
@@ -884,7 +911,7 @@ export const AboutUs: React.FC = () => {
                 custom={1}
                 className="text-sm md:text-base text-[#454843] font-light leading-relaxed"
               >
-                From our meticulous operations hubs in South Korea to our specialized regional offices, we ensure every product arrives with its botanical potency fully preserved. We operate with a transparency that is as clear as the light we promote.
+                {aboutTheme.reachDescription}
               </motion.p>
 
               <motion.div
@@ -944,8 +971,10 @@ export const AboutUs: React.FC = () => {
           </div>
         </div>
       </section>
+      )}
 
       {/* 10. GLOBAL REACH: Bestselling Rituals */}
+      {aboutTheme.showBestsellingRituals && (
       <section className="py-20 lg:py-28 bg-[#f5ece7]">
         <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20">
           <motion.div
@@ -959,21 +988,21 @@ export const AboutUs: React.FC = () => {
               variants={fadeInUp}
               className="text-xs font-semibold uppercase tracking-[0.25em] text-[#5e5f5c]"
             >
-              Global Reach
+              {aboutTheme.bestsellingSubtitle}
             </motion.p>
             <motion.h2
               variants={fadeInUp}
               custom={1}
               className="font-serif-luxury text-3xl sm:text-4xl md:text-5xl font-normal text-[#1e1b18]"
             >
-              Bestselling Rituals
+              {aboutTheme.bestsellingTitle}
             </motion.h2>
             <motion.p
               variants={fadeInUp}
               custom={2}
               className="text-xs md:text-sm text-[#454843] font-light max-w-md"
             >
-              Beloved by skincare devotees across Seoul, Dhaka, and beyond.
+              {aboutTheme.bestsellingDescription}
             </motion.p>
           </motion.div>
 
@@ -1021,8 +1050,10 @@ export const AboutUs: React.FC = () => {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* 11. LUXURY CONSULTATION BANNER */}
+      {aboutTheme.showBottomBanner && (
       <section className="py-16 bg-[#1e1b18] text-[#fff8f5] px-6 md:px-12 lg:px-20">
         <motion.div
           initial="hidden"
@@ -1032,30 +1063,31 @@ export const AboutUs: React.FC = () => {
           className="max-w-[1440px] mx-auto flex flex-col lg:flex-row items-center justify-between gap-8 text-center lg:text-left"
         >
           <motion.div variants={fadeInUp} className="space-y-2 max-w-xl">
-            <p className="text-xs uppercase tracking-[0.25em] text-[#c5c7c1]">Direct Guidance</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-[#c5c7c1]">{aboutTheme.bottomBannerSubtitle}</p>
             <h3 className="font-serif-luxury text-2xl md:text-3xl font-normal">
-              Begin Your Custom Skincare Ritual
+              {aboutTheme.bottomBannerTitle}
             </h3>
             <p className="text-xs md:text-sm text-[#c5c7c1]/80 font-light">
-              Connect directly with our Seoul-trained specialists to tailor formulas formulated for your climate and barrier profile.
+              {aboutTheme.bottomBannerDescription}
             </p>
           </motion.div>
           <motion.div variants={fadeInUp} custom={1} className="flex flex-wrap items-center justify-center gap-4">
             <button
-              onClick={() => navigate('/contact-us')}
+              onClick={() => navigate(aboutTheme.bottomPrimaryBtnLink || '/contact-us')}
               className="border border-[#c5c7c1] text-white hover:bg-white hover:text-[#1e1b18] px-8 py-3.5 text-xs font-semibold uppercase tracking-widest transition-colors duration-300 rounded-none cursor-pointer"
             >
-              Consult an Expert
+              {aboutTheme.bottomPrimaryBtnText}
             </button>
             <button
-              onClick={() => navigate('/shop')}
+              onClick={() => navigate(aboutTheme.bottomSecondaryBtnLink || '/shop')}
               className="bg-[#5b6056] text-white hover:bg-[#44483f] px-8 py-3.5 text-xs font-semibold uppercase tracking-widest transition-colors duration-300 rounded-none cursor-pointer"
             >
-              Explore Full Collection
+              {aboutTheme.bottomSecondaryBtnText}
             </button>
           </motion.div>
         </motion.div>
       </section>
+      )}
     </motion.div>
   );
 };

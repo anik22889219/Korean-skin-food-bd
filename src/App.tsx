@@ -14,6 +14,8 @@ import { Profile } from './components/Profile';
 import { WholesaleProfilePage } from './components/WholesaleProfilePage';
 import { WholesaleDashboard } from './components/WholesaleDashboard';
 import { WholesaleCheckoutPage } from './components/WholesaleCheckoutPage';
+import { CheckoutPage } from './components/CheckoutPage';
+import { ThankYouPage } from './components/ThankYouPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminRoute } from './components/AdminRoute';
 import { AdminLayout } from './components/AdminLayout';
@@ -195,6 +197,9 @@ export default function App() {
                   <Route path="guides" element={<SkincareGuidesIndex />} />
                   <Route path="guide/:slug" element={<SkincareGuideDetail />} />
                   <Route path="login" element={<Login />} />
+                  <Route path="checkout" element={<CheckoutPage />} />
+                  <Route path="thank-you" element={<ThankYouPage />} />
+                  <Route path="thank-you/:orderId" element={<ThankYouPage />} />
                   <Route path="wholesale/checkout" element={<WholesaleCheckoutPage />} />
                   <Route path="wholesale/cart" element={<WholesaleCheckoutPage />} />
                   <Route path="404" element={<NotFoundPage />} />

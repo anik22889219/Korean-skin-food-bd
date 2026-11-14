@@ -4,8 +4,8 @@ import {
   Wand2, Mail, Phone, MapPin, MessageSquare, 
   ShieldCheck, Truck, HeartHandshake
 } from 'lucide-react';
-import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
-import { GlobalThemeSettings } from '../types/theme';
+import { themeService, DEFAULT_GLOBAL_THEME, DEFAULT_FOOTER_COLUMNS } from '../services/themeService';
+import { GlobalThemeSettings, FooterLinkItem } from '../types/theme';
 
 export const Footer: React.FC = () => {
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
@@ -16,6 +16,46 @@ export const Footer: React.FC = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  const footerColumns = globalTheme.footerColumns || DEFAULT_FOOTER_COLUMNS;
+  const renderFooterLinks = (links: FooterLinkItem[]) =>
+    links
+      .filter((item) => item.enabled !== false && item.label.trim() !== '')
+      .map((item) => {
+        const isExternal = item.isExternal || item.to.startsWith('http://') || item.to.startsWith('https://');
+        if (isExternal) {
+          return (
+            <li key={item.id}>
+              <a
+                href={item.to}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5 ${
+                  item.highlight ? 'text-amber-600 font-bold' : ''
+                }`}
+              >
+                <span className={item.highlight ? 'text-amber-500' : 'text-[#E91E8C]'}>
+                  {item.highlight ? '★' : '›'}
+                </span>
+                <span>{item.label}</span>
+              </a>
+            </li>
+          );
+        }
+        return (
+          <li key={item.id}>
+            <Link
+              to={item.to || '/'}
+              className={`hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5 ${
+                item.highlight ? 'text-[#E91E8C] font-bold' : ''
+              }`}
+            >
+              <span className="text-[#E91E8C]">›</span>
+              <span>{item.label}</span>
+            </Link>
+          </li>
+        );
+      });
 
   return (
     <footer id="main_footer" className="bg-white border-t border-pink-100 text-gray-700 pt-12 pb-20 md:pb-12 px-4 md:px-8 lg:px-12 shadow-inner mt-auto">
@@ -54,11 +94,11 @@ export const Footer: React.FC = () => {
           </div>
         </div>
 
-        {/* Main Footer Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 text-xs">
+        {/* Main Footer Grid: Brand + Store + Partners + Legal + Contact */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-8 text-xs">
           
-          {/* Brand Info & Social Links - 4 Cols */}
-          <div className="lg:col-span-4 space-y-4">
+          {/* Brand Info & Social Links - 3 Cols */}
+          <div className="sm:col-span-2 lg:col-span-3 space-y-4">
             <Link to="/" className="flex items-center gap-2.5 group">
               {globalTheme.logoUrl ? (
                 <img src={globalTheme.logoUrl} alt={globalTheme.logoText} className="h-9 object-contain" />
@@ -78,7 +118,7 @@ export const Footer: React.FC = () => {
             </Link>
 
             <p className="text-gray-500 text-xs leading-relaxed font-medium pr-2">
-              Your trusted destination in Bangladesh for 100% authentic Korean skincare, K-Beauty formulations, and barrier-repairing cosmeceuticals straight from Seoul.
+              {globalTheme.siteTagline || 'Your trusted destination in Bangladesh for 100% authentic Korean skincare, K-Beauty formulations, and barrier-repairing cosmeceuticals straight from Seoul.'}
             </p>
 
             {/* Social Media Links Section */}
@@ -159,96 +199,33 @@ export const Footer: React.FC = () => {
             </div>
           </div>
 
-          {/* Quick Links Column - 3 Cols */}
-          <div className="lg:col-span-3 space-y-3">
+          {/* Column 1: Explore Store (2 Cols) */}
+          <div className="lg:col-span-2 space-y-3">
             <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider border-b border-pink-100 pb-2">
-              Explore Store
+              {footerColumns.store.title}
             </h4>
             <ul className="space-y-2 text-gray-600 font-semibold">
-              <li>
-                <Link to="/" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> Home Page
-                </Link>
-              </li>
-              <li>
-                <Link to="/shop" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> Shop All Skincare
-                </Link>
-              </li>
-              <li>
-                <Link to="/creator/leaderboard" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> Creator Leaderboard
-                </Link>
-              </li>
-              <li>
-                <Link to="/brands" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> Korean Brands Directory
-                </Link>
-              </li>
-              <li>
-                <Link to="/guides" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> Skincare Routine Guides
-                </Link>
-              </li>
-              <li>
-                <Link to="/about-us" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> About Our Story
-                </Link>
-              </li>
-              <li>
-                <Link to="/contact-us" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> Contact & Help Desk
-                </Link>
-              </li>
-              <li>
-                <a 
-                  href="https://share.google/lEQv5trQv88b0w8WT" 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5 text-amber-600 font-bold"
-                >
-                  <span className="text-amber-500">★</span> Google Reviews (4.9 Rating)
-                </a>
-              </li>
-              <li>
-                <Link to="/profile" className="hover:text-[#E91E8C] transition-colors flex items-center gap-1.5 py-0.5">
-                  <span className="text-[#E91E8C]">›</span> My Account & Orders
-                </Link>
-              </li>
+              {renderFooterLinks(footerColumns.store.links)}
             </ul>
           </div>
 
-          {/* Popular Categories Column - 2 Cols */}
+          {/* Column 2: Partners & Account (2 Cols) */}
           <div className="lg:col-span-2 space-y-3">
             <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider border-b border-pink-100 pb-2">
-              K-Beauty Focus
+              {footerColumns.partners.title}
             </h4>
             <ul className="space-y-2 text-gray-600 font-semibold">
-              <li>
-                <Link to="/shop?category=Cleanser" className="hover:text-[#E91E8C] transition-colors">
-                  Cleansers & Oils
-                </Link>
-              </li>
-              <li>
-                <Link to="/shop?category=Serum" className="hover:text-[#E91E8C] transition-colors">
-                  Serums & Ampoules
-                </Link>
-              </li>
-              <li>
-                <Link to="/shop?category=Sunscreen" className="hover:text-[#E91E8C] transition-colors">
-                  Korean Sunscreens
-                </Link>
-              </li>
-              <li>
-                <Link to="/shop?category=Moisturizer" className="hover:text-[#E91E8C] transition-colors">
-                  Barrier Moisturizers
-                </Link>
-              </li>
-              <li>
-                <Link to="/shop?category=Toner" className="hover:text-[#E91E8C] transition-colors">
-                  Essences & Toners
-                </Link>
-              </li>
+              {renderFooterLinks(footerColumns.partners.links)}
+            </ul>
+          </div>
+
+          {/* Column 3: Company & Legal (2 Cols) */}
+          <div className="lg:col-span-2 space-y-3">
+            <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider border-b border-pink-100 pb-2">
+              {footerColumns.legal.title}
+            </h4>
+            <ul className="space-y-2 text-gray-600 font-semibold">
+              {renderFooterLinks(footerColumns.legal.links)}
             </ul>
           </div>
 
@@ -260,11 +237,11 @@ export const Footer: React.FC = () => {
             <div className="space-y-3 text-gray-600 font-semibold">
               <div className="flex items-start gap-2.5">
                 <MapPin size={16} className="text-[#E91E8C] shrink-0 mt-0.5" />
-                <span>Banani Road 11, Dhaka, Bangladesh</span>
+                <span>{globalTheme.contactAddress || 'Banani Road 11, Dhaka, Bangladesh'}</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <Phone size={16} className="text-[#E91E8C] shrink-0" />
-                <a href={`tel:${globalTheme.contactPhone.replace(/\s+/g, '')}`} className="hover:text-[#E91E8C] font-mono font-bold transition-colors">
+                <a href={`tel:${(globalTheme.contactPhone || '+8801700000000').replace(/\s+/g, '')}`} className="hover:text-[#E91E8C] font-mono font-bold transition-colors">
                   {globalTheme.contactPhone || '+880 1700-000000'}
                 </a>
               </div>

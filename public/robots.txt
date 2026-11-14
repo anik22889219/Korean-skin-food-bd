@@ -1,4 +1,4 @@
-# robots.txt for Korean Skin Food BD (https://koreanskinfood.web.app/)
+# robots.txt for Korean Skin Food BD (https://koreanskinfood.com/)
 User-agent: *
 Allow: /
 Allow: /shop
@@ -12,10 +12,12 @@ Allow: /privacy-policy
 Allow: /terms-of-service
 Allow: /become-a-creator
 
-# Block administrative, private user, and internal POS paths
+# Block administrative, private user, checkout, and internal POS paths
 Disallow: /admin/
 Disallow: /login
 Disallow: /profile
+Disallow: /checkout
+Disallow: /thank-you
 Disallow: /wholesale/profile
 Disallow: /wholesale/checkout
 Disallow: /wholesale/cart
@@ -24,4 +26,4 @@ Disallow: /creator/reels/upload
 Disallow: /pos/
 Disallow: /api/
 
-Sitemap: https://koreanskinfood.web.app/sitemap.xml
+Sitemap: https://koreanskinfood.com/sitemap.xml

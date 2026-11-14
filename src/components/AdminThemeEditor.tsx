@@ -1,18 +1,68 @@
 import React, { useState, useEffect } from 'react';
-import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME } from '../services/themeService';
-import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, SectionKey, ReelItem, CommunityPhotoItem } from '../types/theme';
+import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, PagesThemeSettings, PageThemeKey, SectionKey, ReelItem, CommunityPhotoItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
+import { FooterLinkManager } from './themeEditor/FooterLinkManager';
+import { PagesThemeEditors } from './themeEditor/PagesThemeEditors';
 import { 
   Palette, Layout, Home, Info, ShoppingBag, Phone, Save, Globe, Type,
   RotateCcw, Eye, ArrowUp, ArrowDown, EyeOff, Check, Image as ImageIcon,
   Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
   Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
-  Upload, RefreshCw, Star, Package, Search, CheckCircle, X
+  Upload, RefreshCw, Star, Package, Search, CheckCircle, X, FileText, Award, BookOpen,
+  FileCheck, LogIn, AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
+
+type ThemeEditorTab = 'global' | 'home' | 'shop' | PageThemeKey;
+
+interface PageDirectoryItem {
+  key: ThemeEditorTab;
+  name: string;
+  route: string;
+  Icon: React.FC<{ size?: number }>;
+}
+
+const PAGE_DIRECTORY_GROUPS: Array<{ groupTitle: string; items: PageDirectoryItem[] }> = [
+  {
+    groupTitle: 'Core Storefront',
+    items: [
+      { key: 'global', name: 'Global & Footer', route: 'Sitewide', Icon: Globe },
+      { key: 'home', name: 'Home Page', route: '/', Icon: Home },
+      { key: 'shop', name: 'Shop Page', route: '/shop', Icon: ShoppingBag },
+    ],
+  },
+  {
+    groupTitle: 'Catalog & Editorial',
+    items: [
+      { key: 'productDetail', name: 'Product Detail', route: '/product/:id', Icon: Package },
+      { key: 'brandsIndex', name: 'Brands Directory', route: '/brands', Icon: Award },
+      { key: 'brandLanding', name: 'Brand Landing', route: '/brand/:slug', Icon: Layers },
+      { key: 'guidesIndex', name: 'Skincare Guides', route: '/guides', Icon: BookOpen },
+      { key: 'guideDetail', name: 'Guide Detail', route: '/guide/:slug', Icon: FileCheck },
+    ],
+  },
+  {
+    groupTitle: 'Partners & Info',
+    items: [
+      { key: 'becomeCreator', name: 'Become a Creator', route: '/become-a-creator', Icon: Sparkles },
+      { key: 'about', name: 'About Us', route: '/about-us', Icon: Info },
+      { key: 'contact', name: 'Contact Us', route: '/contact-us', Icon: Phone },
+    ],
+  },
+  {
+    groupTitle: 'Legal & Utility',
+    items: [
+      { key: 'privacy', name: 'Privacy Policy', route: '/privacy-policy', Icon: Shield },
+      { key: 'terms', name: 'Terms of Service', route: '/terms-of-service', Icon: FileText },
+      { key: 'login', name: 'Login Page', route: '/login', Icon: LogIn },
+      { key: 'notFound', name: '404 Not Found', route: '/404', Icon: AlertTriangle },
+    ],
+  },
+];
 
 const SECTION_LABELS: Record<SectionKey, { name: string; desc: string }> = {
   hero: { name: 'Hero Banner & Shipping Calculator', desc: 'Main title, background image, CTAs, and live shipping calculator card' },
@@ -64,13 +114,14 @@ const BODY_FONT_OPTIONS = [
 ];
 
 export const AdminThemeEditor: React.FC = () => {
-  // Active Subpage Tab: 'global' | 'home' | 'about' | 'shop' | 'contact'
-  const [activeTab, setActiveTab] = useState<'global' | 'home' | 'about' | 'shop' | 'contact'>('global');
+  // Active Subpage Tab across all 15 Storefront & Info modules
+  const [activeTab, setActiveTab] = useState<ThemeEditorTab>('global');
 
   // Theme State
   const [theme, setTheme] = useState<HomeThemeSettings>(DEFAULT_HOME_THEME);
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [shopTheme, setShopTheme] = useState<ShopThemeSettings>(DEFAULT_SHOP_THEME);
+  const [pagesTheme, setPagesTheme] = useState<PagesThemeSettings>(DEFAULT_PAGES_THEME);
   const [expandedSection, setExpandedSection] = useState<SectionKey | null>('hero');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -109,6 +160,9 @@ export const AdminThemeEditor: React.FC = () => {
     const unsubscribeShop = themeService.subscribeShop((data) => {
       setShopTheme(data);
     });
+    const unsubscribePages = themeService.subscribePages((data) => {
+      setPagesTheme(data);
+    });
     const unsubscribeProducts = productService.subscribe((prods) => {
       setAllProducts(prods);
     });
@@ -117,6 +171,7 @@ export const AdminThemeEditor: React.FC = () => {
       unsubscribeHome();
       unsubscribeGlobal();
       unsubscribeShop();
+      unsubscribePages();
       unsubscribeProducts();
     };
   }, []);
@@ -347,6 +402,79 @@ export const AdminThemeEditor: React.FC = () => {
     }
   };
 
+  // Pages Save handler (for the 12 additional public pages)
+  const handleSavePages = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await themeService.savePagesTheme(pagesTheme);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to save pages theme:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Single Page Reset handler
+  const handleResetCurrentPage = async () => {
+    if (activeTab === 'global' || activeTab === 'home' || activeTab === 'shop') return;
+    if (confirm(`Reset "${activeTab}" page theme settings to defaults?`)) {
+      await themeService.resetSinglePageToDefault(activeTab);
+    }
+  };
+
+  const handleSaveActiveTab = () => {
+    if (activeTab === 'global') return handleSaveGlobal();
+    if (activeTab === 'home') return handleSave();
+    if (activeTab === 'shop') return handleSaveShop();
+    return handleSavePages();
+  };
+
+  const handleResetActiveTab = () => {
+    if (activeTab === 'global') return handleResetGlobal();
+    if (activeTab === 'home') return handleReset();
+    if (activeTab === 'shop') return handleResetShop();
+    return handleResetCurrentPage();
+  };
+
+  const getActivePreviewPath = (): string => {
+    switch (activeTab) {
+      case 'global':
+      case 'home':
+        return '/';
+      case 'shop':
+        return '/shop';
+      case 'about':
+        return '/about-us';
+      case 'contact':
+        return '/contact-us';
+      case 'privacy':
+        return '/privacy-policy';
+      case 'terms':
+        return '/terms-of-service';
+      case 'becomeCreator':
+        return '/become-a-creator';
+      case 'brandsIndex':
+        return '/brands';
+      case 'brandLanding':
+        return '/brand/cosrx';
+      case 'guidesIndex':
+        return '/guides';
+      case 'guideDetail':
+        return '/guide/korean-skincare-routine-for-beginners-in-bangladesh';
+      case 'productDetail':
+        return allProducts[0]?.id ? `/product/${allProducts[0].id}` : '/shop';
+      case 'login':
+        return '/login';
+      case 'notFound':
+        return '/404';
+      default:
+        return '/';
+    }
+  };
+
   // Section Order handlers
   const moveSection = (index: number, direction: 'up' | 'down') => {
     const newOrder = [...theme.sectionOrder];
@@ -388,6 +516,19 @@ export const AdminThemeEditor: React.FC = () => {
     if (activeMediaTarget.startsWith('global.')) {
       const field = activeMediaTarget.replace('global.', '') as keyof GlobalThemeSettings;
       setGlobalTheme((prev) => ({ ...prev, [field]: url }));
+      setActiveMediaTarget(null);
+      return;
+    }
+
+    if (activeMediaTarget.startsWith('pages.')) {
+      const parts = activeMediaTarget.replace('pages.', '').split('.');
+      const updatedPages = JSON.parse(JSON.stringify(pagesTheme));
+      let curr: any = updatedPages;
+      for (let i = 0; i < parts.length - 1; i++) {
+        curr = curr[parts[i]];
+      }
+      curr[parts[parts.length - 1]] = url;
+      setPagesTheme(updatedPages);
       setActiveMediaTarget(null);
       return;
     }
@@ -437,20 +578,30 @@ export const AdminThemeEditor: React.FC = () => {
           </button>
 
           <button
-            onClick={activeTab === 'global' ? handleResetGlobal : handleReset}
-            title="Reset theme settings to default"
+            onClick={handleResetActiveTab}
+            title="Reset current tab theme settings to default"
             className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition border border-slate-700 cursor-pointer shadow-sm"
           >
             <RotateCcw size={15} />
           </button>
 
           <button
-            onClick={activeTab === 'global' ? handleSaveGlobal : handleSave}
+            onClick={handleSaveActiveTab}
             disabled={isSaving}
             className="flex-1 md:flex-none px-6 py-2.5 bg-[#E91E8C] hover:bg-pink-600 text-white rounded-xl text-xs font-extrabold transition flex items-center justify-center gap-2 shadow-lg shadow-pink-900/30 cursor-pointer disabled:opacity-50"
           >
             <Save size={16} />
-            <span>{isSaving ? 'Saving Changes...' : activeTab === 'global' ? 'Save Global Settings' : 'Save Theme Changes'}</span>
+            <span>
+              {isSaving
+                ? 'Saving Changes...'
+                : activeTab === 'global'
+                ? 'Save Global & Footer'
+                : activeTab === 'home'
+                ? 'Save Home Theme'
+                : activeTab === 'shop'
+                ? 'Save Shop Theme'
+                : 'Save Page Theme'}
+            </span>
           </button>
         </div>
       </div>
@@ -463,76 +614,71 @@ export const AdminThemeEditor: React.FC = () => {
           className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-sm"
         >
           <Check size={18} className="text-emerald-600" />
-          <span>{activeTab === 'global' ? 'Global theme settings saved successfully! Site favicon, logo & colors updated.' : 'Theme changes saved successfully! The live homepage has automatically updated.'}</span>
+          <span>
+            {activeTab === 'global'
+              ? 'Global settings & dynamic Footer links saved successfully!'
+              : activeTab === 'home'
+              ? 'Home page theme changes saved successfully! Live homepage updated.'
+              : activeTab === 'shop'
+              ? 'Shop page settings saved successfully!'
+              : 'Page content & theme settings saved! Live storefront updated.'}
+          </span>
         </motion.div>
       )}
 
-      {/* Subpage Navigation Tabs */}
-      <div className="bg-white p-2 rounded-2xl border border-pink-100 shadow-sm flex flex-wrap gap-2">
-        <button
-          onClick={() => setActiveTab('global')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-            activeTab === 'global'
-              ? 'bg-[#E91E8C] text-white shadow-md'
-              : 'text-gray-600 hover:text-[#E91E8C] hover:bg-pink-50/50'
-          }`}
-        >
-          <Globe size={15} />
-          <span>Global Setting</span>
-          <span className="text-[9px] bg-white/20 px-2 py-0.5 rounded-full uppercase">Favicon & Logo</span>
-        </button>
+      {/* All-Pages Directory Switcher (15 Modules) */}
+      <div className="bg-white p-4 rounded-[24px] border border-pink-100 shadow-sm space-y-3">
+        <div className="flex items-center justify-between gap-2 px-1">
+          <div className="flex items-center gap-2">
+            <Layout size={15} className="text-[#E91E8C]" />
+            <span className="text-xs font-black text-slate-900">
+              All Storefront & Info Pages Directory (15 Editable Modules)
+            </span>
+          </div>
+          <span className="text-[10px] font-mono font-bold text-slate-400">
+            Active: {getActivePreviewPath()}
+          </span>
+        </div>
 
-        <button
-          onClick={() => setActiveTab('home')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-            activeTab === 'home'
-              ? 'bg-[#E91E8C] text-white shadow-md'
-              : 'text-gray-600 hover:text-[#E91E8C] hover:bg-pink-50/50'
-          }`}
-        >
-          <Home size={15} />
-          <span>Home Page</span>
-          <span className="text-[9px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Sections</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('about')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-            activeTab === 'about'
-              ? 'bg-[#E91E8C] text-white shadow-md'
-              : 'text-gray-600 hover:text-[#E91E8C] hover:bg-pink-50/50'
-          }`}
-        >
-          <Info size={15} />
-          <span>About Us Page</span>
-          <span className="text-[9px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Structure</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('shop')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-            activeTab === 'shop'
-              ? 'bg-[#E91E8C] text-white shadow-md'
-              : 'text-gray-600 hover:text-[#E91E8C] hover:bg-pink-50/50'
-          }`}
-        >
-          <ShoppingBag size={15} />
-          <span>Shop Page</span>
-          <span className="text-[9px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Structure</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('contact')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
-            activeTab === 'contact'
-              ? 'bg-[#E91E8C] text-white shadow-md'
-              : 'text-gray-600 hover:text-[#E91E8C] hover:bg-pink-50/50'
-          }`}
-        >
-          <Phone size={15} />
-          <span>Contact Us Page</span>
-          <span className="text-[9px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Structure</span>
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {PAGE_DIRECTORY_GROUPS.map((group) => (
+            <div key={group.groupTitle} className="bg-pink-50/20 border border-pink-100/80 rounded-2xl p-2.5 space-y-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-2 block">
+                {group.groupTitle}
+              </span>
+              <div className="space-y-1">
+                {group.items.map((item) => {
+                  const IconComp = item.Icon;
+                  const isActive = activeTab === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setActiveTab(item.key)}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                        isActive
+                          ? 'bg-[#E91E8C] text-white shadow-sm'
+                          : 'text-slate-700 hover:text-[#E91E8C] hover:bg-white'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 min-w-0 truncate">
+                        <IconComp size={14} />
+                        <span className="truncate">{item.name}</span>
+                      </span>
+                      <span
+                        className={`text-[9px] font-mono shrink-0 ${
+                          isActive ? 'text-pink-100' : 'text-slate-400'
+                        }`}
+                      >
+                        {item.route}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* SUBPAGE: GLOBAL SETTINGS */}
@@ -1074,17 +1220,35 @@ export const AdminThemeEditor: React.FC = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Footer Copyright / Slogan Text</label>
-                  <input
-                    type="text"
-                    value={globalTheme.footerText}
-                    onChange={(e) => setGlobalTheme({ ...globalTheme, footerText: e.target.value })}
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Footer Store Address</label>
+                    <input
+                      type="text"
+                      value={globalTheme.contactAddress || ''}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, contactAddress: e.target.value })}
+                      placeholder="Banani Road 11, Dhaka, Bangladesh"
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Footer Copyright / Slogan Text</label>
+                    <input
+                      type="text"
+                      value={globalTheme.footerText}
+                      onChange={(e) => setGlobalTheme({ ...globalTheme, footerText: e.target.value })}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-[#E91E8C] outline-none"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
+
+            {/* 7. Dynamic Footer Links & Column Manager */}
+            <FooterLinkManager
+              footerColumns={globalTheme.footerColumns}
+              onChange={(cols) => setGlobalTheme((prev) => ({ ...prev, footerColumns: cols }))}
+            />
 
           </div>
         </div>
@@ -3045,24 +3209,7 @@ export const AdminThemeEditor: React.FC = () => {
         </div>
       )}
 
-      {/* SUBPAGES FOR OTHER 3 PAGES (STRUCTURE / PLACEHOLDERS) */}
-      {activeTab === 'about' && (
-        <div className="bg-white p-8 rounded-[28px] border border-pink-100 text-center space-y-4 shadow-sm">
-          <div className="w-16 h-16 bg-pink-50 rounded-2xl flex items-center justify-center mx-auto text-[#E91E8C]">
-            <Info size={32} />
-          </div>
-          <h2 className="text-xl font-extrabold text-gray-900">About Us Page Theme Editor</h2>
-          <p className="text-xs text-gray-500 max-w-md mx-auto">
-            This structure is ready for the About Us page layout. Custom section editing system for heritage history, mission statement, and team specs will be integrated in the next module.
-          </p>
-          <div className="pt-2">
-            <span className="px-4 py-1.5 bg-pink-50 text-[#E91E8C] text-xs font-bold rounded-full border border-pink-200 inline-block">
-              Structure Reserved • Home Page Customizer Ready
-            </span>
-          </div>
-        </div>
-      )}
-
+      {/* SUBPAGE: SHOP CATEGORY PAGE */}
       {activeTab === 'shop' && (
         <div className="bg-white p-6 md:p-8 rounded-[28px] border border-pink-100 space-y-6 shadow-sm">
           <div className="flex items-center justify-between border-b border-pink-100 pb-4">
@@ -3189,21 +3336,17 @@ export const AdminThemeEditor: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'contact' && (
-        <div className="bg-white p-8 rounded-[28px] border border-pink-100 text-center space-y-4 shadow-sm">
-          <div className="w-16 h-16 bg-pink-50 rounded-2xl flex items-center justify-center mx-auto text-[#E91E8C]">
-            <Phone size={32} />
-          </div>
-          <h2 className="text-xl font-extrabold text-gray-900">Contact Us Page Theme Editor</h2>
-          <p className="text-xs text-gray-500 max-w-md mx-auto">
-            This structure is ready for the Contact Us page layout. Custom section editing system for office address, customer support hotline, and map widget will be integrated in the next module.
-          </p>
-          <div className="pt-2">
-            <span className="px-4 py-1.5 bg-pink-50 text-[#E91E8C] text-xs font-bold rounded-full border border-pink-200 inline-block">
-              Structure Reserved • Home Page Customizer Ready
-            </span>
-          </div>
-        </div>
+      {/* SUBPAGES: DYNAMIC EDITORS FOR ALL 12 PUBLIC STOREFRONT, INFO, PARTNER & LEGAL PAGES */}
+      {activeTab !== 'global' && activeTab !== 'home' && activeTab !== 'shop' && (
+        <PagesThemeEditors
+          activePage={activeTab}
+          pagesTheme={pagesTheme}
+          onChange={setPagesTheme}
+          openMediaPicker={openMediaPicker}
+          onSave={handleSavePages}
+          onReset={handleResetCurrentPage}
+          isSaving={isSaving}
+        />
       )}
 
       {/* Cloudinary Media Library Modal */}
@@ -3223,11 +3366,11 @@ export const AdminThemeEditor: React.FC = () => {
           <div className="bg-slate-900 text-white p-4 rounded-t-3xl flex justify-between items-center border-b border-slate-800">
             <div className="flex items-center gap-2">
               <Eye className="text-[#E91E8C]" size={20} />
-              <span className="font-extrabold text-sm">Live Theme Preview</span>
+              <span className="font-extrabold text-sm">Live Theme Preview ({getActivePreviewPath()})</span>
             </div>
             <div className="flex items-center gap-3">
               <a
-                href="/"
+                href={getActivePreviewPath()}
                 target="_blank"
                 rel="noreferrer"
                 className="text-xs text-pink-300 hover:text-white flex items-center gap-1 font-bold"
@@ -3245,9 +3388,10 @@ export const AdminThemeEditor: React.FC = () => {
           </div>
           <div className="flex-1 bg-[#fff8f5] overflow-y-auto rounded-b-3xl">
             <iframe
-              src="/"
+              key={getActivePreviewPath()}
+              src={getActivePreviewPath()}
               className="w-full h-full border-none"
-              title="Home Page Live Storefront Preview"
+              title="Live Storefront Preview"
             />
           </div>
         </div>

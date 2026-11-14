@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { articleService } from '../services/articleService';
 import { useProducts } from '../hooks/queries/products';
@@ -6,6 +6,8 @@ import { isSameBrand } from '../data/brands';
 import { ProductCard } from './ProductCard';
 import { SeoHead } from './SeoHead';
 import { buildGuideSeo } from '../services/seoService';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { GuideDetailPageThemeSettings } from '../types/theme';
 import { Clock, Calendar, User, ChevronRight, HelpCircle, ChevronDown, BookOpen, AlertCircle, Sparkles, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -16,6 +18,13 @@ export const SkincareGuideDetail: React.FC = () => {
 
   const [language, setLanguage] = useState<'en' | 'bn'>('en');
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [pageTheme, setPageTheme] = useState<GuideDetailPageThemeSettings>(DEFAULT_PAGES_THEME.guideDetail);
+
+  useEffect(() => {
+    return themeService.subscribePages((p) => {
+      if (p?.guideDetail) setPageTheme(p.guideDetail);
+    });
+  }, []);
 
   // SEO metadata
   const seoMeta = useMemo(() => {
@@ -95,7 +104,7 @@ export const SkincareGuideDetail: React.FC = () => {
           </div>
 
           {/* Bilingual Switcher */}
-          {guide.contentBN && (
+          {pageTheme.showLanguageSwitcher && guide.contentBN && (
             <div className="flex items-center gap-1 bg-pink-50/60 p-1 rounded-xl border border-pink-100 text-xs font-bold">
               <button
                 type="button"
@@ -181,7 +190,7 @@ export const SkincareGuideDetail: React.FC = () => {
         {guide.keyIngredients && guide.keyIngredients.length > 0 && (
           <div className="p-5 rounded-2xl bg-pink-50/20 border border-pink-100 space-y-2">
             <span className="text-xs font-bold text-gray-900 uppercase tracking-wider block">
-              Featured Dermatological Actives Discussed
+              {pageTheme.featuredActivesHeading}
             </span>
             <div className="flex flex-wrap gap-2">
               {guide.keyIngredients.map((ing, i) => (
@@ -195,15 +204,15 @@ export const SkincareGuideDetail: React.FC = () => {
       </section>
 
       {/* Frequently Asked Questions */}
-      {guide.faqs && guide.faqs.length > 0 && (
+      {pageTheme.showFaqs && guide.faqs && guide.faqs.length > 0 && (
         <section className="bg-white border border-pink-100 rounded-[32px] p-6 sm:p-10 space-y-6 shadow-sm">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
               <HelpCircle size={20} className="text-[#E91E8C]" />
-              <span>{isBengali ? 'সাধারণ জিজ্ঞাসা (FAQ)' : 'Frequently Asked Questions'}</span>
+              <span>{isBengali ? pageTheme.faqHeadingBN : pageTheme.faqHeadingEN}</span>
             </h2>
             <p className="text-xs text-gray-500">
-              Clear answers to common questions about this skincare topic in Bangladesh.
+              {pageTheme.faqSubtext}
             </p>
           </div>
 
@@ -245,20 +254,20 @@ export const SkincareGuideDetail: React.FC = () => {
       )}
 
       {/* Recommended Products for this Guide */}
-      {relatedProducts.length > 0 && (
+      {pageTheme.showRelatedProducts && relatedProducts.length > 0 && (
         <section className="space-y-6">
           <div className="flex items-center justify-between border-b border-pink-100/80 pb-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <Sparkles size={20} className="text-[#E91E8C]" />
-                <span>Recommended Products from Our Catalog</span>
+                <span>{pageTheme.relatedHeading}</span>
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Authentic, Seoul-imported cosmeceuticals matching the principles outlined in this guide.
+                {pageTheme.relatedSubtext}
               </p>
             </div>
             <Link to="/shop" className="text-xs font-bold text-[#E91E8C] hover:underline">
-              View All Products &rarr;
+              {pageTheme.relatedCtaLabel}
             </Link>
           </div>
 

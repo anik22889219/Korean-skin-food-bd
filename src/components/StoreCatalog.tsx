@@ -30,6 +30,7 @@ import { analytics } from '../services/analyticsService';
 import { getRetailPrice } from '../utils/pricing';
 import { SeoHead } from './SeoHead';
 import { buildHomepageSeo } from '../services/seoService';
+import { getYouTubeEmbedUrl as buildYouTubeEmbedUrl, isYouTubeUrl } from '../utils/youtubeUrl';
 
 const CATEGORIES = [
   'All', 
@@ -1627,23 +1628,10 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
       return cleanUrl;
     };
 
-    const isYouTube = Boolean(
-      reel.videoUrl && (
-        reel.videoUrl.includes('youtube.com') || reel.videoUrl.includes('youtu.be')
-      )
-    );
+    const isYouTube = isYouTubeUrl(reel.videoUrl);
 
-    const getYouTubeEmbedUrl = (url: string) => {
-      let videoId = '';
-      if (url.includes('youtu.be/')) {
-        videoId = url.split('youtu.be/')[1]?.split('?')[0] || '';
-      } else if (url.includes('youtube.com/shorts/')) {
-        videoId = url.split('youtube.com/shorts/')[1]?.split('?')[0] || '';
-      } else if (url.includes('watch?v=')) {
-        videoId = url.split('watch?v=')[1]?.split('&')[0] || '';
-      }
-      return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0`;
-    };
+    const getYouTubeEmbedUrl = (url: string) =>
+      buildYouTubeEmbedUrl(url, { autoplay: true, mute: true, loop: true, controls: false });
 
     const toggleMute = (e: React.MouseEvent) => {
       e.stopPropagation();

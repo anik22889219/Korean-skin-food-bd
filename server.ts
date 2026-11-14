@@ -3,6 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
 import crypto from "crypto";
+import https from "https";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps, getApp } from "firebase/app";
@@ -14,6 +15,62 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
+app.set("trust proxy", true);
+
+const rawSiteUrl = (process.env.SITE_URL || process.env.APP_URL || "https://koreanskinfood.com").trim().replace(/\/+$/, "");
+const DEFAULT_SITE_URL = /^https?:\/\//i.test(rawSiteUrl) ? rawSiteUrl : `https://${rawSiteUrl}`;
+const LEGACY_SITE_HOSTS = new Set(["koreanskinfood.web.app", "koreanskinfood.firebaseapp.com"]);
+
+function isLocalHostHeader(host: string): boolean {
+  const cleanHost = host.split(":")[0].toLowerCase();
+  return cleanHost === "localhost" || cleanHost === "127.0.0.1" || cleanHost === "0.0.0.0" || cleanHost === "::1" || cleanHost === "[::1]";
+}
+
+function resolveRequestOrigin(req?: express.Request): string | null {
+  if (!req) return null;
+  const rawForwardedHost = req.headers["x-forwarded-host"];
+  const hostHeader = (Array.isArray(rawForwardedHost) ? rawForwardedHost[0] : rawForwardedHost) || req.headers.host || "";
+  const host = String(hostHeader).split(",")[0].trim();
+  if (!host) return null;
+
+  const rawProto = req.headers["x-forwarded-proto"];
+  const protoHeader = (Array.isArray(rawProto) ? rawProto[0] : rawProto) || req.protocol || "";
+  let proto = String(protoHeader).split(",")[0].trim().toLowerCase();
+  if (!proto) {
+    proto = isLocalHostHeader(host) ? "http" : "https";
+  } else if (!isLocalHostHeader(host) && proto === "http" && !req.headers["x-forwarded-proto"]) {
+    proto = "https";
+  }
+  return `${proto}://${host}`.replace(/\/+$/, "");
+}
+
+function resolveSiteBaseUrl(req?: express.Request): string {
+  const envConfigured = (process.env.SITE_URL || process.env.APP_URL || "").trim().replace(/\/+$/, "");
+  const reqOrigin = resolveRequestOrigin(req);
+  if (reqOrigin) {
+    try {
+      const hostname = new URL(reqOrigin).hostname;
+      if (!isLocalHostHeader(hostname)) {
+        return reqOrigin;
+      }
+    } catch {}
+  }
+  return envConfigured || DEFAULT_SITE_URL;
+}
+
+function normalizeConfiguredDomainUrl(configuredUrl: any, req?: express.Request): string {
+  const trimmed = typeof configuredUrl === "string" ? configuredUrl.trim() : "";
+  if (!trimmed) return resolveSiteBaseUrl(req);
+  try {
+    const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    if (LEGACY_SITE_HOSTS.has(parsed.hostname.toLowerCase())) {
+      return resolveSiteBaseUrl(req);
+    }
+    return parsed.origin.replace(/\/+$/, "");
+  } catch {
+    return resolveSiteBaseUrl(req);
+  }
+}
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -748,16 +805,22 @@ async function verifyCreatorAuth(req: express.Request, res: express.Response, ne
     return res.status(401).json({ success: false, error: "Invalid or expired Firebase ID token." });
   }
 
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized on server." });
-  }
+  (req as any).idToken = idToken;
 
   try {
-    const userDocRef = doc(db, "users", verifiedUser.uid);
-    const userSnap = await getDoc(userDocRef);
-    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr'];
-    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com';
-    const userRole = userSnap.exists() ? userSnap.data()?.role : (isSuperAdminEmail ? 'super_admin' : 'customer');
+    const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr', 'customer_support'];
+    const isSuperAdminEmail = verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd';
+    let userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
+    if (!userDoc && db) {
+      try {
+        const userSnap = await getDoc(doc(db, "users", verifiedUser.uid));
+        if (userSnap.exists()) userDoc = userSnap.data();
+      } catch {
+        // ignore unauthenticated client SDK denial
+      }
+    }
+
+    const userRole = userDoc?.role || (isSuperAdminEmail ? 'super_admin' : 'customer');
 
     (req as any).user = {
       uid: verifiedUser.uid,
@@ -770,9 +833,15 @@ async function verifyCreatorAuth(req: express.Request, res: express.Response, ne
     const isStaff = isSuperAdminEmail || staffRoles.includes(userRole);
 
     if (requestedUserId && !isStaff && requestedUserId !== verifiedUser.uid) {
-      const creatorRef = doc(db, "creators", requestedUserId);
-      const creatorSnap = await getDoc(creatorRef);
-      const creatorData = creatorSnap.exists() ? creatorSnap.data() : null;
+      let creatorData = await getFirestoreDocWithToken("creators", requestedUserId, idToken);
+      if (!creatorData && db) {
+        try {
+          const creatorSnap = await getDoc(doc(db, "creators", requestedUserId));
+          creatorData = creatorSnap.exists() ? creatorSnap.data() : null;
+        } catch {
+          // ignore
+        }
+      }
       if (!creatorData || creatorData.userId !== verifiedUser.uid) {
         return res.status(403).json({
           success: false,
@@ -796,30 +865,29 @@ app.get("/api/creator/profile", verifyCreatorAuth, async (req, res) => {
   }
 
   try {
-    if (!db) {
-      return res.status(503).json({ success: false, error: "Database not initialized on server" });
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    let profile = await getFirestoreDocWithToken("creators", userId, idToken);
+    if (!profile && db) {
+      try {
+        const docSnap = await getDoc(doc(db, "creators", userId));
+        if (docSnap.exists()) profile = docSnap.data();
+      } catch {
+        // ignore
+      }
     }
 
-    const docRef = doc(db, "creators", userId);
-    const docSnap = await getDoc(docRef);
-
-    if (docSnap.exists()) {
-      return res.json({ success: true, profile: docSnap.data() });
+    if (profile) {
+      return res.json({ success: true, profile });
     }
 
     // Try querying by userId field if docId differs
-    const creatorsRef = collection(db, "creators");
-    const querySnap = await getDocs(creatorsRef);
-    let foundProfile = null;
-    querySnap.forEach((d) => {
-      const data = d.data();
-      if (data.userId === userId || data.creatorId === userId) {
-        foundProfile = data;
-      }
-    });
-
-    if (foundProfile) {
-      return res.json({ success: true, profile: foundProfile });
+    const matchedByUserId = await queryFirestoreCollectionWithToken(
+      "creators",
+      [{ field: "userId", op: "EQUAL", value: userId }],
+      idToken
+    );
+    if (matchedByUserId.length > 0) {
+      return res.json({ success: true, profile: matchedByUserId[0] });
     }
 
     return res.status(404).json({ success: false, error: "Creator profile not found" });
@@ -837,15 +905,18 @@ app.get("/api/creator/stats", verifyCreatorAuth, async (req, res) => {
   }
 
   try {
-    if (!db) {
-      return res.status(503).json({ success: false, error: "Database not initialized on server" });
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    let data = await getFirestoreDocWithToken("creators", userId, idToken);
+    if (!data && db) {
+      try {
+        const docSnap = await getDoc(doc(db, "creators", userId));
+        if (docSnap.exists()) data = docSnap.data();
+      } catch {
+        // ignore
+      }
     }
 
-    const docRef = doc(db, "creators", userId);
-    const docSnap = await getDoc(docRef);
-
-    if (docSnap.exists()) {
-      const data = docSnap.data();
+    if (data) {
       return res.json({
         success: true,
         stats: {
@@ -877,18 +948,21 @@ app.get("/api/creator/reels", verifyCreatorAuth, async (req, res) => {
   }
 
   try {
-    if (!db) {
-      return res.status(503).json({ success: false, error: "Database not initialized on server" });
-    }
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    let reels = await queryFirestoreCollectionWithToken(
+      "creator_reels",
+      [{ field: "creatorUserId", op: "EQUAL", value: userId }],
+      idToken
+    );
 
-    const querySnap = await getDocs(collection(db, "creator_reels"));
-    const reels: any[] = [];
-    querySnap.forEach((d) => {
-      const data = d.data();
-      if (data.creatorUserId === userId || data.creatorId === userId) {
-        reels.push(data);
-      }
-    });
+    if (reels.length === 0 && idToken) {
+      const byCreatorId = await queryFirestoreCollectionWithToken(
+        "creator_reels",
+        [{ field: "creatorId", op: "EQUAL", value: userId }],
+        idToken
+      );
+      if (byCreatorId.length > 0) reels = byCreatorId;
+    }
 
     reels.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
@@ -930,19 +1004,23 @@ app.post("/api/creator/reels/upload", verifyCreatorAuth, async (req, res) => {
   const extractedPostId = normResult.postId || extractFacebookPostId(rawFbUrl) || '';
 
   try {
-    if (!db) {
-      return res.status(503).json({ success: false, error: "Database not initialized on server" });
-    }
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
 
     // Check creator status to ensure creator is approved
-    const creatorRef = doc(db, "creators", targetUserId);
-    const creatorSnap = await getDoc(creatorRef);
+    let creatorData = await getFirestoreDocWithToken("creators", targetUserId, idToken);
+    if (!creatorData && db) {
+      try {
+        const creatorSnap = await getDoc(doc(db, "creators", targetUserId));
+        if (creatorSnap.exists()) creatorData = creatorSnap.data();
+      } catch {
+        // ignore
+      }
+    }
 
-    if (!creatorSnap.exists()) {
+    if (!creatorData) {
       return res.status(403).json({ success: false, error: "Creator profile not found. Please apply first." });
     }
 
-    const creatorData = creatorSnap.data();
     if (creatorData.status !== 'approved') {
       return res.status(403).json({
         success: false,
@@ -950,30 +1028,56 @@ app.post("/api/creator/reels/upload", verifyCreatorAuth, async (req, res) => {
       });
     }
 
-    // Check duplicate Facebook submissions across creator reels collection
-    const allReelsSnap = await getDocs(collection(db, "creator_reels"));
-    for (const d of allReelsSnap.docs) {
-      const existing = d.data();
-      if (!existing) continue;
-
-      const isDuplicate = areFacebookUrlsEqual(
-        existing.normalizedFacebookUrl || existing.facebookPostUrl,
-        normalizedUrl
+    // Check duplicate Facebook submissions across readable creator_reels
+    try {
+      const existingByUrl = await queryFirestoreCollectionWithToken(
+        "creator_reels",
+        [{ field: "normalizedFacebookUrl", op: "EQUAL", value: normalizedUrl }],
+        idToken
       );
-
-      if (isDuplicate) {
+      if (existingByUrl.length > 0) {
         return res.status(409).json({
           success: false,
           error: "This Facebook Reel or Post URL has already been submitted to the creator program."
         });
       }
 
-      if (extractedPostId && existing.facebookPostId && existing.facebookPostId === extractedPostId) {
-        return res.status(409).json({
-          success: false,
-          error: "This Facebook Reel or Post ID has already been submitted to the creator program."
-        });
+      if (extractedPostId) {
+        const existingById = await queryFirestoreCollectionWithToken(
+          "creator_reels",
+          [{ field: "facebookPostId", op: "EQUAL", value: extractedPostId }],
+          idToken
+        );
+        if (existingById.length > 0) {
+          return res.status(409).json({
+            success: false,
+            error: "This Facebook Reel or Post ID has already been submitted to the creator program."
+          });
+        }
       }
+
+      const ownReels = await queryFirestoreCollectionWithToken(
+        "creator_reels",
+        [{ field: "creatorUserId", op: "EQUAL", value: targetUserId }],
+        idToken
+      );
+      for (const existing of ownReels) {
+        if (!existing) continue;
+        if (areFacebookUrlsEqual(existing.normalizedFacebookUrl || existing.facebookPostUrl, normalizedUrl)) {
+          return res.status(409).json({
+            success: false,
+            error: "This Facebook Reel or Post URL has already been submitted to the creator program."
+          });
+        }
+        if (extractedPostId && existing.facebookPostId && existing.facebookPostId === extractedPostId) {
+          return res.status(409).json({
+            success: false,
+            error: "This Facebook Reel or Post ID has already been submitted to the creator program."
+          });
+        }
+      }
+    } catch {
+      // Non-staff creators cannot list non-approved reels of others; proceed if own check passed
     }
 
     const creatorReelId = `reel-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -1011,7 +1115,13 @@ app.post("/api/creator/reels/upload", verifyCreatorAuth, async (req, res) => {
       updatedAt: now,
     };
 
-    await setDoc(doc(db, "creator_reels", creatorReelId), reelPayload);
+    if (idToken) {
+      await setFirestoreDocWithToken("creator_reels", creatorReelId, reelPayload, idToken, false);
+    } else if (db) {
+      await setDoc(doc(db, "creator_reels", creatorReelId), reelPayload);
+    } else {
+      return res.status(503).json({ success: false, error: "Database not initialized on server" });
+    }
 
     return res.json({
       success: true,
@@ -1040,12 +1150,17 @@ const DEFAULT_CREATOR_POINT_SETTINGS = {
   ],
 };
 
-async function getServerPointSettings() {
-  if (!db) return DEFAULT_CREATOR_POINT_SETTINGS;
+async function getServerPointSettings(idToken?: string) {
   try {
-    const snap = await getDoc(doc(db, "settings", "creator_points"));
-    if (snap.exists()) {
-      const data = snap.data();
+    let data: any = null;
+    if (idToken) {
+      data = await getFirestoreDocWithToken("settings", "creator_points", idToken);
+    }
+    if (!data && db) {
+      const snap = await getDoc(doc(db, "settings", "creator_points"));
+      if (snap.exists()) data = snap.data();
+    }
+    if (data) {
       return {
         viewsPerPoint: Number(data.viewsPerPoint) || 100,
         likesPerPoint: Number(data.likesPerPoint) || 10,
@@ -1147,25 +1262,29 @@ async function recordMetricAuditLogServer(audit: {
   reason?: string;
   status?: 'success' | 'failed';
   timestamp?: string;
-}) {
-  if (!db) return;
+}, idToken?: string) {
   const id = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const now = audit.timestamp || new Date().toISOString();
+  const payload = {
+    id,
+    auditLogId: id,
+    creatorReelId: String(audit.creatorReelId),
+    adminId: audit.adminId || 'admin',
+    source: audit.source || 'admin_verified',
+    status: audit.status || 'success',
+    previousPerformance: audit.previousValues,
+    newPerformance: audit.newValues,
+    previousValues: audit.previousValues,
+    newValues: audit.newValues,
+    reason: audit.reason || 'Metric adjustment',
+    timestamp: now,
+  };
   try {
-    await setDoc(doc(db, "reel_metric_audits", id), {
-      id,
-      auditLogId: id,
-      creatorReelId: String(audit.creatorReelId),
-      adminId: audit.adminId || 'admin',
-      source: audit.source || 'admin_verified',
-      status: audit.status || 'success',
-      previousPerformance: audit.previousValues,
-      newPerformance: audit.newValues,
-      previousValues: audit.previousValues,
-      newValues: audit.newValues,
-      reason: audit.reason || 'Metric adjustment',
-      timestamp: now,
-    });
+    if (idToken) {
+      await setFirestoreDocWithToken("reel_metric_audits", id, payload, idToken, false);
+    } else if (db) {
+      await setDoc(doc(db, "reel_metric_audits", id), payload);
+    }
   } catch (e) {
     console.warn("Failed to record metric audit log on server:", e);
   }
@@ -1175,18 +1294,30 @@ async function recordMetricAuditLogServer(audit: {
  * Recalculate points, totals, and level for a creator server-side across all their approved reels.
  * Prevents double-counting and ensures non-approved reels never grant points.
  */
-async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, settingsInput?: any) {
-  if (!db) return null;
-  const settings = settingsInput || (await getServerPointSettings());
+async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, settingsInput?: any, idToken?: string) {
+  if (!idToken && !db) return null;
+  const settings = settingsInput || (await getServerPointSettings(idToken));
   const now = new Date().toISOString();
 
-  const q = query(collection(db, "creator_reels"), where("creatorUserId", "==", String(creatorUserId)));
-  const querySnap = await getDocs(q);
+  let reelsList: Array<{ docId: string; data: any }> = [];
+
+  if (idToken) {
+    const restReels = await queryFirestoreCollectionWithToken(
+      "creator_reels",
+      [{ field: "creatorUserId", op: "EQUAL", value: String(creatorUserId) }],
+      idToken
+    );
+    reelsList = restReels.map((r) => ({ docId: r.creatorReelId || r.id, data: r }));
+  } else if (db) {
+    const q = query(collection(db, "creator_reels"), where("creatorUserId", "==", String(creatorUserId)));
+    const querySnap = await getDocs(q);
+    reelsList = querySnap.docs.map((docSnap) => ({ docId: docSnap.id, data: docSnap.data() }));
+  }
 
   let totalViews = 0, totalLikes = 0, totalComments = 0, totalReels = 0, totalPoints = 0;
 
-  for (const docSnap of querySnap.docs) {
-    const reel: any = docSnap.data();
+  for (const item of reelsList) {
+    const reel: any = item.data;
     const isEligible = reel.status === 'approved' || reel.status === 'published';
     const pointCalc = calculateReelPointsServer(reel.performance || {}, reel.status, settings);
 
@@ -1198,7 +1329,7 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
       totalPoints += pointCalc.totalPoints;
     }
 
-    await setDoc(docSnap.ref, {
+    const reelPerfUpdate = {
       performance: {
         ...reel.performance,
         views: Number(reel.performance?.views || 0),
@@ -1210,17 +1341,27 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
         commentPoints: pointCalc.commentPoints,
       },
       updatedAt: now,
-    }, { merge: true });
+    };
+
+    if (idToken) {
+      await setFirestoreDocWithToken("creator_reels", item.docId, reelPerfUpdate, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "creator_reels", item.docId), reelPerfUpdate, { merge: true });
+    }
   }
 
   const levelInfo = calculateCreatorLevelServer(totalPoints, settings);
 
-  const creatorRef = doc(db, "creators", String(creatorUserId));
-  const creatorSnap = await getDoc(creatorRef);
+  let creatorData: any = null;
+  if (idToken) {
+    creatorData = await getFirestoreDocWithToken("creators", String(creatorUserId), idToken);
+  } else if (db) {
+    const creatorSnap = await getDoc(doc(db, "creators", String(creatorUserId)));
+    if (creatorSnap.exists()) creatorData = creatorSnap.data();
+  }
 
-  if (creatorSnap.exists()) {
-    const creatorData: any = creatorSnap.data();
-    await setDoc(creatorRef, {
+  if (creatorData) {
+    const creatorUpdate = {
       totalViews,
       totalLikes,
       totalComments,
@@ -1233,12 +1374,17 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
       pointsRemaining: levelInfo.pointsRemaining,
       nextLevelName: levelInfo.nextLevelName,
       updatedAt: now,
-    }, { merge: true });
+    };
+
+    if (idToken) {
+      await setFirestoreDocWithToken("creators", String(creatorUserId), creatorUpdate, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "creators", String(creatorUserId)), creatorUpdate, { merge: true });
+    }
 
     // Sync to public_creators
     try {
-      const publicRef = doc(db, "public_creators", String(creatorUserId));
-      await setDoc(publicRef, {
+      const publicUpdate = {
         creatorId: String(creatorUserId),
         username: creatorData.username || '',
         displayName: creatorData.displayName || '',
@@ -1253,7 +1399,12 @@ async function recalculateCreatorPointsAndLevelServer(creatorUserId: string, set
         totalReels,
         status: creatorData.status || 'pending',
         updatedAt: now,
-      }, { merge: true });
+      };
+      if (idToken) {
+        await setFirestoreDocWithToken("public_creators", String(creatorUserId), publicUpdate, idToken, true);
+      } else if (db) {
+        await setDoc(doc(db, "public_creators", String(creatorUserId)), publicUpdate, { merge: true });
+      }
     } catch (pubErr) {
       console.warn("Could not sync public_creators on server:", pubErr);
     }
@@ -1493,6 +1644,30 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; em
 }
 
 // ================= FIRESTORE REST API TOKEN HELPER =================
+function getIdTokenFromRequest(req?: express.Request): string | undefined {
+  const authHeader = req?.headers?.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return undefined;
+  return authHeader.slice(7).trim() || undefined;
+}
+
+function getFirestoreRestConfig(): { projectId: string; databaseId: string; baseUrl: string } | null {
+  try {
+    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    if (!fs.existsSync(configPath)) return null;
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const projectId = process.env.VITE_FIREBASE_PROJECT_ID || cfg.projectId;
+    const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || cfg.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
+    if (!projectId) return null;
+    return {
+      projectId,
+      databaseId,
+      baseUrl: `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parseFirestoreValue(value: any): any {
   if (!value || typeof value !== 'object') return value;
   if ('stringValue' in value) return value.stringValue;
@@ -1512,23 +1687,65 @@ function parseFirestoreValue(value: any): any {
   return value;
 }
 
-function parseFirestoreDoc(doc: any): any {
-  if (!doc) return null;
-  const id = doc.name ? doc.name.split('/').pop() : '';
+function parseFirestoreDoc(docItem: any): any {
+  if (!docItem) return null;
+  const id = docItem.name ? docItem.name.split('/').pop() : '';
   const data: Record<string, any> = { id };
-  for (const [k, v] of Object.entries(doc.fields || {})) {
+  for (const [k, v] of Object.entries(docItem.fields || {})) {
     data[k] = parseFirestoreValue(v);
   }
   return data;
 }
 
+function encodeFirestoreValue(val: any): any {
+  if (val === null || val === undefined) {
+    return { nullValue: null };
+  }
+  if (typeof val === 'boolean') {
+    return { booleanValue: val };
+  }
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) return { doubleValue: 0 };
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (typeof val === 'string') {
+    return { stringValue: val };
+  }
+  if (val instanceof Date) {
+    return { timestampValue: val.toISOString() };
+  }
+  if (Array.isArray(val)) {
+    return {
+      arrayValue: {
+        values: val.filter((v) => v !== undefined).map(encodeFirestoreValue),
+      },
+    };
+  }
+  if (typeof val === 'object') {
+    return {
+      mapValue: {
+        fields: encodeFirestoreFields(val),
+      },
+    };
+  }
+  return { stringValue: String(val) };
+}
+
+function encodeFirestoreFields(obj: Record<string, any>): Record<string, any> {
+  const fields: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v === undefined) continue;
+    fields[k] = encodeFirestoreValue(v);
+  }
+  return fields;
+}
+
 async function getFirestoreDocWithToken(collectionName: string, docId: string, idToken?: string): Promise<any | null> {
   try {
-    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) return null;
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || cfg.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
-    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${databaseId}/documents/${collectionName}/${encodeURIComponent(docId)}`;
+    const restCfg = getFirestoreRestConfig();
+    if (!restCfg) return null;
+    const url = `${restCfg.baseUrl}/${collectionName}/${encodeURIComponent(docId)}`;
 
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (idToken) {
@@ -1549,28 +1766,169 @@ async function getFirestoreDocWithToken(collectionName: string, docId: string, i
 
 async function getFirestoreCollectionWithToken(collectionName: string, idToken?: string): Promise<any[]> {
   try {
-    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) return [];
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || cfg.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
-    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${databaseId}/documents/${collectionName}?pageSize=300`;
+    const restCfg = getFirestoreRestConfig();
+    if (!restCfg) return [];
 
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (idToken) {
       headers["Authorization"] = `Bearer ${idToken}`;
     }
 
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      return [];
+    const allDocs: any[] = [];
+    let pageToken: string | undefined;
+
+    for (let page = 0; page < 10; page++) {
+      const qs = new URLSearchParams({ pageSize: "300" });
+      if (pageToken) qs.set("pageToken", pageToken);
+      const url = `${restCfg.baseUrl}/${collectionName}?${qs.toString()}`;
+
+      const response = await fetch(url, { headers });
+      if (!response.ok) {
+        if (page === 0) {
+          const errData: any = await response.json().catch(() => ({}));
+          if (response.status === 403) {
+            throw new Error(errData?.error?.message || `Missing or insufficient permissions for ${collectionName}.`);
+          }
+        }
+        break;
+      }
+
+      const data: any = await response.json();
+      if (Array.isArray(data.documents)) {
+        allDocs.push(...data.documents.map(parseFirestoreDoc).filter(Boolean));
+      }
+      if (!data.nextPageToken) break;
+      pageToken = data.nextPageToken;
     }
 
-    const data = await response.json();
-    if (!data.documents || !Array.isArray(data.documents)) return [];
-    return data.documents.map(parseFirestoreDoc).filter(Boolean);
+    return allDocs;
   } catch (err) {
+    if (err instanceof Error && err.message.toLowerCase().includes("permission")) {
+      throw err;
+    }
     return [];
   }
+}
+
+async function setFirestoreDocWithToken(
+  collectionName: string,
+  docId: string,
+  data: Record<string, any>,
+  idToken?: string,
+  merge = true
+): Promise<void> {
+  const restCfg = getFirestoreRestConfig();
+  if (!restCfg) {
+    throw new Error("Firestore configuration is missing on server.");
+  }
+
+  const fields = encodeFirestoreFields(data);
+  const fieldPaths = Object.keys(fields);
+  const queryParams = merge && fieldPaths.length > 0
+    ? `?${fieldPaths.map((p) => `updateMask.fieldPaths=${encodeURIComponent(p)}`).join("&")}`
+    : "";
+
+  const url = `${restCfg.baseUrl}/${collectionName}/${encodeURIComponent(docId)}${queryParams}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (idToken) {
+    headers["Authorization"] = `Bearer ${idToken}`;
+  }
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ fields }),
+  });
+
+  if (!response.ok) {
+    const errData: any = await response.json().catch(() => ({}));
+    const errMsg = errData?.error?.message || response.statusText || `HTTP ${response.status}`;
+    throw new Error(`Firestore write failed (${collectionName}/${docId}): ${errMsg}`);
+  }
+}
+
+async function deleteFirestoreDocWithToken(
+  collectionName: string,
+  docId: string,
+  idToken?: string
+): Promise<void> {
+  const restCfg = getFirestoreRestConfig();
+  if (!restCfg) {
+    throw new Error("Firestore configuration is missing on server.");
+  }
+
+  const url = `${restCfg.baseUrl}/${collectionName}/${encodeURIComponent(docId)}`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (idToken) {
+    headers["Authorization"] = `Bearer ${idToken}`;
+  }
+
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers,
+  });
+
+  if (!response.ok && response.status !== 404) {
+    const errData: any = await response.json().catch(() => ({}));
+    const errMsg = errData?.error?.message || response.statusText || `HTTP ${response.status}`;
+    throw new Error(`Firestore delete failed (${collectionName}/${docId}): ${errMsg}`);
+  }
+}
+
+async function queryFirestoreCollectionWithToken(
+  collectionName: string,
+  filters: Array<{ field: string; op?: string; value: any }>,
+  idToken?: string
+): Promise<any[]> {
+  const restCfg = getFirestoreRestConfig();
+  if (!restCfg) return [];
+
+  const url = `${restCfg.baseUrl}:runQuery`;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (idToken) {
+    headers["Authorization"] = `Bearer ${idToken}`;
+  }
+
+  const fieldFilters = filters.map((f) => ({
+    fieldFilter: {
+      field: { fieldPath: f.field },
+      op: f.op || "EQUAL",
+      value: encodeFirestoreValue(f.value),
+    },
+  }));
+
+  const structuredQuery: any = {
+    from: [{ collectionId: collectionName }],
+  };
+
+  if (fieldFilters.length === 1) {
+    structuredQuery.where = fieldFilters[0];
+  } else if (fieldFilters.length > 1) {
+    structuredQuery.where = {
+      compositeFilter: {
+        op: "AND",
+        filters: fieldFilters,
+      },
+    };
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ structuredQuery }),
+  });
+
+  if (!response.ok) {
+    const errData: any = await response.json().catch(() => ({}));
+    if (response.status === 403) {
+      throw new Error(errData?.error?.message || `Missing or insufficient permissions querying ${collectionName}.`);
+    }
+    return [];
+  }
+
+  const rows: any = await response.json();
+  if (!Array.isArray(rows)) return [];
+  return rows.map((r) => (r.document ? parseFirestoreDoc(r.document) : null)).filter(Boolean);
 }
 
 async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -1598,6 +1956,8 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     });
   }
 
+  (req as any).idToken = idToken;
+
   // 1. Direct super admin authorization by email
   const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd');
   if (isSuperAdminEmail) {
@@ -1611,21 +1971,20 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     return next();
   }
 
-  // 2. Fetch staff role with safe fallbacks
+  // 2. Fetch staff role using caller's verified token first, then fallback to db
   let userRole: string | null = null;
-  if (db) {
+  const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
+  if (userDoc) {
+    userRole = userDoc.role || null;
+  } else if (db) {
     try {
       const userDocRef = doc(db, "users", verifiedUser.uid);
       const userSnap = await getDoc(userDocRef);
       if (userSnap.exists()) {
         userRole = userSnap.data()?.role;
       }
-    } catch (e) {
-      // Fallback: try REST with user's verified token
-      const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
-      if (userDoc) {
-        userRole = userDoc.role;
-      }
+    } catch {
+      // ignore
     }
   }
 
@@ -1672,6 +2031,8 @@ async function verifyFinanceAuth(req: express.Request, res: express.Response, ne
     });
   }
 
+  (req as any).idToken = idToken;
+
   // 1. Direct super admin authorization by email (instant, zero DB query)
   const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd');
   if (isSuperAdminEmail) {
@@ -1687,19 +2048,18 @@ async function verifyFinanceAuth(req: express.Request, res: express.Response, ne
 
   // 2. Fetch role for other staff members
   let userRole: string | null = null;
-  if (db) {
+  const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
+  if (userDoc) {
+    userRole = userDoc.role || null;
+  } else if (db) {
     try {
       const userDocRef = doc(db, "users", verifiedUser.uid);
       const userSnap = await getDoc(userDocRef);
       if (userSnap.exists()) {
         userRole = userSnap.data()?.role;
       }
-    } catch (e) {
-      // Fallback: try REST with user's verified token
-      const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
-      if (userDoc) {
-        userRole = userDoc.role;
-      }
+    } catch {
+      // ignore
     }
   }
 
@@ -1746,6 +2106,7 @@ async function verifyUserOrStaffAuth(req: express.Request, res: express.Response
     });
   }
 
+  (req as any).idToken = idToken;
   (req as any).user = verifiedUser;
   return next();
 }
@@ -1768,6 +2129,8 @@ async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Res
     });
   }
 
+  (req as any).idToken = idToken;
+
   // 1. Direct super admin authorization by email
   const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd');
   if (isSuperAdminEmail) {
@@ -1781,18 +2144,18 @@ async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Res
   }
 
   let userRole = 'customer';
-  if (db) {
+  const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
+  if (userDoc) {
+    userRole = userDoc.role || userRole;
+  } else if (db) {
     try {
       const userDocRef = doc(db, "users", verifiedUser.uid);
       const userSnap = await getDoc(userDocRef);
       if (userSnap.exists()) {
         userRole = userSnap.data()?.role || userRole;
       }
-    } catch (e) {
-      const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
-      if (userDoc) {
-        userRole = userDoc.role || userRole;
-      }
+    } catch {
+      // ignore
     }
   }
 
@@ -1815,18 +2178,18 @@ async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Res
   if (requestedTargetId && requestedTargetId !== verifiedUser.uid) {
     try {
       let custUserId: string | null = null;
-      if (db) {
+      const custDoc = await getFirestoreDocWithToken("wholesale_customers", requestedTargetId, idToken);
+      if (custDoc) {
+        custUserId = custDoc.userId;
+      } else if (db) {
         try {
           const custDocRef = doc(db, "wholesale_customers", requestedTargetId);
           const custSnap = await getDoc(custDocRef);
           if (custSnap.exists()) {
             custUserId = custSnap.data()?.userId;
           }
-        } catch (e) {
-          const custDoc = await getFirestoreDocWithToken("wholesale_customers", requestedTargetId, idToken);
-          if (custDoc) {
-            custUserId = custDoc.userId;
-          }
+        } catch {
+          // ignore
         }
       }
 
@@ -1852,7 +2215,8 @@ async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Res
 // GET Creator Point Settings (Admin Only)
 app.get("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) => {
   try {
-    const settings = await getServerPointSettings();
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    const settings = await getServerPointSettings(idToken);
     return res.json({ success: true, settings });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1865,7 +2229,8 @@ app.post("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) 
   if (!settings) return res.status(400).json({ success: false, error: "Settings object required" });
 
   try {
-    if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) return res.status(503).json({ success: false, error: "Database not initialized" });
 
     const adminUid = (req as any).user?.uid || 'admin';
     const now = new Date().toISOString();
@@ -1875,15 +2240,22 @@ app.post("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) 
       updatedBy: adminUid,
     };
 
-    await setDoc(doc(db, "settings", "creator_points"), payload, { merge: true });
+    if (idToken) {
+      await setFirestoreDocWithToken("settings", "creator_points", payload, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "settings", "creator_points"), payload, { merge: true });
+    }
 
     // Recalculate all creators with new settings
-    const creatorsSnap = await getDocs(collection(db, "creators"));
+    const creatorsList = idToken
+      ? await getFirestoreCollectionWithToken("creators", idToken)
+      : (await getDocs(collection(db, "creators"))).docs.map((d) => d.data());
+
     let updatedCount = 0;
-    for (const d of creatorsSnap.docs) {
-      const c = d.data();
-      if (c.userId) {
-        await recalculateCreatorPointsAndLevelServer(c.userId, payload);
+    for (const c of creatorsList) {
+      const targetCreatorId = c.userId || c.creatorId || c.id;
+      if (targetCreatorId) {
+        await recalculateCreatorPointsAndLevelServer(targetCreatorId, payload, idToken);
         updatedCount++;
       }
     }
@@ -1902,19 +2274,22 @@ app.post("/api/admin/creator-point-settings", verifyAdminAuth, async (req, res) 
 app.post("/api/admin/recalculate-creator-points", verifyAdminAuth, async (req, res) => {
   const { creatorUserId } = req.body;
   try {
-    if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
-    const settings = await getServerPointSettings();
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) return res.status(503).json({ success: false, error: "Database not initialized" });
+    const settings = await getServerPointSettings(idToken);
 
     if (creatorUserId) {
-      await recalculateCreatorPointsAndLevelServer(creatorUserId, settings);
+      await recalculateCreatorPointsAndLevelServer(creatorUserId, settings, idToken);
       return res.json({ success: true, message: `Recalculated points for creator ${creatorUserId}` });
     } else {
-      const creatorsSnap = await getDocs(collection(db, "creators"));
+      const creatorsList = idToken
+        ? await getFirestoreCollectionWithToken("creators", idToken)
+        : (await getDocs(collection(db, "creators"))).docs.map((d) => d.data());
       let updatedCount = 0;
-      for (const d of creatorsSnap.docs) {
-        const c = d.data();
-        if (c.userId) {
-          await recalculateCreatorPointsAndLevelServer(c.userId, settings);
+      for (const c of creatorsList) {
+        const targetCreatorId = c.userId || c.creatorId || c.id;
+        if (targetCreatorId) {
+          await recalculateCreatorPointsAndLevelServer(targetCreatorId, settings, idToken);
           updatedCount++;
         }
       }
@@ -1928,10 +2303,18 @@ app.post("/api/admin/recalculate-creator-points", verifyAdminAuth, async (req, r
 // GET Admin Audit Logs (Admin Only)
 app.get("/api/admin/reel-metric-audits", verifyAdminAuth, async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
-    const snap = await getDocs(collection(db, "reel_metric_audits"));
-    const audits: any[] = [];
-    snap.forEach((d) => audits.push({ auditLogId: d.id, ...d.data() }));
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) return res.status(503).json({ success: false, error: "Database not initialized" });
+
+    let audits: any[] = [];
+    if (idToken) {
+      const docs = await getFirestoreCollectionWithToken("reel_metric_audits", idToken);
+      audits = docs.map((d) => ({ auditLogId: d.auditLogId || d.id, ...d }));
+    } else if (db) {
+      const snap = await getDocs(collection(db, "reel_metric_audits"));
+      snap.forEach((d) => audits.push({ auditLogId: d.id, ...d.data() }));
+    }
+
     audits.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return res.json({ success: true, count: audits.length, audits, logs: audits });
   } catch (err: any) {
@@ -1945,14 +2328,25 @@ app.get("/api/creator/reels/:id/metrics", async (req, res) => {
   if (!id) return res.status(400).json({ success: false, error: "Reel ID is required" });
 
   try {
-    if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
-    const reelSnap = await getDoc(doc(db, "creator_reels", String(id)));
-    if (!reelSnap.exists()) {
+    const idToken = getIdTokenFromRequest(req);
+    if (!idToken && !db) return res.status(503).json({ success: false, error: "Database not initialized" });
+
+    let reelData: any = idToken
+      ? await getFirestoreDocWithToken("creator_reels", String(id), idToken)
+      : null;
+
+    if (!reelData && db) {
+      const reelSnap = await getDoc(doc(db, "creator_reels", String(id)));
+      if (reelSnap.exists()) {
+        reelData = reelSnap.data();
+      }
+    }
+
+    if (!reelData) {
       return res.status(404).json({ success: false, error: `Reel ${id} not found` });
     }
 
-    const reelData = reelSnap.data();
-    const facebookApiConfigured = Boolean(process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN);
+    const facebookApiConfigured = Boolean(process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.FACEBOOK_GRAPH_API_TOKEN);
 
     return res.json({
       success: true,
@@ -1974,19 +2368,25 @@ app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, re
   const { id } = req.params;
   const { views, likes, comments, metricsSource = 'admin_verified', reason = 'Admin manual metric adjustment' } = req.body;
   const adminUid = (req as any).user?.uid || 'admin';
+  const idToken = (req as any).idToken || getIdTokenFromRequest(req);
 
   if (!id) return res.status(400).json({ success: false, error: "Reel ID is required" });
 
   try {
-    if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
+    if (!idToken && !db) return res.status(503).json({ success: false, error: "Database not initialized" });
 
-    const reelRef = doc(db, "creator_reels", String(id));
-    const reelSnap = await getDoc(reelRef);
-    if (!reelSnap.exists()) {
+    let reelData: any = idToken
+      ? await getFirestoreDocWithToken("creator_reels", String(id), idToken)
+      : null;
+    if (!reelData && !idToken && db) {
+      const reelSnap = await getDoc(doc(db, "creator_reels", String(id)));
+      if (reelSnap.exists()) reelData = reelSnap.data();
+    }
+
+    if (!reelData) {
       return res.status(404).json({ success: false, error: `Reel ${id} not found` });
     }
 
-    const reelData = reelSnap.data();
     const facebookPostId = reelData.facebookPostId || extractFacebookPostId(reelData.facebookPostUrl) || '';
     const now = new Date().toISOString();
 
@@ -2001,7 +2401,7 @@ app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, re
     const parsedLikes = likes !== undefined ? Math.max(0, Math.floor(Number(likes))) : previousValues.likes;
     const parsedComments = comments !== undefined ? Math.max(0, Math.floor(Number(comments))) : previousValues.comments;
 
-    const settings = await getServerPointSettings();
+    const settings = await getServerPointSettings(idToken);
     const pointCalc = calculateReelPointsServer(
       { views: parsedViews, likes: parsedLikes, comments: parsedComments },
       reelData.status,
@@ -2021,21 +2421,26 @@ app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, re
       facebookPostId,
     };
 
-    await setDoc(reelRef, {
+    const reelUpdate = {
       performance: updatedPerformance,
       facebookPostId,
       metricsSource,
       metricsUpdatedAt: now,
       updatedAt: now,
-    }, { merge: true });
+    };
+
+    if (idToken) {
+      await setFirestoreDocWithToken("creator_reels", String(id), reelUpdate, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "creator_reels", String(id)), reelUpdate, { merge: true });
+    }
 
     // Audit Logging
-    const auditId = `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    await setDoc(doc(db, "reel_metric_audits", auditId), {
-      id: auditId,
-      auditLogId: auditId,
+    await recordMetricAuditLogServer({
       creatorReelId: String(id),
       adminId: adminUid,
+      source: metricsSource,
+      status: 'success',
       previousValues,
       newValues: {
         views: parsedViews,
@@ -2045,13 +2450,13 @@ app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, re
       },
       reason,
       timestamp: now,
-    });
+    }, idToken);
 
     // Recalculate Creator totals, points, and level
     const creatorUserId = reelData.creatorUserId || reelData.creatorId;
     let recapResult = null;
     if (creatorUserId) {
-      recapResult = await recalculateCreatorPointsAndLevelServer(creatorUserId, settings);
+      recapResult = await recalculateCreatorPointsAndLevelServer(creatorUserId, settings, idToken);
     }
 
     return res.json({
@@ -2070,6 +2475,7 @@ app.post("/api/admin/creator-reels/:id/metrics", verifyAdminAuth, async (req, re
 app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
   const adminUid = (req as any).user?.uid || 'admin';
+  const idToken = (req as any).idToken || getIdTokenFromRequest(req);
   if (!id) return res.status(400).json({ success: false, error: "Reel ID is required" });
 
   const fbToken = process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.FACEBOOK_GRAPH_API_TOKEN;
@@ -2083,15 +2489,20 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
   }
 
   try {
-    if (!db) return res.status(503).json({ success: false, error: "Database not initialized" });
+    if (!idToken && !db) return res.status(503).json({ success: false, error: "Database not initialized" });
 
-    const reelRef = doc(db, "creator_reels", String(id));
-    const reelSnap = await getDoc(reelRef);
-    if (!reelSnap.exists()) {
+    let reelData: any = idToken
+      ? await getFirestoreDocWithToken("creator_reels", String(id), idToken)
+      : null;
+    if (!reelData && !idToken && db) {
+      const reelSnap = await getDoc(doc(db, "creator_reels", String(id)));
+      if (reelSnap.exists()) reelData = reelSnap.data();
+    }
+
+    if (!reelData) {
       return res.status(404).json({ success: false, error: `Reel ${id} not found` });
     }
 
-    const reelData: any = reelSnap.data();
     const now = new Date().toISOString();
 
     const previousValues = {
@@ -2112,12 +2523,17 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
     if (!resolution.success) {
       console.warn(`[facebookMetricsService] Facebook Graph API sync failed for reel ${id}: ${resolution.error}. Preserving existing metrics.`);
 
-      await setDoc(reelRef, {
+      const failedUpdate = {
         syncStatus: 'failed',
         lastSyncError: resolution.error || 'Graph API query failed',
         lastSyncAttemptAt: now,
         updatedAt: now,
-      }, { merge: true });
+      };
+      if (idToken) {
+        await setFirestoreDocWithToken("creator_reels", String(id), failedUpdate, idToken, true);
+      } else if (db) {
+        await setDoc(doc(db, "creator_reels", String(id)), failedUpdate, { merge: true });
+      }
 
       // Record failed sync audit log
       await recordMetricAuditLogServer({
@@ -2129,7 +2545,7 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
         newValues: previousValues,
         reason: `Facebook API sync failed: ${resolution.error}. Existing valid metrics preserved.`,
         timestamp: now,
-      });
+      }, idToken);
 
       return res.status(400).json({
         success: false,
@@ -2144,7 +2560,7 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
     const parsedLikes = resolution.likes;
     const parsedComments = resolution.comments;
 
-    const settings = await getServerPointSettings();
+    const settings = await getServerPointSettings(idToken);
     const pointCalc = calculateReelPointsServer(
       { views: parsedViews, likes: parsedLikes, comments: parsedComments },
       reelData.status,
@@ -2164,7 +2580,7 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
       facebookPostId: resolution.resolvedObjectId || reelData.facebookPostId || '',
     };
 
-    await setDoc(reelRef, {
+    const successUpdate = {
       performance: updatedPerformance,
       facebookPostId: resolution.resolvedObjectId || reelData.facebookPostId || '',
       metricsSource: 'facebook_api',
@@ -2173,7 +2589,13 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
       lastSyncError: null,
       lastSyncAttemptAt: now,
       updatedAt: now,
-    }, { merge: true });
+    };
+
+    if (idToken) {
+      await setFirestoreDocWithToken("creator_reels", String(id), successUpdate, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "creator_reels", String(id)), successUpdate, { merge: true });
+    }
 
     // Record successful sync audit log
     await recordMetricAuditLogServer({
@@ -2190,13 +2612,13 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
       },
       reason: `Live Facebook Graph API sync (${resolution.resolvedObjectId || 'node'})`,
       timestamp: now,
-    });
+    }, idToken);
 
     // Recalculate Creator totals, points, and level
     const creatorUserId = reelData.creatorUserId || reelData.creatorId;
     let recapResult = null;
     if (creatorUserId) {
-      recapResult = await recalculateCreatorPointsAndLevelServer(creatorUserId, settings);
+      recapResult = await recalculateCreatorPointsAndLevelServer(creatorUserId, settings, idToken);
     }
 
     return res.json({
@@ -2215,15 +2637,20 @@ app.post("/api/admin/creator-reels/:id/refresh-facebook", verifyAdminAuth, async
 // GET All Creator Reels for Admin Moderation (Admin Only)
 app.get("/api/admin/reels", verifyAdminAuth, async (req, res) => {
   try {
-    if (!db) {
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    const querySnap = await getDocs(collection(db, "creator_reels"));
-    const reels: any[] = [];
-    querySnap.forEach((d) => {
-      reels.push(d.data());
-    });
+    let reels: any[] = [];
+    if (idToken) {
+      reels = await getFirestoreCollectionWithToken("creator_reels", idToken);
+    } else if (db) {
+      const querySnap = await getDocs(collection(db, "creator_reels"));
+      querySnap.forEach((d) => {
+        reels.push(d.data());
+      });
+    }
 
     reels.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
@@ -2238,6 +2665,7 @@ app.post("/api/admin/reels/status", verifyAdminAuth, async (req, res) => {
   const { creatorReelId, reelId, status, adminNote, note } = req.body;
   const targetReelId = creatorReelId || reelId;
   const targetNote = adminNote !== undefined ? adminNote : note;
+  const idToken = (req as any).idToken || getIdTokenFromRequest(req);
 
   if (!targetReelId || !['pending', 'approved', 'rejected', 'published'].includes(status)) {
     return res.status(400).json({
@@ -2247,17 +2675,22 @@ app.post("/api/admin/reels/status", verifyAdminAuth, async (req, res) => {
   }
 
   try {
-    if (!db) {
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    const docRef = doc(db, "creator_reels", String(targetReelId));
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) {
+    let reelData: any = idToken
+      ? await getFirestoreDocWithToken("creator_reels", String(targetReelId), idToken)
+      : null;
+    if (!reelData && !idToken && db) {
+      const snap = await getDoc(doc(db, "creator_reels", String(targetReelId)));
+      if (snap.exists()) reelData = snap.data();
+    }
+
+    if (!reelData) {
       return res.status(404).json({ success: false, error: `Reel ${targetReelId} not found` });
     }
 
-    const reelData = snap.data();
     const now = new Date().toISOString();
 
     const updatePayload: Record<string, any> = {
@@ -2278,12 +2711,16 @@ app.post("/api/admin/reels/status", verifyAdminAuth, async (req, res) => {
       }
     }
 
-    await setDoc(docRef, updatePayload, { merge: true });
+    if (idToken) {
+      await setFirestoreDocWithToken("creator_reels", String(targetReelId), updatePayload, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "creator_reels", String(targetReelId)), updatePayload, { merge: true });
+    }
 
     // Recalculate creator totals and points
     const creatorUserId = reelData.creatorUserId || reelData.creatorId;
     if (creatorUserId) {
-      await recalculateCreatorPointsAndLevelServer(creatorUserId);
+      await recalculateCreatorPointsAndLevelServer(creatorUserId, undefined, idToken);
     }
 
     return res.json({
@@ -2306,11 +2743,16 @@ app.delete("/api/admin/reels/:id", verifyAdminAuth, async (req, res) => {
   }
 
   try {
-    if (!db) {
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    await deleteDoc(doc(db, "creator_reels", String(id)));
+    if (idToken) {
+      await deleteFirestoreDocWithToken("creator_reels", String(id), idToken);
+    } else if (db) {
+      await deleteDoc(doc(db, "creator_reels", String(id)));
+    }
     return res.json({ success: true, message: `Reel ${id} deleted successfully` });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -2467,6 +2909,1136 @@ app.post("/api/cloudinary/upload-invoice", async (req, res) => {
   }
 });
 
+// ==========================================
+// YOUTUBE DATA API v3 INTEGRATION (ADMIN CHANNEL + CREATOR UPLOADS)
+// ==========================================
+const YOUTUBE_CONFIG_FILE = path.join(process.cwd(), ".youtube-integration.json");
+const YOUTUBE_DAILY_LIMIT_FILE = path.join(process.cwd(), ".youtube-daily-uploads.json");
+const YOUTUBE_DAILY_LIMIT = 1;
+
+interface YouTubeStoredConfig {
+  refreshToken?: string;
+  channelId?: string;
+  channelTitle?: string;
+  channelThumbnail?: string;
+  connectedAt?: string;
+  connectedBy?: string;
+  disconnected?: boolean;
+}
+
+interface YouTubeHealthStatus {
+  hasOAuthCredentials: boolean;
+  connected: boolean;
+  hasStaleToken: boolean;
+  tokenError: string | null;
+  errorCode: string | null;
+  tokenSource: "oauth_file" | "env_secret" | "disconnected" | "none";
+  channelId: string | null;
+  channelTitle: string | null;
+  channelThumbnail: string | null;
+  connectedAt: string | null;
+  hasEnvRefreshToken: boolean;
+}
+
+let youtubeHealthCache: {
+  checkedAt: number;
+  tokenFingerprint: string;
+  status: YouTubeHealthStatus;
+} | null = null;
+
+function invalidateYouTubeHealthCache() {
+  youtubeHealthCache = null;
+}
+
+const youtubeOAuthStates = new Map<string, { redirectUri: string; adminUid: string; expiresAt: number }>();
+const youtubeUploadSessions = new Map<string, {
+  uid: string;
+  uploadUrl: string;
+  dhakaDate: string;
+  title: string;
+  initialPrivacy: string;
+  channelId?: string;
+  channelTitle?: string;
+  expiresAt: number;
+}>();
+const activeCreatorUploadLocks = new Set<string>();
+
+function getDhakaDateString(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dhaka",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function readYouTubeFileConfig(): YouTubeStoredConfig {
+  try {
+    if (fs.existsSync(YOUTUBE_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(YOUTUBE_CONFIG_FILE, "utf-8")) || {};
+    }
+  } catch (e) {
+    console.warn("[YouTube] Could not read config file:", e);
+  }
+  return {};
+}
+
+function readYouTubeConfig(): YouTubeStoredConfig & { tokenSource: "oauth_file" | "env_secret" | "disconnected" | "none" } {
+  const fileConfig = readYouTubeFileConfig();
+  const envRefreshToken = process.env.YOUTUBE_REFRESH_TOKEN?.trim();
+
+  if (fileConfig.refreshToken) {
+    return {
+      ...fileConfig,
+      refreshToken: fileConfig.refreshToken,
+      tokenSource: "oauth_file",
+    };
+  }
+
+  if (fileConfig.disconnected) {
+    return {
+      ...fileConfig,
+      refreshToken: undefined,
+      tokenSource: "disconnected",
+    };
+  }
+
+  if (envRefreshToken) {
+    return {
+      ...fileConfig,
+      refreshToken: envRefreshToken,
+      tokenSource: "env_secret",
+    };
+  }
+
+  return {
+    ...fileConfig,
+    refreshToken: undefined,
+    tokenSource: "none",
+  };
+}
+
+function writeYouTubeConfig(cfg: YouTubeStoredConfig | null) {
+  invalidateYouTubeHealthCache();
+  try {
+    if (!cfg) {
+      if (fs.existsSync(YOUTUBE_CONFIG_FILE)) {
+        fs.unlinkSync(YOUTUBE_CONFIG_FILE);
+      }
+      return;
+    }
+    fs.writeFileSync(YOUTUBE_CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("[YouTube] Could not persist config file:", e);
+  }
+}
+
+function readDailyUploadStore(): Record<string, { count: number; videoIds: string[]; updatedAt: string }> {
+  try {
+    if (fs.existsSync(YOUTUBE_DAILY_LIMIT_FILE)) {
+      return JSON.parse(fs.readFileSync(YOUTUBE_DAILY_LIMIT_FILE, "utf-8")) || {};
+    }
+  } catch (e) {
+    console.warn("[YouTube] Could not read daily upload store:", e);
+  }
+  return {};
+}
+
+function recordCreatorDailyUpload(uid: string, youtubeVideoId: string, dhakaDate: string = getDhakaDateString()) {
+  const store = readDailyUploadStore();
+  const key = `${dhakaDate}:${uid}`;
+  const existing = store[key] || { count: 0, videoIds: [], updatedAt: new Date().toISOString() };
+  if (!existing.videoIds.includes(youtubeVideoId)) {
+    existing.videoIds.push(youtubeVideoId);
+    existing.count = existing.videoIds.length;
+  }
+  existing.updatedAt = new Date().toISOString();
+  store[key] = existing;
+
+  // Prune entries older than 7 days
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const cutoffStr = getDhakaDateString(cutoff);
+  for (const k of Object.keys(store)) {
+    const datePart = k.split(":")[0];
+    if (datePart && datePart < cutoffStr) {
+      delete store[k];
+    }
+  }
+
+  try {
+    fs.writeFileSync(YOUTUBE_DAILY_LIMIT_FILE, JSON.stringify(store, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("[YouTube] Could not save daily upload store:", e);
+  }
+}
+
+async function queryCreatorReelsByToken(uid: string, idToken?: string): Promise<any[]> {
+  try {
+    const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+    if (!fs.existsSync(configPath)) return [];
+    const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || cfg.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
+    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${databaseId}/documents:runQuery`;
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (idToken) {
+      headers["Authorization"] = `Bearer ${idToken}`;
+    }
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: "creator_reels" }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: "creatorUserId" },
+              op: "EQUAL",
+              value: { stringValue: uid },
+            },
+          },
+        },
+      }),
+    });
+
+    if (!res.ok) return [];
+    const rows: any = await res.json();
+    if (!Array.isArray(rows)) return [];
+    return rows.map((r) => (r.document ? parseFirestoreDoc(r.document) : null)).filter(Boolean);
+  } catch (err) {
+    console.warn("[YouTube] Firestore creator_reels query warning:", err);
+    return [];
+  }
+}
+
+async function getCreatorTodayUploadCount(uid: string, idToken?: string): Promise<{ count: number; dhakaDate: string }> {
+  const dhakaDate = getDhakaDateString();
+  const store = readDailyUploadStore();
+  const localCount = Number(store[`${dhakaDate}:${uid}`]?.count || 0);
+
+  let firestoreCount = 0;
+  try {
+    const reels = await queryCreatorReelsByToken(uid, idToken);
+    for (const r of reels) {
+      if (r?.createdAt) {
+        const createdDhakaDate = getDhakaDateString(new Date(r.createdAt));
+        if (createdDhakaDate === dhakaDate) {
+          firestoreCount += 1;
+        }
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return {
+    count: Math.max(localCount, firestoreCount),
+    dhakaDate,
+  };
+}
+
+function formatYouTubeTokenError(errorCode?: string, errorDescription?: string): string {
+  if (errorCode === "invalid_grant") {
+    return "Your YouTube Refresh Token is expired or revoked (invalid_grant). Note: If your Google Cloud OAuth Consent Screen is in 'Testing' mode, refresh tokens expire every 7 days. Reconnect YouTube below, publish your OAuth app to 'In Production' in Google Cloud Console, and save the new Refresh Token in Secrets.";
+  }
+  if (errorCode === "invalid_client" || errorCode === "unauthorized_client") {
+    return "YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET does not match the Refresh Token. Verify your Google Cloud OAuth credentials and reconnect.";
+  }
+  return errorDescription || errorCode || "Failed to refresh YouTube access token. Please reconnect your YouTube channel.";
+}
+
+async function verifyYouTubeConnection(forceRefresh = false): Promise<YouTubeHealthStatus> {
+  const clientId = process.env.YOUTUBE_CLIENT_ID?.trim();
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.trim();
+  const hasEnvRefreshToken = Boolean(process.env.YOUTUBE_REFRESH_TOKEN?.trim());
+  const cfg = readYouTubeConfig();
+  const refreshToken = cfg.refreshToken?.trim();
+
+  if (!clientId || !clientSecret) {
+    return {
+      hasOAuthCredentials: false,
+      connected: false,
+      hasStaleToken: false,
+      tokenError: "YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET are not configured in server environment variables.",
+      errorCode: "missing_oauth_credentials",
+      tokenSource: cfg.tokenSource,
+      channelId: null,
+      channelTitle: null,
+      channelThumbnail: null,
+      connectedAt: null,
+      hasEnvRefreshToken,
+    };
+  }
+
+  if (!refreshToken) {
+    return {
+      hasOAuthCredentials: true,
+      connected: false,
+      hasStaleToken: false,
+      tokenError: null,
+      errorCode: null,
+      tokenSource: cfg.tokenSource,
+      channelId: null,
+      channelTitle: null,
+      channelThumbnail: null,
+      connectedAt: null,
+      hasEnvRefreshToken,
+    };
+  }
+
+  const tokenFingerprint = crypto
+    .createHash("sha256")
+    .update(`${clientId}:${refreshToken}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  if (
+    !forceRefresh &&
+    youtubeHealthCache &&
+    youtubeHealthCache.tokenFingerprint === tokenFingerprint &&
+    Date.now() - youtubeHealthCache.checkedAt < 60 * 1000
+  ) {
+    return youtubeHealthCache.status;
+  }
+
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }).toString(),
+    });
+
+    const tokenData: any = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !tokenData.access_token) {
+      const errorCode = String(tokenData.error || `http_${tokenRes.status}`);
+      const status: YouTubeHealthStatus = {
+        hasOAuthCredentials: true,
+        connected: false,
+        hasStaleToken: true,
+        tokenError: formatYouTubeTokenError(tokenData.error, tokenData.error_description),
+        errorCode,
+        tokenSource: cfg.tokenSource,
+        channelId: cfg.channelId || null,
+        channelTitle: cfg.channelTitle || null,
+        channelThumbnail: cfg.channelThumbnail || null,
+        connectedAt: cfg.connectedAt || null,
+        hasEnvRefreshToken,
+      };
+      youtubeHealthCache = { checkedAt: Date.now(), tokenFingerprint, status };
+      return status;
+    }
+
+    let channelId = cfg.channelId || "";
+    let channelTitle = cfg.channelTitle || "";
+    let channelThumbnail = cfg.channelThumbnail || "";
+
+    if (!channelId || !channelTitle || forceRefresh) {
+      const chRes = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const chData: any = await chRes.json().catch(() => ({}));
+      if (!chRes.ok) {
+        const apiMsg = chData?.error?.message || `YouTube API error (${chRes.status})`;
+        const status: YouTubeHealthStatus = {
+          hasOAuthCredentials: true,
+          connected: false,
+          hasStaleToken: true,
+          tokenError: `OAuth token is valid, but YouTube Data API v3 returned an error: ${apiMsg}`,
+          errorCode: "youtube_api_error",
+          tokenSource: cfg.tokenSource,
+          channelId: channelId || null,
+          channelTitle: channelTitle || null,
+          channelThumbnail: channelThumbnail || null,
+          connectedAt: cfg.connectedAt || null,
+          hasEnvRefreshToken,
+        };
+        youtubeHealthCache = { checkedAt: Date.now(), tokenFingerprint, status };
+        return status;
+      }
+
+      const firstChannel = chData?.items?.[0];
+      if (!firstChannel) {
+        const status: YouTubeHealthStatus = {
+          hasOAuthCredentials: true,
+          connected: false,
+          hasStaleToken: true,
+          tokenError: "Connected Google account does not have a YouTube channel yet. Please create or select a Google account that owns your YouTube channel.",
+          errorCode: "no_channel",
+          tokenSource: cfg.tokenSource,
+          channelId: null,
+          channelTitle: null,
+          channelThumbnail: null,
+          connectedAt: cfg.connectedAt || null,
+          hasEnvRefreshToken,
+        };
+        youtubeHealthCache = { checkedAt: Date.now(), tokenFingerprint, status };
+        return status;
+      }
+
+      channelId = firstChannel.id || channelId;
+      channelTitle = firstChannel.snippet?.title || channelTitle || "Connected YouTube Channel";
+      channelThumbnail = firstChannel.snippet?.thumbnails?.default?.url || channelThumbnail;
+
+      // Persist resolved channel profile metadata without overwriting env-based token mode
+      const fileCfg = readYouTubeFileConfig();
+      const updatedFileCfg: YouTubeStoredConfig = {
+        ...fileCfg,
+        channelId,
+        channelTitle,
+        channelThumbnail,
+        connectedAt: fileCfg.connectedAt || new Date().toISOString(),
+        disconnected: false,
+      };
+      try {
+        fs.writeFileSync(YOUTUBE_CONFIG_FILE, JSON.stringify(updatedFileCfg, null, 2), "utf-8");
+      } catch {}
+    }
+
+    const status: YouTubeHealthStatus = {
+      hasOAuthCredentials: true,
+      connected: true,
+      hasStaleToken: false,
+      tokenError: null,
+      errorCode: null,
+      tokenSource: cfg.tokenSource,
+      channelId: channelId || null,
+      channelTitle: channelTitle || "Connected YouTube Channel",
+      channelThumbnail: channelThumbnail || null,
+      connectedAt: cfg.connectedAt || new Date().toISOString(),
+      hasEnvRefreshToken,
+    };
+    youtubeHealthCache = { checkedAt: Date.now(), tokenFingerprint, status };
+    return status;
+  } catch (err: any) {
+    return {
+      hasOAuthCredentials: true,
+      connected: false,
+      hasStaleToken: true,
+      tokenError: err.message || "Network error verifying YouTube connection.",
+      errorCode: "network_error",
+      tokenSource: cfg.tokenSource,
+      channelId: cfg.channelId || null,
+      channelTitle: cfg.channelTitle || null,
+      channelThumbnail: cfg.channelThumbnail || null,
+      connectedAt: cfg.connectedAt || null,
+      hasEnvRefreshToken,
+    };
+  }
+}
+
+async function getYouTubeAccessToken(): Promise<{
+  accessToken: string;
+  channelId?: string;
+  channelTitle?: string;
+  channelThumbnail?: string;
+}> {
+  const clientId = process.env.YOUTUBE_CLIENT_ID?.trim();
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.trim();
+  const cfg = readYouTubeConfig();
+  const refreshToken = cfg.refreshToken?.trim();
+
+  if (!clientId || !clientSecret) {
+    throw new Error("YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET must be configured in environment variables.");
+  }
+  if (!refreshToken) {
+    throw new Error("Admin YouTube channel is not connected yet. Please connect your YouTube channel in Admin -> Creator Hub.");
+  }
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }).toString(),
+  });
+
+  const tokenData: any = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok || !tokenData.access_token) {
+    invalidateYouTubeHealthCache();
+    throw new Error(formatYouTubeTokenError(tokenData.error, tokenData.error_description));
+  }
+
+  return {
+    accessToken: tokenData.access_token,
+    channelId: cfg.channelId,
+    channelTitle: cfg.channelTitle,
+    channelThumbnail: cfg.channelThumbnail,
+  };
+}
+
+// GET YouTube integration status (Admin Only — performs live OAuth + Channel verification)
+app.get("/api/admin/youtube/status", verifyAdminAuth, async (req, res) => {
+  const forceVerify = req.query.force === "1" || req.query.force === "true" || req.query.verify === "1";
+  const health = await verifyYouTubeConnection(forceVerify);
+  const initialPrivacy = (process.env.YOUTUBE_INITIAL_PRIVACY || "unlisted").toLowerCase();
+  const reqOrigin = typeof req.query.origin === "string" ? req.query.origin.trim() : "";
+  const headerOrigin = resolveRequestOrigin(req);
+  const baseOrigin = (reqOrigin && (reqOrigin.startsWith("https://") || reqOrigin.startsWith("http://localhost")))
+    ? reqOrigin.replace(/\/$/, "")
+    : (headerOrigin || DEFAULT_SITE_URL);
+
+  return res.json({
+    success: true,
+    ...health,
+    initialPrivacy: initialPrivacy === "private" ? "private" : "unlisted",
+    dailyLimitPerCreator: YOUTUBE_DAILY_LIMIT,
+    redirectUri: `${baseOrigin}/api/youtube/callback`,
+  });
+});
+
+// GET OAuth URL to connect Admin YouTube Channel (Admin Only)
+app.get("/api/admin/youtube/auth-url", verifyAdminAuth, (req, res) => {
+  const clientId = process.env.YOUTUBE_CLIENT_ID?.trim();
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) {
+    return res.status(400).json({
+      success: false,
+      error: "YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET are not configured in server environment variables.",
+    });
+  }
+
+  const reqOrigin = typeof req.query.origin === "string" ? req.query.origin.trim() : "";
+  const headerOrigin = resolveRequestOrigin(req);
+  const baseOrigin = (reqOrigin && (reqOrigin.startsWith("https://") || reqOrigin.startsWith("http://localhost")))
+    ? reqOrigin.replace(/\/$/, "")
+    : (headerOrigin || DEFAULT_SITE_URL);
+
+  const redirectUri = `${baseOrigin}/api/youtube/callback`;
+  const state = crypto.randomBytes(24).toString("hex");
+  youtubeOAuthStates.set(state, {
+    redirectUri,
+    adminUid: (req as any).user?.uid || "admin",
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  });
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: [
+      "https://www.googleapis.com/auth/youtube.upload",
+      "https://www.googleapis.com/auth/youtube",
+      "https://www.googleapis.com/auth/youtube.readonly",
+    ].join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    state,
+  });
+
+  return res.json({
+    success: true,
+    url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+    redirectUri,
+  });
+});
+
+// GET OAuth Callback Handler for YouTube Channel Connection
+app.get(["/api/youtube/callback", "/api/youtube/callback/"], async (req, res) => {
+  const { code, state, error: oauthError } = req.query as Record<string, string>;
+
+  if (oauthError) {
+    return res.status(400).send(`
+      <html><body style="font-family:sans-serif;padding:24px;">
+        <h3>YouTube Authorization Failed</h3>
+        <p>${String(oauthError).replace(/[<>&]/g, "")}</p>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'YOUTUBE_OAUTH_ERROR', error: ${JSON.stringify(oauthError)} }, '*');
+            setTimeout(() => window.close(), 1200);
+          }
+        </script>
+      </body></html>
+    `);
+  }
+
+  const stateEntry = state ? youtubeOAuthStates.get(state) : null;
+  if (!code || !stateEntry || Date.now() > stateEntry.expiresAt) {
+    return res.status(400).send(`
+      <html><body style="font-family:sans-serif;padding:24px;">
+        <h3>Invalid or expired OAuth state</h3>
+        <p>Please close this window and try connecting again from the Admin Dashboard.</p>
+      </body></html>
+    `);
+  }
+  youtubeOAuthStates.delete(state);
+
+  const clientId = process.env.YOUTUBE_CLIENT_ID?.trim() || "";
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.trim() || "";
+
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: stateEntry.redirectUri,
+        grant_type: "authorization_code",
+      }).toString(),
+    });
+
+    const tokenData: any = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || tokenData.error || "Failed to exchange authorization code");
+    }
+
+    const existing = readYouTubeConfig();
+    const refreshToken = tokenData.refresh_token || existing.refreshToken;
+    if (!refreshToken) {
+      throw new Error("Google did not return a refresh_token. Please remove app access from Google Account permissions and reconnect.");
+    }
+
+    // Fetch channel profile & ensure account actually owns a YouTube channel
+    const chRes = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const chData: any = await chRes.json().catch(() => ({}));
+    if (!chRes.ok) {
+      throw new Error(chData?.error?.message || "Failed to query YouTube Data API v3 for channel info.");
+    }
+    const firstChannel = chData?.items?.[0];
+    if (!firstChannel) {
+      throw new Error("This Google account does not have a YouTube channel. Please create a YouTube channel or authorize the Google account that owns your store channel.");
+    }
+
+    const channelId = firstChannel.id || "";
+    const channelTitle = firstChannel.snippet?.title || "Connected YouTube Channel";
+    const channelThumbnail = firstChannel.snippet?.thumbnails?.default?.url || "";
+
+    writeYouTubeConfig({
+      refreshToken,
+      channelId,
+      channelTitle,
+      channelThumbnail,
+      connectedAt: new Date().toISOString(),
+      connectedBy: stateEntry.adminUid,
+      disconnected: false,
+    });
+
+    return res.send(`
+      <html>
+        <body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;color:#fff;">
+          <div style="text-align:center;max-width:420px;padding:24px;">
+            <h2 style="margin-bottom:8px;">YouTube Channel Connected!</h2>
+            <p style="color:#cbd5e1;font-size:14px;">Channel: <strong>${channelTitle.replace(/[<>&]/g, "")}</strong></p>
+            <p style="color:#94a3b8;font-size:12px;">Closing this window automatically...</p>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'YOUTUBE_OAUTH_SUCCESS',
+                channel: ${JSON.stringify({ channelId, channelTitle, channelThumbnail })},
+                refreshToken: ${JSON.stringify(refreshToken)}
+              }, '*');
+              setTimeout(() => window.close(), 700);
+            } else {
+              window.location.href = '/admin/creators';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (err: any) {
+    console.error("[YouTube OAuth Callback Error]:", err);
+    return res.status(500).send(`
+      <html><body style="font-family:sans-serif;padding:24px;">
+        <h3>YouTube Connection Error</h3>
+        <p>${String(err.message || "Unknown error").replace(/[<>&]/g, "")}</p>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'YOUTUBE_OAUTH_ERROR', error: ${JSON.stringify(err.message || "Connection failed")} }, '*');
+          }
+        </script>
+      </body></html>
+    `);
+  }
+});
+
+// POST Save manual YouTube refresh token & verify channel (Admin Only)
+app.post("/api/admin/youtube/save-refresh-token", verifyAdminAuth, async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken || typeof refreshToken !== "string") {
+    return res.status(400).json({ success: false, error: "refreshToken is required" });
+  }
+
+  const clientId = process.env.YOUTUBE_CLIENT_ID?.trim();
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) {
+    return res.status(400).json({
+      success: false,
+      error: "YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET must be set in environment variables.",
+    });
+  }
+
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken.trim(),
+        grant_type: "refresh_token",
+      }).toString(),
+    });
+    const tokenData: any = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      return res.status(400).json({
+        success: false,
+        error: tokenData.error_description || tokenData.error || "Invalid refresh token",
+      });
+    }
+
+    const chRes = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const chData: any = await chRes.json().catch(() => ({}));
+    if (!chRes.ok) {
+      return res.status(chRes.status).json({
+        success: false,
+        error: chData?.error?.message || "Refresh token is valid, but YouTube Data API v3 failed to load channel.",
+      });
+    }
+
+    const firstChannel = chData?.items?.[0];
+    if (!firstChannel) {
+      return res.status(400).json({
+        success: false,
+        error: "This Google account does not have a YouTube channel. Please use a refresh token for an account that owns a YouTube channel.",
+      });
+    }
+
+    const channelId = firstChannel.id || "";
+    const channelTitle = firstChannel.snippet?.title || "Connected YouTube Channel";
+    const channelThumbnail = firstChannel.snippet?.thumbnails?.default?.url || "";
+
+    writeYouTubeConfig({
+      refreshToken: refreshToken.trim(),
+      channelId,
+      channelTitle,
+      channelThumbnail,
+      connectedAt: new Date().toISOString(),
+      connectedBy: (req as any).user?.uid || "admin",
+      disconnected: false,
+    });
+
+    return res.json({
+      success: true,
+      channelId,
+      channelTitle,
+      channelThumbnail,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Disconnect YouTube Channel (Admin Only)
+app.post("/api/admin/youtube/disconnect", verifyAdminAuth, (req, res) => {
+  if (process.env.YOUTUBE_REFRESH_TOKEN?.trim()) {
+    writeYouTubeConfig({ disconnected: true });
+  } else {
+    writeYouTubeConfig(null);
+  }
+  return res.json({ success: true, message: "YouTube channel disconnected." });
+});
+
+// GET Creator's Daily YouTube Upload Quota & Platform Connection Status (Creator / Staff)
+app.get("/api/youtube/upload-quota", verifyUserOrStaffAuth, async (req, res) => {
+  try {
+    const uid = (req as any).user?.uid;
+    const idToken = req.headers.authorization?.split("Bearer ")[1]?.trim();
+
+    const health = await verifyYouTubeConnection(false);
+    const { count, dhakaDate } = await getCreatorTodayUploadCount(uid, idToken);
+    const initialPrivacy = (process.env.YOUTUBE_INITIAL_PRIVACY || "unlisted").toLowerCase() === "private" ? "private" : "unlisted";
+
+    return res.json({
+      success: true,
+      youtubeConnected: health.connected,
+      channelTitle: health.channelTitle || null,
+      tokenError: health.connected ? null : health.tokenError,
+      usedToday: count,
+      dailyLimit: YOUTUBE_DAILY_LIMIT,
+      remainingToday: Math.max(0, YOUTUBE_DAILY_LIMIT - count),
+      dhakaDate,
+      initialPrivacy,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Initiate Resumable YouTube Upload Session (Approved Creator, max 1/day)
+app.post("/api/youtube/upload-session", verifyUserOrStaffAuth, async (req, res) => {
+  const uid = (req as any).user?.uid;
+  const idToken = req.headers.authorization?.split("Bearer ")[1]?.trim();
+
+  if (activeCreatorUploadLocks.has(uid)) {
+    return res.status(429).json({
+      success: false,
+      error: "Another upload is already in progress for your account. Please wait for it to finish.",
+    });
+  }
+
+  try {
+    const { title, description, tags, fileSize, mimeType } = req.body || {};
+
+    if (!title || typeof title !== "string" || !title.trim()) {
+      return res.status(400).json({ success: false, error: "Video title/caption is required." });
+    }
+
+    const numericSize = Number(fileSize || 0);
+    const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
+    if (!numericSize || numericSize <= 0 || numericSize > MAX_VIDEO_BYTES) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid video size. Video must be greater than 0 bytes and under 150MB.",
+      });
+    }
+
+    // 1. Verify creator is approved
+    const creatorDoc = await getFirestoreDocWithToken("creators", uid, idToken);
+    if (!creatorDoc || creatorDoc.status !== "approved") {
+      return res.status(403).json({
+        success: false,
+        error: `Only approved creators can upload videos. Your current status is: ${creatorDoc?.status || "unregistered"}`,
+      });
+    }
+
+    // 2. Enforce strict Daily Limit (1 video per creator per Asia/Dhaka day)
+    const { count: usedToday, dhakaDate } = await getCreatorTodayUploadCount(uid, idToken);
+    if (usedToday >= YOUTUBE_DAILY_LIMIT) {
+      return res.status(429).json({
+        success: false,
+        code: "DAILY_LIMIT_REACHED",
+        usedToday,
+        dailyLimit: YOUTUBE_DAILY_LIMIT,
+        dhakaDate,
+        error: `Daily limit reached: You can upload only ${YOUTUBE_DAILY_LIMIT} video per day (${dhakaDate}). Please try again tomorrow.`,
+      });
+    }
+
+    // 3. Get Admin YouTube OAuth access token
+    const ytAuth = await getYouTubeAccessToken();
+    const initialPrivacy = (process.env.YOUTUBE_INITIAL_PRIVACY || "unlisted").toLowerCase() === "private" ? "private" : "unlisted";
+
+    const cleanTags = Array.isArray(tags)
+      ? tags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 15)
+      : ["kbeauty", "skincare", "koreanskinfoodbd"];
+
+    // 4. Initiate YouTube Resumable Upload Session (Unpublished until Admin Approves)
+    const initRes = await fetch(
+      "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${ytAuth.accessToken}`,
+          "Content-Type": "application/json; charset=UTF-8",
+          "X-Upload-Content-Length": String(numericSize),
+          "X-Upload-Content-Type": String(mimeType || "video/mp4"),
+        },
+        body: JSON.stringify({
+          snippet: {
+            title: title.trim().slice(0, 100),
+            description: (description ? `${String(description).trim()}\n\n` : "") + `Creator: ${creatorDoc.displayName || creatorDoc.username || uid}`,
+            tags: cleanTags,
+            categoryId: "26", // Howto & Style
+          },
+          status: {
+            privacyStatus: initialPrivacy,
+            selfDeclaredMadeForKids: false,
+          },
+        }),
+      }
+    );
+
+    const uploadUrl = initRes.headers.get("location");
+    if (!initRes.ok || !uploadUrl) {
+      const errBody: any = await initRes.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || `YouTube upload initiation failed (${initRes.status})`;
+      return res.status(initRes.status >= 400 ? initRes.status : 500).json({
+        success: false,
+        error: errMsg,
+      });
+    }
+
+    // Clean expired sessions
+    const now = Date.now();
+    for (const [sid, s] of youtubeUploadSessions.entries()) {
+      if (now > s.expiresAt) youtubeUploadSessions.delete(sid);
+    }
+
+    const sessionId = crypto.randomBytes(20).toString("hex");
+    youtubeUploadSessions.set(sessionId, {
+      uid,
+      uploadUrl,
+      dhakaDate,
+      title: title.trim().slice(0, 100),
+      initialPrivacy,
+      channelId: ytAuth.channelId,
+      channelTitle: ytAuth.channelTitle,
+      expiresAt: now + 30 * 60 * 1000,
+    });
+
+    return res.json({
+      success: true,
+      sessionId,
+      initialPrivacy,
+      dhakaDate,
+    });
+  } catch (err: any) {
+    console.error("[YouTube Upload Session Error]:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to initiate YouTube upload." });
+  }
+});
+
+// PUT Stream binary video directly to YouTube Resumable Upload URL (Creator / Staff)
+app.put("/api/youtube/upload-stream/:sessionId", verifyUserOrStaffAuth, async (req, res) => {
+  req.setTimeout(0);
+  res.setTimeout(0);
+  const uid = (req as any).user?.uid;
+  const idToken = req.headers.authorization?.split("Bearer ")[1]?.trim();
+  const { sessionId } = req.params;
+  const session = youtubeUploadSessions.get(sessionId);
+
+  if (!session || session.uid !== uid || Date.now() > session.expiresAt) {
+    return res.status(400).json({
+      success: false,
+      error: "Upload session expired or invalid. Please try uploading again.",
+    });
+  }
+
+  // Re-verify daily limit right before streaming
+  const { count: usedToday } = await getCreatorTodayUploadCount(uid, idToken);
+  if (usedToday >= YOUTUBE_DAILY_LIMIT) {
+    youtubeUploadSessions.delete(sessionId);
+    return res.status(429).json({
+      success: false,
+      code: "DAILY_LIMIT_REACHED",
+      error: `Daily upload limit reached (${YOUTUBE_DAILY_LIMIT} video/day).`,
+    });
+  }
+
+  if (activeCreatorUploadLocks.has(uid)) {
+    return res.status(429).json({
+      success: false,
+      error: "Upload already in progress for this account.",
+    });
+  }
+
+  activeCreatorUploadLocks.add(uid);
+
+  try {
+    const targetUrl = new URL(session.uploadUrl);
+    const forwardHeaders: Record<string, string> = {
+      "Content-Type": String(req.headers["content-type"] || "video/mp4"),
+    };
+    if (req.headers["content-length"]) {
+      forwardHeaders["Content-Length"] = String(req.headers["content-length"]);
+    }
+
+    const ytData: any = await new Promise((resolve, reject) => {
+      const upstreamReq = https.request(
+        {
+          protocol: targetUrl.protocol,
+          hostname: targetUrl.hostname,
+          port: targetUrl.port || 443,
+          path: targetUrl.pathname + targetUrl.search,
+          method: "PUT",
+          headers: forwardHeaders,
+        },
+        (upstreamRes) => {
+          const chunks: Buffer[] = [];
+          upstreamRes.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          upstreamRes.on("end", () => {
+            const rawText = Buffer.concat(chunks).toString("utf-8");
+            try {
+              const parsed = rawText ? JSON.parse(rawText) : {};
+              if ((upstreamRes.statusCode || 500) >= 200 && (upstreamRes.statusCode || 500) < 300 && parsed.id) {
+                resolve(parsed);
+              } else {
+                const msg = parsed?.error?.message || `YouTube upload failed (${upstreamRes.statusCode})`;
+                reject(new Error(msg));
+              }
+            } catch (parseErr) {
+              reject(new Error(`Unexpected response from YouTube (${upstreamRes.statusCode}): ${rawText.slice(0, 200)}`));
+            }
+          });
+        }
+      );
+
+      upstreamReq.on("error", (err) => reject(err));
+      req.on("error", (err) => {
+        upstreamReq.destroy();
+        reject(err);
+      });
+      req.on("aborted", () => {
+        upstreamReq.destroy();
+        reject(new Error("Client aborted video upload."));
+      });
+
+      req.pipe(upstreamReq);
+    });
+
+    const youtubeVideoId = String(ytData.id);
+    const privacyStatus = (ytData?.status?.privacyStatus || session.initialPrivacy) as "private" | "unlisted" | "public";
+
+    // Mark creator's daily quota as used
+    recordCreatorDailyUpload(uid, youtubeVideoId, session.dhakaDate);
+    youtubeUploadSessions.delete(sessionId);
+
+    return res.json({
+      success: true,
+      youtubeVideoId,
+      videoUrl: `https://www.youtube.com/watch?v=${youtubeVideoId}`,
+      embedUrl: `https://www.youtube.com/embed/${youtubeVideoId}`,
+      thumbnailUrl: `https://i.ytimg.com/vi/${youtubeVideoId}/hqdefault.jpg`,
+      privacyStatus,
+      channelId: session.channelId || ytData?.snippet?.channelId || "",
+      channelTitle: session.channelTitle || ytData?.snippet?.channelTitle || "",
+    });
+  } catch (err: any) {
+    console.error("[YouTube Stream Upload Error]:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to stream video to YouTube.",
+    });
+  } finally {
+    activeCreatorUploadLocks.delete(uid);
+  }
+});
+
+// POST Update YouTube Video Privacy Status on Admin Moderation (Admin Only)
+app.post("/api/admin/youtube/update-privacy", verifyAdminAuth, async (req, res) => {
+  const { youtubeVideoId, privacyStatus } = req.body || {};
+  if (!youtubeVideoId || !["public", "unlisted", "private"].includes(privacyStatus)) {
+    return res.status(400).json({
+      success: false,
+      error: "youtubeVideoId and valid privacyStatus ('public' | 'unlisted' | 'private') are required.",
+    });
+  }
+
+  try {
+    const ytAuth = await getYouTubeAccessToken();
+    const updateRes = await fetch("https://www.googleapis.com/youtube/v3/videos?part=status", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${ytAuth.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: String(youtubeVideoId),
+        status: {
+          privacyStatus,
+          selfDeclaredMadeForKids: false,
+        },
+      }),
+    });
+
+    const updateData: any = await updateRes.json().catch(() => ({}));
+    if (!updateRes.ok) {
+      return res.status(updateRes.status).json({
+        success: false,
+        error: updateData?.error?.message || "Failed to update YouTube video privacy status.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      youtubeVideoId,
+      privacyStatus: updateData?.status?.privacyStatus || privacyStatus,
+    });
+  } catch (err: any) {
+    console.error("[YouTube Privacy Update Error]:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to update YouTube privacy status.",
+    });
+  }
+});
+
+// POST Refresh Live YouTube Views/Likes/Comments Metrics (Admin Only)
+app.post("/api/admin/youtube/refresh-metrics", verifyAdminAuth, async (req, res) => {
+  const { youtubeVideoId } = req.body || {};
+  if (!youtubeVideoId) {
+    return res.status(400).json({ success: false, error: "youtubeVideoId is required" });
+  }
+
+  try {
+    const ytAuth = await getYouTubeAccessToken();
+    const statsRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=statistics,status&id=${encodeURIComponent(String(youtubeVideoId))}`,
+      {
+        headers: { Authorization: `Bearer ${ytAuth.accessToken}` },
+      }
+    );
+
+    const statsData: any = await statsRes.json().catch(() => ({}));
+    if (!statsRes.ok) {
+      return res.status(statsRes.status).json({
+        success: false,
+        error: statsData?.error?.message || "Failed to fetch YouTube video statistics.",
+      });
+    }
+
+    const item = statsData?.items?.[0];
+    if (!item) {
+      return res.status(404).json({ success: false, error: "YouTube video not found on connected channel." });
+    }
+
+    return res.json({
+      success: true,
+      youtubeVideoId,
+      views: Math.max(0, Number(item.statistics?.viewCount || 0)),
+      likes: Math.max(0, Number(item.statistics?.likeCount || 0)),
+      comments: Math.max(0, Number(item.statistics?.commentCount || 0)),
+      privacyStatus: item.status?.privacyStatus || "unlisted",
+    });
+  } catch (err: any) {
+    console.error("[YouTube Metrics Refresh Error]:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to refresh YouTube metrics." });
+  }
+});
+
+// DELETE YouTube Video from Connected Channel when Admin deletes a reel (Admin Only)
+app.delete("/api/admin/youtube/video/:videoId", verifyAdminAuth, async (req, res) => {
+  const { videoId } = req.params;
+  if (!videoId) {
+    return res.status(400).json({ success: false, error: "videoId is required" });
+  }
+
+  try {
+    const ytAuth = await getYouTubeAccessToken();
+    const delRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?id=${encodeURIComponent(videoId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${ytAuth.accessToken}` },
+    });
+
+    if (!delRes.ok && delRes.status !== 404) {
+      const delErr: any = await delRes.json().catch(() => ({}));
+      return res.status(delRes.status).json({
+        success: false,
+        error: delErr?.error?.message || "Failed to delete video from YouTube.",
+      });
+    }
+
+    return res.json({ success: true, videoId });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST Apply for Creator (Public user registration/application)
 app.post("/api/creator/apply", async (req, res) => {
   const { userId, email, phone, username, displayName, bio, profileImage, facebookUrl, instagramUrl, niche } = req.body;
@@ -2487,7 +4059,8 @@ app.post("/api/creator/apply", async (req, res) => {
   }
 
   try {
-    if (!db) {
+    const idToken = getIdTokenFromRequest(req);
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
@@ -2495,9 +4068,15 @@ app.post("/api/creator/apply", async (req, res) => {
     const now = new Date().toISOString();
 
     // 1. Check if user already applied or has a creator profile
-    const existingSnap = await getDoc(doc(db, "creators", creatorId));
-    if (existingSnap.exists()) {
-      const existingData = existingSnap.data();
+    let existingData: any = idToken
+      ? await getFirestoreDocWithToken("creators", creatorId, idToken)
+      : null;
+    if (!existingData && !idToken && db) {
+      const existingSnap = await getDoc(doc(db, "creators", creatorId));
+      if (existingSnap.exists()) existingData = existingSnap.data();
+    }
+
+    if (existingData) {
       if (existingData.status === 'pending') {
         return res.status(409).json({
           success: false,
@@ -2521,12 +4100,15 @@ app.post("/api/creator/apply", async (req, res) => {
       }
     }
 
-    // 2. Check if username is taken by someone else
-    const usernameQuery = query(collection(db, "creators"), where("username", "==", cleanUsername));
-    const usernameSnap = await getDocs(usernameQuery);
-    if (!usernameSnap.empty) {
-      const existingUser = usernameSnap.docs[0].data();
-      if (existingUser.userId !== creatorId && existingUser.creatorId !== creatorId) {
+    // 2. Check if username is taken by someone else (via public_creators or creators)
+    const publicMatches = await queryFirestoreCollectionWithToken(
+      "public_creators",
+      [{ field: "username", op: "EQUAL", value: cleanUsername }],
+      idToken
+    );
+    if (publicMatches.length > 0) {
+      const existingUser = publicMatches[0];
+      if (existingUser.userId !== creatorId && existingUser.creatorId !== creatorId && existingUser.id !== creatorId) {
         return res.status(409).json({
           success: false,
           error: `The handle @${cleanUsername} is already registered by another creator. Please choose a different username.`
@@ -2562,11 +4144,15 @@ app.post("/api/creator/apply", async (req, res) => {
     };
 
     // Save to creators collection
-    await setDoc(doc(db, "creators", creatorId), creatorPayload);
+    if (idToken) {
+      await setFirestoreDocWithToken("creators", creatorId, creatorPayload, idToken, false);
+    } else if (db) {
+      await setDoc(doc(db, "creators", creatorId), creatorPayload);
+    }
 
     // Save public sync
     try {
-      await setDoc(doc(db, "public_creators", creatorId), {
+      const publicPayload = {
         creatorId,
         username: cleanUsername,
         displayName: String(displayName).trim(),
@@ -2581,18 +4167,27 @@ app.post("/api/creator/apply", async (req, res) => {
         totalReels: 0,
         status: 'pending',
         updatedAt: now,
-      }, { merge: true });
+      };
+      if (idToken) {
+        await setFirestoreDocWithToken("public_creators", creatorId, publicPayload, idToken, true);
+      } else if (db) {
+        await setDoc(doc(db, "public_creators", creatorId), publicPayload, { merge: true });
+      }
     } catch (pubErr) {
       console.warn("Could not sync public creator profile on apply:", pubErr);
     }
 
     // Update user collection role safely
     try {
-      await setDoc(doc(db, "users", creatorId), {
-        role: "creator",
-        creatorId,
-        updatedAt: now,
-      }, { merge: true });
+      if (idToken) {
+        await setFirestoreDocWithToken("users", creatorId, { role: "creator", creatorId, updatedAt: now }, idToken, true);
+      } else if (db) {
+        await setDoc(doc(db, "users", creatorId), {
+          role: "creator",
+          creatorId,
+          updatedAt: now,
+        }, { merge: true });
+      }
     } catch (e) {
       console.warn("Could not merge user doc role:", e);
     }
@@ -2611,6 +4206,7 @@ app.post("/api/creator/apply", async (req, res) => {
 // POST Admin Update Creator Status (Admin Only)
 app.post("/api/admin/creator/status", verifyAdminAuth, async (req, res) => {
   const { creatorId, status, reason } = req.body;
+  const idToken = (req as any).idToken || getIdTokenFromRequest(req);
 
   if (!creatorId || !['pending', 'approved', 'suspended', 'rejected'].includes(status)) {
     return res.status(400).json({
@@ -2620,35 +4216,48 @@ app.post("/api/admin/creator/status", verifyAdminAuth, async (req, res) => {
   }
 
   try {
-    if (!db) {
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    const docRef = doc(db, "creators", String(creatorId));
     const now = new Date().toISOString();
-    await setDoc(docRef, {
+    const statusUpdate = {
       status,
       statusReason: reason || null,
       updatedAt: now,
-    }, { merge: true });
+    };
+
+    if (idToken) {
+      await setFirestoreDocWithToken("creators", String(creatorId), statusUpdate, idToken, true);
+    } else if (db) {
+      await setDoc(doc(db, "creators", String(creatorId)), statusUpdate, { merge: true });
+    }
 
     // Sync to public_creators
     try {
-      await setDoc(doc(db, "public_creators", String(creatorId)), {
-        status,
-        updatedAt: now,
-      }, { merge: true });
+      if (idToken) {
+        await setFirestoreDocWithToken("public_creators", String(creatorId), { status, updatedAt: now }, idToken, true);
+      } else if (db) {
+        await setDoc(doc(db, "public_creators", String(creatorId)), {
+          status,
+          updatedAt: now,
+        }, { merge: true });
+      }
     } catch (pErr) {
       console.warn("Public creator sync warning on status update:", pErr);
     }
 
     // Sync role doc if user exists
     try {
-      const userRef = doc(db, "users", String(creatorId));
-      await setDoc(userRef, { 
+      const rolePayload = {
         role: status === 'approved' ? 'creator' : 'customer',
-        updatedAt: now 
-      }, { merge: true });
+        updatedAt: now,
+      };
+      if (idToken) {
+        await setFirestoreDocWithToken("users", String(creatorId), rolePayload, idToken, true);
+      } else if (db) {
+        await setDoc(doc(db, "users", String(creatorId)), rolePayload, { merge: true });
+      }
     } catch (uErr) {
       console.warn("User doc sync warning:", uErr);
     }
@@ -2668,15 +4277,21 @@ app.post("/api/admin/creator/status", verifyAdminAuth, async (req, res) => {
 // GET All Creators for Admin (Admin Only)
 app.get("/api/admin/creators", verifyAdminAuth, async (req, res) => {
   try {
-    if (!db) {
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    const querySnap = await getDocs(collection(db, "creators"));
-    const creators: any[] = [];
-    querySnap.forEach((d) => {
-      creators.push({ creatorId: d.id, ...d.data() });
-    });
+    let creators: any[] = [];
+    if (idToken) {
+      const docs = await getFirestoreCollectionWithToken("creators", idToken);
+      creators = docs.map((d) => ({ creatorId: d.creatorId || d.id, ...d }));
+    } else if (db) {
+      const querySnap = await getDocs(collection(db, "creators"));
+      querySnap.forEach((d) => {
+        creators.push({ creatorId: d.id, ...d.data() });
+      });
+    }
 
     return res.json({ success: true, count: creators.length, creators });
   } catch (err: any) {
@@ -2687,15 +4302,21 @@ app.get("/api/admin/creators", verifyAdminAuth, async (req, res) => {
 // GET All Creators alias (Admin Only)
 app.get("/api/creators", verifyAdminAuth, async (req, res) => {
   try {
-    if (!db) {
+    const idToken = (req as any).idToken || getIdTokenFromRequest(req);
+    if (!idToken && !db) {
       return res.status(503).json({ success: false, error: "Database not initialized on server" });
     }
 
-    const querySnap = await getDocs(collection(db, "creators"));
-    const creators: any[] = [];
-    querySnap.forEach((d) => {
-      creators.push({ creatorId: d.id, ...d.data() });
-    });
+    let creators: any[] = [];
+    if (idToken) {
+      const docs = await getFirestoreCollectionWithToken("creators", idToken);
+      creators = docs.map((d) => ({ creatorId: d.creatorId || d.id, ...d }));
+    } else if (db) {
+      const querySnap = await getDocs(collection(db, "creators"));
+      querySnap.forEach((d) => {
+        creators.push({ creatorId: d.id, ...d.data() });
+      });
+    }
 
     return res.json({ success: true, count: creators.length, creators });
   } catch (err: any) {
@@ -3033,7 +4654,26 @@ app.post("/api/slack/trigger-test-notification", async (req, res) => {
   }
 });
 
-// 1. placeOrder Endpoint (Authoritative Server-Side Checkout with Idempotency)
+// In-memory idempotency store for online checkout retries (15-minute TTL)
+const placeOrderIdempotencyCache = new Map<string, { order: any; expiresAt: number }>();
+
+function stripUndefinedFields<T>(val: T): T {
+  if (Array.isArray(val)) {
+    return val.map(stripUndefinedFields) as unknown as T;
+  }
+  if (val !== null && typeof val === "object") {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== undefined) {
+        out[k] = stripUndefinedFields(v);
+      }
+    }
+    return out as T;
+  }
+  return val;
+}
+
+// 1. placeOrder Endpoint (Authoritative Server-Side Price & Stock Validation with Idempotency)
 app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
   const { 
     items, 
@@ -3042,6 +4682,7 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
     customerEmail, 
     address, 
     deliveryArea,
+    isFreeDelivery,
     customer_uid,
     couponCode,
     couponDiscount,
@@ -3058,197 +4699,175 @@ app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
     return res.status(500).json({ error: "Database not initialized" });
   }
 
+  // Prune expired idempotency entries periodically
+  const nowMs = Date.now();
+  if (placeOrderIdempotencyCache.size > 200) {
+    for (const [k, entry] of placeOrderIdempotencyCache.entries()) {
+      if (nowMs > entry.expiresAt) {
+        placeOrderIdempotencyCache.delete(k);
+      }
+    }
+  }
+
+  // Idempotency Check
+  if (idempotencyKey) {
+    const existing = placeOrderIdempotencyCache.get(String(idempotencyKey));
+    if (existing && nowMs <= existing.expiresAt && existing.order) {
+      return res.json({
+        success: true,
+        orderId: existing.order.id,
+        order: existing.order,
+        message: `Successfully placed order ${existing.order.id}`
+      });
+    }
+  }
+
   const orderId = "ORD-" + Math.floor(100000 + Math.random() * 900000);
-  const deliveryCharge = deliveryArea === "outside" ? 120 : 60;
+  const deliveryCharge = isFreeDelivery ? 0 : (deliveryArea === "outside" ? 150 : 80);
   const nowIso = new Date().toISOString();
 
   try {
-    const committedOrder = await runTransaction(db, async (transaction) => {
-      // 0. Idempotency Check (Check if order was already committed under this idempotencyKey)
-      if (idempotencyKey) {
-        const idempRef = doc(db, "payment_idempotency", String(idempotencyKey));
-        const idempSnap = await transaction.get(idempRef);
-        if (idempSnap.exists()) {
-          const idempData = idempSnap.data() as any;
-          if (idempData.orderId) {
-            const existingOrderRef = doc(db, "orders", idempData.orderId);
-            const existingOrderSnap = await transaction.get(existingOrderRef);
-            if (existingOrderSnap.exists()) {
-              console.log(`[placeOrder] Idempotent hit: returning existing order #${idempData.orderId} without duplicate stock deduction.`);
-              return existingOrderSnap.data();
-            }
-          }
-        }
+    const validatedProducts: Array<{
+      data: any;
+      productId: string;
+      quantity: number;
+      name: string;
+      unitPrice: number;
+      barcode: string;
+    }> = [];
+
+    for (const item of items) {
+      const productRef = doc(db, "products", item.productId);
+      const productDoc = await getDoc(productRef);
+
+      if (!productDoc.exists()) {
+        return res.status(400).json({ error: `Product "${item.name || item.productId}" does not exist.` });
       }
 
-      const validatedProducts: Array<{
-        ref: any;
-        data: any;
-        currentStock: number;
-        updatedStock: number;
-        productId: string;
-        quantity: number;
-        name: string;
-        unitPrice: number;
-      }> = [];
+      const productData = productDoc.data() as any;
+      const currentStock = Number(productData?.stock ?? 0);
+      const qty = Math.max(1, Number(item.quantity || 1));
 
-      for (const item of items) {
-        const productRef = doc(db, "products", item.productId);
-        const productDoc = await transaction.get(productRef);
+      if (currentStock < qty) {
+        return res.status(400).json({
+          error: `Insufficient stock for "${productData?.name || item.name}". Requested: ${qty}, Available: ${currentStock}`
+        });
+      }
 
-        if (!productDoc.exists()) {
-          throw new Error(`Product "${item.name || item.productId}" does not exist.`);
-        }
-
-        const productData = productDoc.data() as any;
-        const currentStock = Number(productData?.stock ?? 0);
-
-        if (currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for "${productData?.name || item.name}". Requested: ${item.quantity}, Available: ${currentStock}`);
-        }
-
-        // Authoritative server-side retail price
-        const retail = Number(productData.retailPrice ?? productData.price ?? 0);
-        const discount = productData.discountRetailPrice !== undefined && Number(productData.discountRetailPrice) > 0 && Number(productData.discountRetailPrice) < retail
+      // Authoritative server-side retail price
+      const retail = Number(productData.retailPrice ?? productData.price ?? 0);
+      const discount =
+        productData.discountRetailPrice !== undefined &&
+        Number(productData.discountRetailPrice) > 0 &&
+        Number(productData.discountRetailPrice) < retail
           ? Number(productData.discountRetailPrice)
-          : undefined;
-        const unitPrice = discount ?? retail;
+          : productData.discountPrice !== undefined &&
+            Number(productData.discountPrice) > 0 &&
+            Number(productData.discountPrice) < retail
+            ? Number(productData.discountPrice)
+            : undefined;
+      const unitPrice = discount ?? retail;
 
-        validatedProducts.push({
-          ref: productRef,
-          updatedStock: currentStock - item.quantity,
-          productId: item.productId,
-          quantity: item.quantity,
-          name: productData.name || item.name,
-          unitPrice,
-          currentStock,
-          data: productData
-        });
-      }
+      validatedProducts.push({
+        productId: item.productId,
+        quantity: qty,
+        name: productData.name || item.name,
+        unitPrice,
+        barcode: productData.barcode || item.barcode || "",
+        data: productData
+      });
+    }
 
-      // Calculate server-side total
-      const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + (p.unitPrice * p.quantity), 0);
-      const totalDiscount = Number(couponDiscount || 0) + Number(pointsDiscount || 0);
-      const totalAmount = Math.max(0, itemsSubtotal + deliveryCharge - totalDiscount);
-      const cogsAmount = validatedProducts.reduce((sum, p) => {
-        const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
-        return sum + (cost * p.quantity);
-      }, 0);
-      const grossProfit = Math.max(0, totalAmount - cogsAmount);
+    // Calculate server-side totals
+    const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + p.unitPrice * p.quantity, 0);
+    const totalDiscount = Number(couponDiscount || 0) + Number(pointsDiscount || 0);
+    const totalAmount = Math.max(0, itemsSubtotal + deliveryCharge - totalDiscount);
+    const cogsAmount = validatedProducts.reduce((sum, p) => {
+      const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
+      return sum + cost * p.quantity;
+    }, 0);
+    const grossProfit = Math.max(0, totalAmount - cogsAmount);
 
-      // Decrement stock and log inventory change
-      for (const upd of validatedProducts) {
-        transaction.update(upd.ref, { stock: upd.updatedStock, updated_at: nowIso });
+    const earnedPoints = customer_uid ? Math.floor(totalAmount / 10) : 0;
+    const redeemedPoints = customer_uid ? Number(pointsDiscount || 0) : 0;
 
-        const logRef = doc(collection(db, "inventory_logs"));
-        transaction.set(logRef, {
-          id: logRef.id,
-          productId: upd.productId,
-          productName: upd.name,
-          type: "sale",
-          quantity: upd.updatedStock,
-          change: -1 * upd.quantity,
-          prevStock: upd.currentStock,
-          newStock: upd.updatedStock,
-          note: `Website Order Checkout - #${orderId}`,
-          source: "WEBSITE",
-          orderId,
-          performedBy: "Website Checkout",
-          timestamp: nowIso,
-          createdAt: nowIso
-        });
-
-        const movementRef = doc(collection(db, "stock_movements"));
-        transaction.set(movementRef, {
-          id: movementRef.id,
-          productId: upd.productId,
-          productName: upd.name,
-          orderId,
-          quantity: -upd.quantity,
-          type: "sale",
-          source: "WEBSITE",
-          performedBy: "Website Checkout",
-          previousStock: upd.currentStock,
-          newStock: upd.updatedStock,
-          reason: "Website Online Checkout",
-          timestamp: nowIso,
-          createdAt: nowIso
-        });
-      }
-
-      // Create Order doc with initial UNPAID due status
-      const newOrder = {
-        id: orderId,
-        customerName: (customerName || "").trim() || "Website Customer",
-        customerPhone: (customerPhone || "").trim() || "N/A",
-        customerEmail: customerEmail || "",
-        customer_uid: customer_uid || null,
-        address: address || "Inside Dhaka",
-        items: validatedProducts.map(p => ({
+    // Note: Stock is NOT deducted on online order creation (stock_deducted: false);
+    // Staff deducts stock transactionally upon scan & fulfillment in Admin Order Management.
+    const rawOrder = {
+      id: orderId,
+      customerName: (customerName || "").trim() || "Website Customer",
+      customerPhone: (customerPhone || "").trim() || "N/A",
+      customerEmail: customerEmail || "",
+      customer_uid: customer_uid || null,
+      address: (address || "").trim() || "Inside Dhaka",
+      items: validatedProducts.map((p, idx) => {
+        const orig = items[idx] || {};
+        return {
           productId: p.productId,
           name: p.name,
           price: p.unitPrice,
           quantity: p.quantity,
-          scannedQuantity: 0
-        })),
-        totalAmount,
-        totalPaid: 0,
-        dueAmount: totalAmount,
-        paymentStatus: "UNPAID",
-        status: "pending",
-        order_source: "WEBSITE",
-        stock_deducted: true,
-        createdAt: nowIso,
-        paymentMethod: "COD",
-        sessionType: "Web",
-        isPaid: false,
-        couponCode: couponCode || undefined,
-        couponDiscount: couponDiscount > 0 ? couponDiscount : undefined,
-        pointsDiscount: pointsDiscount > 0 ? pointsDiscount : undefined,
-        shippingCharge: deliveryCharge,
-        cogsAmount,
-        grossProfit,
-        attribution: attribution || {},
-        analytics: {
-          purchaseEventId: `purchase_${orderId}`,
-          capiStatus: "pending"
-        },
-        paymentTransactions: []
-      };
+          scannedQuantity: 0,
+          barcode: p.barcode,
+          ...(orig.isCombo ? { isCombo: true, comboType: orig.comboType } : {}),
+          ...(Array.isArray(orig.comboComponents) && orig.comboComponents.length > 0
+            ? { comboComponents: orig.comboComponents }
+            : {})
+        };
+      }),
+      totalAmount,
+      discountAmount: totalDiscount,
+      totalPaid: 0,
+      dueAmount: totalAmount,
+      paymentStatus: "UNPAID",
+      status: "pending",
+      order_source: "WEBSITE",
+      stock_deducted: false,
+      createdAt: nowIso,
+      paymentMethod: "COD",
+      sessionType: "Online",
+      isPaid: false,
+      ...(couponCode ? { couponCode } : {}),
+      ...(Number(couponDiscount) > 0 ? { couponDiscount: Number(couponDiscount) } : {}),
+      ...(isFreeDelivery ? { isFreeDelivery: true } : {}),
+      ...(Number(pointsDiscount) > 0 ? { pointsDiscount: Number(pointsDiscount) } : {}),
+      pointsEarned: earnedPoints,
+      pointsRedeemed: redeemedPoints,
+      shippingCharge: deliveryCharge,
+      cogsAmount,
+      grossProfit,
+      attribution: attribution || {},
+      analytics: {
+        purchaseEventId: `purchase_${orderId}`,
+        capiStatus: "pending"
+      },
+      paymentTransactions: []
+    };
 
-      const orderRef = doc(db, "orders", orderId);
-      transaction.set(orderRef, newOrder);
+    const committedOrder = stripUndefinedFields(rawOrder);
+    await setDoc(doc(db, "orders", orderId), committedOrder);
 
-      // Record Idempotency Key
-      if (idempotencyKey) {
-        const idempRef = doc(db, "payment_idempotency", String(idempotencyKey));
-        transaction.set(idempRef, {
-          id: idempotencyKey,
-          orderId,
-          status: "completed",
-          createdAt: nowIso,
-          totalAmount,
-          source: "WEBSITE"
-        });
-      }
-
-      return newOrder;
-    });
+    if (idempotencyKey) {
+      placeOrderIdempotencyCache.set(String(idempotencyKey), {
+        order: committedOrder,
+        expiresAt: nowMs + 15 * 60 * 1000
+      });
+    }
 
     // Notify Slack asynchronously
     import('./src/services/slackNotificationService').then(({ slackNotificationService }) => {
       slackNotificationService.notifyNewOrder(committedOrder as any).catch(console.warn);
     }).catch(() => {});
 
-    res.json({
+    return res.json({
       success: true,
-      orderId: (committedOrder as any).id || orderId,
+      orderId,
       order: committedOrder,
-      message: `Successfully placed order ${(committedOrder as any).id || orderId}`
+      message: `Successfully placed order ${orderId}`
     });
   } catch (error: any) {
-    console.error("placeOrder transaction failed:", error);
-    res.status(400).json({ error: error.message || "Transaction aborted" });
+    console.error("placeOrder failed:", error);
+    return res.status(500).json({ error: error.message || "Could not create order" });
   }
 });
 
@@ -7803,8 +9422,9 @@ async function getMetaCatalogProducts(req: express.Request) {
   }
 
   // Load configured settings
+  const dynamicSiteUrl = resolveSiteBaseUrl(req);
   let settings: any = {
-    domainUrl: "https://koreanskinfood.web.app",
+    domainUrl: dynamicSiteUrl,
     currency: "BDT",
     defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
     defaultBrand: "Korean Skin Food BD"
@@ -7820,9 +9440,9 @@ async function getMetaCatalogProducts(req: express.Request) {
     }
   }
 
-  // Resolve base store URL (defaulting to https://koreanskinfood.web.app)
-  let baseUrl = (settings.domainUrl && settings.domainUrl.trim()) ? settings.domainUrl.trim() : "https://koreanskinfood.web.app";
-  baseUrl = baseUrl.replace(/\/+$/, "");
+  // Resolve base store URL dynamically (defaulting to https://koreanskinfood.com)
+  const baseUrl = normalizeConfiguredDomainUrl(settings.domainUrl, req);
+  settings.domainUrl = baseUrl;
 
   // Normalize products
   const formattedItems = products.map((prod) => {
@@ -8112,12 +9732,13 @@ app.get("/api/meta-catalog/preview", async (req, res) => {
 // 4. Get Meta Catalog Settings
 app.get("/api/meta-catalog/settings", async (req, res) => {
   try {
+    const dynamicSiteUrl = resolveSiteBaseUrl(req);
     let settings: any = {
       catalogId: "",
       hasAccessToken: false,
       pixelId: "1181966467366737",
       currency: "BDT",
-      domainUrl: "https://koreanskinfood.web.app",
+      domainUrl: dynamicSiteUrl,
       defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
       lastSyncAt: null,
       lastSyncStatus: "idle",
@@ -8132,7 +9753,7 @@ app.get("/api/meta-catalog/settings", async (req, res) => {
           ...settings,
           ...data,
           pixelId: data.pixelId || "1181966467366737",
-          domainUrl: data.domainUrl || "https://koreanskinfood.web.app",
+          domainUrl: normalizeConfiguredDomainUrl(data.domainUrl, req),
           hasAccessToken: !!data.accessToken,
           accessToken: undefined // Do not leak full token
         };
@@ -8154,13 +9775,13 @@ app.post("/api/meta-catalog/settings", async (req, res) => {
       return res.status(500).json({ success: false, error: "Database not connected" });
     }
 
-    const cleanedDomain = String(domainUrl || "https://koreanskinfood.web.app").trim().replace(/\/+$/, "");
+    const cleanedDomain = normalizeConfiguredDomainUrl(domainUrl, req);
 
     const payload: any = {
       catalogId: String(catalogId || "").trim(),
       pixelId: String(pixelId || "1181966467366737").trim(),
       currency: String(currency || "BDT").trim().toUpperCase(),
-      domainUrl: cleanedDomain || "https://koreanskinfood.web.app",
+      domainUrl: cleanedDomain,
       defaultCategory: String(defaultCategory || "Health & Beauty > Personal Care > Cosmetics > Skin Care").trim(),
       updatedAt: new Date().toISOString()
     };
@@ -8721,7 +10342,7 @@ app.get("/api/pinterest/test-verify", async (req, res) => {
 // TECHNICAL SEO & GOOGLE RANKING ENGINE
 // ==========================================
 
-const BASE_STORE_URL = "https://koreanskinfood.web.app";
+const BASE_STORE_URL = DEFAULT_SITE_URL;
 
 function isSearchEngineBot(userAgent?: string): boolean {
   if (!userAgent) return false;
@@ -8736,18 +10357,14 @@ function isSearchEngineBot(userAgent?: string): boolean {
   return botList.some(bot => ua.includes(bot));
 }
 
-// 1. Technical robots.txt Endpoint
+// 1. Technical robots.txt Endpoint (Dynamically adapts to active domain, defaulting to https://koreanskinfood.com)
 app.get("/robots.txt", (req, res) => {
+  const siteBase = resolveSiteBaseUrl(req);
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=86400");
-
-  const robotsPath = path.resolve(process.cwd(), "public", "robots.txt");
-  if (fs.existsSync(robotsPath)) {
-    return res.sendFile(robotsPath);
-  }
+  res.setHeader("Cache-Control", "public, max-age=3600");
 
   const defaultRobots = [
-    "# robots.txt for Korean Skin Food BD (https://koreanskinfood.web.app/)",
+    `# robots.txt for Korean Skin Food BD (${siteBase}/)`,
     "User-agent: *",
     "Allow: /",
     "Allow: /shop",
@@ -8760,9 +10377,13 @@ app.get("/robots.txt", (req, res) => {
     "Allow: /privacy-policy",
     "Allow: /terms-of-service",
     "Allow: /become-a-creator",
+    "",
+    "# Block administrative, private user, checkout, and internal POS paths",
     "Disallow: /admin/",
     "Disallow: /login",
     "Disallow: /profile",
+    "Disallow: /checkout",
+    "Disallow: /thank-you",
     "Disallow: /wholesale/profile",
     "Disallow: /wholesale/checkout",
     "Disallow: /wholesale/cart",
@@ -8771,7 +10392,7 @@ app.get("/robots.txt", (req, res) => {
     "Disallow: /pos/",
     "Disallow: /api/",
     "",
-    "Sitemap: https://koreanskinfood.web.app/sitemap.xml"
+    `Sitemap: ${siteBase}/sitemap.xml`
   ].join("\n");
 
   return res.send(defaultRobots);
@@ -8780,6 +10401,7 @@ app.get("/robots.txt", (req, res) => {
 // 2. Dynamic XML Sitemap (/sitemap.xml)
 app.get("/sitemap.xml", async (req, res) => {
   try {
+    const siteBase = resolveSiteBaseUrl(req);
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=14400");
 
@@ -8798,21 +10420,21 @@ app.get("/sitemap.xml", async (req, res) => {
 
     // Static core pages
     const staticRoutes = [
-      { url: `${BASE_STORE_URL}/`, priority: "1.0", changefreq: "daily", lastmod: "2026-03-25" },
-      { url: `${BASE_STORE_URL}/shop`, priority: "0.9", changefreq: "daily", lastmod: "2026-03-25" },
-      { url: `${BASE_STORE_URL}/brands`, priority: "0.9", changefreq: "weekly", lastmod: "2026-03-22" },
-      { url: `${BASE_STORE_URL}/guides`, priority: "0.85", changefreq: "weekly", lastmod: "2026-03-24" },
-      { url: `${BASE_STORE_URL}/about-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
-      { url: `${BASE_STORE_URL}/contact-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
-      { url: `${BASE_STORE_URL}/become-a-creator`, priority: "0.7", changefreq: "monthly", lastmod: "2026-02-20" },
-      { url: `${BASE_STORE_URL}/privacy-policy`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" },
-      { url: `${BASE_STORE_URL}/terms-of-service`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" }
+      { url: `${siteBase}/`, priority: "1.0", changefreq: "daily", lastmod: "2026-03-25" },
+      { url: `${siteBase}/shop`, priority: "0.9", changefreq: "daily", lastmod: "2026-03-25" },
+      { url: `${siteBase}/brands`, priority: "0.9", changefreq: "weekly", lastmod: "2026-03-22" },
+      { url: `${siteBase}/guides`, priority: "0.85", changefreq: "weekly", lastmod: "2026-03-24" },
+      { url: `${siteBase}/about-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
+      { url: `${siteBase}/contact-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
+      { url: `${siteBase}/become-a-creator`, priority: "0.7", changefreq: "monthly", lastmod: "2026-02-20" },
+      { url: `${siteBase}/privacy-policy`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" },
+      { url: `${siteBase}/terms-of-service`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" }
     ];
 
     // Top Flagship Brands
     const brandSlugs = ["cosrx", "beauty-of-joseon", "skin1004", "anua", "some-by-mi", "round-lab"];
     const brandRoutes = brandSlugs.map(slug => ({
-      url: `${BASE_STORE_URL}/brand/${slug}`,
+      url: `${siteBase}/brand/${slug}`,
       priority: "0.85",
       changefreq: "weekly",
       lastmod: "2026-03-22"
@@ -8832,7 +10454,7 @@ app.get("/sitemap.xml", async (req, res) => {
       "choosing-skincare-products-according-to-skin-type"
     ];
     const guideRoutes = guideSlugs.map(slug => ({
-      url: `${BASE_STORE_URL}/guide/${slug}`,
+      url: `${siteBase}/guide/${slug}`,
       priority: "0.8",
       changefreq: "weekly",
       lastmod: "2026-03-24"
@@ -8853,7 +10475,7 @@ app.get("/sitemap.xml", async (req, res) => {
           } catch {}
         }
         return {
-          url: `${BASE_STORE_URL}/product/${encodeURIComponent(p.id)}`,
+          url: `${siteBase}/product/${encodeURIComponent(p.id)}`,
           priority: "0.8",
           changefreq: "weekly",
           lastmod
@@ -9071,12 +10693,13 @@ async function startServer() {
       }
 
       console.log(`[SEO Bot Crawler Detected] User-Agent: "${userAgent.slice(0, 45)}" requested path: ${req.path}`);
+      const siteBase = resolveSiteBaseUrl(req);
 
       // Build target metadata according to requested path
       let meta = {
         title: "Korean Skin Food BD | Authentic Korean Skincare in Bangladesh",
         description: "Shop authentic Korean skincare products in Bangladesh at Korean Skin Food BD. Explore trusted Korean beauty brands, skincare essentials, product information and convenient nationwide delivery.",
-        canonicalUrl: `${BASE_STORE_URL}${req.path === "/" ? "/" : req.path}`,
+        canonicalUrl: `${siteBase}${req.path === "/" ? "/" : req.path}`,
         ogImage: "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80",
         ogImageAlt: "Korean Skin Food BD Authentic Korean Skincare in Bangladesh",
         ogType: "website",
@@ -9112,7 +10735,7 @@ async function startServer() {
           meta = {
             title: pTitle,
             description: pDesc,
-            canonicalUrl: `${BASE_STORE_URL}/product/${encodeURIComponent(product.id)}`,
+            canonicalUrl: `${siteBase}/product/${encodeURIComponent(product.id)}`,
             ogImage: product.image || (Array.isArray(product.images) && product.images[0]) || meta.ogImage,
             ogImageAlt: product.imageAltText || `${product.name} ${product.brand || 'Korean Skin Food BD'}`,
             ogType: "product",
@@ -9120,7 +10743,7 @@ async function startServer() {
             jsonLd: {
               "@context": "https://schema.org",
               "@type": "Product",
-              "@id": `${BASE_STORE_URL}/product/${encodeURIComponent(product.id)}#product`,
+              "@id": `${siteBase}/product/${encodeURIComponent(product.id)}#product`,
               name: product.name,
               image: [product.image, ...(product.images || [])].filter(Boolean),
               description: pDesc,
@@ -9131,7 +10754,7 @@ async function startServer() {
               },
               offers: {
                 "@type": "Offer",
-                url: `${BASE_STORE_URL}/product/${encodeURIComponent(product.id)}`,
+                url: `${siteBase}/product/${encodeURIComponent(product.id)}`,
                 priceCurrency: "BDT",
                 price: activePrice,
                 availability: isAvail ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
@@ -9154,7 +10777,7 @@ async function startServer() {
         const brandName = bSlug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
         meta.title = `${brandName} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
         meta.description = `Shop 100% authentic ${brandName} skincare in Bangladesh. Direct Seoul imports, genuine ingredients, verified batch standards, and fast nationwide delivery.`;
-        meta.canonicalUrl = `${BASE_STORE_URL}/brand/${bSlug}`;
+        meta.canonicalUrl = `${siteBase}/brand/${bSlug}`;
       }
       // 3. Educational Guide Page
       else if (req.path.startsWith("/guide/")) {
@@ -9162,11 +10785,18 @@ async function startServer() {
         const guideTitle = gSlug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
         meta.title = `${guideTitle} | Korean Skin Food BD`;
         meta.description = `Learn essential Korean skincare routines, active ingredients, and barrier protection adapted for Bangladesh's climate.`;
-        meta.canonicalUrl = `${BASE_STORE_URL}/guide/${gSlug}`;
+        meta.canonicalUrl = `${siteBase}/guide/${gSlug}`;
         meta.ogType = "article";
       }
-      // 4. Private / Admin routes should strictly return noindex to bots
-      else if (req.path.startsWith("/admin") || req.path === "/login" || req.path.startsWith("/profile") || req.path.startsWith("/wholesale/profile")) {
+      // 4. Private / Transactional / Admin routes should strictly return noindex to bots
+      else if (
+        req.path.startsWith("/admin") ||
+        req.path === "/login" ||
+        req.path.startsWith("/profile") ||
+        req.path.startsWith("/checkout") ||
+        req.path.startsWith("/thank-you") ||
+        req.path.startsWith("/wholesale/profile")
+      ) {
         meta.noindex = true;
       }
 

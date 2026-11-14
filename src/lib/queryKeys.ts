@@ -76,6 +76,7 @@ export const queryKeys = {
     globalTheme: () => [...queryKeys.settings.all, 'theme_global'] as const,
     homeTheme: () => [...queryKeys.settings.all, 'theme_home'] as const,
     shopTheme: () => [...queryKeys.settings.all, 'theme_shop'] as const,
+    pagesTheme: () => [...queryKeys.settings.all, 'theme_pages'] as const,
     site: () => [...queryKeys.settings.all, 'site'] as const,
   },
   creators: {

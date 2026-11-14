@@ -1,11 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useProducts } from '../hooks/queries/products';
-import { BRAND_SEO_PROFILES, getBrandProfileBySlug, BrandSeoProfile } from '../data/brandProfiles';
+import { getBrandProfileBySlug, BrandSeoProfile } from '../data/brandProfiles';
 import { getCanonicalBrandName, isSameBrand } from '../data/brands';
 import { ProductCard } from './ProductCard';
 import { SeoHead } from './SeoHead';
 import { buildBrandSeo } from '../services/seoService';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { BrandLandingPageThemeSettings } from '../types/theme';
 import { ShieldCheck, ChevronRight, HelpCircle, ChevronDown, Sparkles, Package, MapPin } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -13,6 +15,14 @@ export const BrandLandingPage: React.FC = () => {
   const { brandSlug = '' } = useParams<{ brandSlug: string }>();
   const { data: allProducts = [], isLoading } = useProducts();
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [brandTheme, setBrandTheme] = useState<BrandLandingPageThemeSettings>(() => themeService.getPagesTheme().brandLanding || DEFAULT_PAGES_THEME.brandLanding);
+
+  useEffect(() => {
+    const unsub = themeService.subscribePages((pt) => {
+      setBrandTheme(pt.brandLanding || DEFAULT_PAGES_THEME.brandLanding);
+    });
+    return () => unsub();
+  }, []);
 
   // Match brand profile or compose dynamic fallback
   const brandProfile: BrandSeoProfile = useMemo(() => {
@@ -37,7 +47,7 @@ export const BrandLandingPage: React.FC = () => {
       descriptionBN: `দক্ষিণ কোরিয়া থেকে সরাসরি আমদানিকৃত আসল ${canonicalName} প্রডাক্ট। দ্রুত ডেলিভারি ও আসল পণ্যের নিশ্চয়তা।`,
       philosophy: 'Authentic Korean cosmeceutical formulation focused on gentle, effective skin barrier support.',
       keyIngredients: ['Centella Asiatica', 'Hyaluronic Acid', 'Niacinamide'],
-      heroImage: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80',
+      heroImage: brandTheme.defaultHeroImage || DEFAULT_PAGES_THEME.brandLanding.defaultHeroImage,
       faqs: [
         {
           question: `Are ${canonicalName} products at Korean Skin Food BD authentic?`,
@@ -49,7 +59,7 @@ export const BrandLandingPage: React.FC = () => {
         }
       ]
     };
-  }, [brandSlug]);
+  }, [brandSlug, brandTheme.defaultHeroImage]);
 
   // Filter products belonging to this brand
   const brandProducts = useMemo(() => {
@@ -79,7 +89,7 @@ export const BrandLandingPage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 font-medium">
             <span className="flex items-center gap-1.5 text-emerald-700 font-bold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
               <ShieldCheck size={14} />
-              <span>100% Authentic Korean Import</span>
+              <span>{brandTheme.authenticityBadge}</span>
             </span>
             <span className="flex items-center gap-1 text-gray-600">
               <MapPin size={13} className="text-[#E91E8C]" />
@@ -100,7 +110,7 @@ export const BrandLandingPage: React.FC = () => {
           </p>
 
           {/* Key Botanicals & Ingredients */}
-          {brandProfile.keyIngredients && brandProfile.keyIngredients.length > 0 && (
+          {brandTheme.showSignatureIngredients && brandProfile.keyIngredients && brandProfile.keyIngredients.length > 0 && (
             <div className="pt-2 flex flex-wrap items-center gap-2 text-xs">
               <span className="font-bold text-gray-700">Signature Ingredients:</span>
               {brandProfile.keyIngredients.map((ing, i) => (
@@ -119,10 +129,10 @@ export const BrandLandingPage: React.FC = () => {
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
               <Package size={22} className="text-[#E91E8C]" />
-              <span>Available {brandProfile.name} Products</span>
+              <span>{brandTheme.catalogHeadingPrefix}: {brandProfile.name}</span>
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Genuine Seoul-imported formulas with cash on delivery across Bangladesh.
+              {brandTheme.catalogSubtext}
             </p>
           </div>
           <span className="text-xs font-bold text-gray-600 font-mono tabular-nums">
@@ -148,31 +158,31 @@ export const BrandLandingPage: React.FC = () => {
               <Sparkles size={28} />
             </div>
             <div className="space-y-1">
-              <h3 className="text-base font-bold text-gray-900">New Shipments Arriving Soon</h3>
+              <h3 className="text-base font-bold text-gray-900">{brandTheme.emptyStateTitle}</h3>
               <p className="text-xs text-gray-500 max-w-md mx-auto">
                 Current {brandProfile.name} inventory has sold out. Fresh authentic batches are currently in transit from Seoul.
               </p>
             </div>
             <Link
-              to="/shop"
+              to={brandTheme.emptyStateCtaLink || '/shop'}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#E91E8C] text-white text-xs font-bold rounded-xl shadow-md hover:bg-[#d0177c] transition"
             >
-              Browse All Korean Skincare
+              {brandTheme.emptyStateCtaLabel}
             </Link>
           </div>
         )}
       </section>
 
       {/* Brand FAQs Section */}
-      {brandProfile.faqs && brandProfile.faqs.length > 0 && (
+      {brandTheme.showFaqs && brandProfile.faqs && brandProfile.faqs.length > 0 && (
         <section className="bg-white border border-pink-100 rounded-[32px] p-6 sm:p-10 space-y-6 shadow-sm">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
               <HelpCircle size={20} className="text-[#E91E8C]" />
-              <span>Frequently Asked Questions about {brandProfile.name} in Bangladesh</span>
+              <span>{brandTheme.faqHeadingPrefix} — {brandProfile.name} in Bangladesh</span>
             </h2>
             <p className="text-xs text-gray-500">
-              Key guidance on authenticity verification, suitable skin types, and delivery terms.
+              {brandTheme.faqSubtext}
             </p>
           </div>
 
@@ -187,7 +197,7 @@ export const BrandLandingPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setOpenFaqIndex(isOpen ? null : index)}
-                    className="w-full text-left px-5 py-4 flex items-center justify-between gap-4 font-bold text-xs sm:text-sm text-gray-900 hover:text-[#E91E8C] transition"
+                    className="w-full text-left px-5 py-4 flex items-center justify-between gap-4 font-bold text-xs sm:text-sm text-gray-900 hover:text-[#E91E8C] transition cursor-pointer"
                   >
                     <span>{faq.question}</span>
                     <ChevronDown
@@ -218,3 +228,4 @@ export const BrandLandingPage: React.FC = () => {
     </div>
   );
 };
+

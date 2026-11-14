@@ -15,9 +15,11 @@ import {
   Zap, 
   RefreshCw, 
   Trash2, 
-  Tag 
+  Tag,
+  Youtube
 } from 'lucide-react';
 import { CreatorReel, CreatorProfile } from '../../types';
+import { isYouTubeUrl, getYouTubeThumbnailUrl } from '../../utils/youtubeUrl';
 
 interface AdminReelsTabProps {
   reels: CreatorReel[];
@@ -171,7 +173,16 @@ export const AdminReelsTab: React.FC<AdminReelsTabProps> = ({
 
                   {/* Video / Thumbnail Container */}
                   <div className="relative aspect-video bg-slate-900 overflow-hidden group">
-                    {reel.videoUrl ? (
+                    {reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl) ? (
+                      <img
+                        src={
+                          reel.thumbnailUrl ||
+                          (reel.youtubeVideoId ? getYouTubeThumbnailUrl(reel.youtubeVideoId) : '')
+                        }
+                        alt={reel.caption}
+                        className="w-full h-full object-cover opacity-90"
+                      />
+                    ) : reel.videoUrl ? (
                       <video src={reel.videoUrl} className="w-full h-full object-cover opacity-90" preload="metadata" />
                     ) : (
                       <img src={reel.thumbnailUrl} alt={reel.caption} className="w-full h-full object-cover" />
@@ -180,10 +191,23 @@ export const AdminReelsTab: React.FC<AdminReelsTabProps> = ({
                     {reel.videoUrl && (
                       <button
                         onClick={() => onPreviewVideo(reel.videoUrl)}
-                        className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-pink-600/90 text-white flex items-center justify-center shadow-xl hover:bg-pink-700 hover:scale-110 transition cursor-pointer"
+                        className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-red-600/90 text-white flex items-center justify-center shadow-xl hover:bg-red-700 hover:scale-110 transition cursor-pointer"
                       >
                         <Play size={20} className="fill-white ml-0.5" />
                       </button>
+                    )}
+
+                    {reel.youtubeVideoId && (
+                      <div className="absolute top-2.5 left-2.5">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase border shadow-sm backdrop-blur-md ${
+                          reel.youtubePrivacyStatus === 'public'
+                            ? 'bg-emerald-950/85 text-emerald-200 border-emerald-400/40'
+                            : 'bg-slate-950/85 text-amber-200 border-amber-400/40'
+                        }`}>
+                          <Youtube size={10} />
+                          <span>{reel.youtubePrivacyStatus === 'public' ? 'YT Public' : `YT ${reel.youtubePrivacyStatus || 'Unpublished'}`}</span>
+                        </span>
+                      </div>
                     )}
                   </div>
 
@@ -209,17 +233,31 @@ export const AdminReelsTab: React.FC<AdminReelsTabProps> = ({
                       </div>
                     )}
 
-                    <div className="pt-1">
-                      <a
-                        href={reel.facebookPostUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:underline"
-                      >
-                        <Globe size={12} />
-                        <span>Facebook Post Link</span>
-                        <ExternalLink size={10} />
-                      </a>
+                    <div className="pt-1 flex flex-wrap items-center gap-3">
+                      {(reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl)) && (
+                        <a
+                          href={reel.videoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 hover:underline"
+                        >
+                          <Youtube size={12} />
+                          <span>YouTube Video</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      )}
+                      {reel.facebookPostUrl && (
+                        <a
+                          href={reel.facebookPostUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:underline"
+                        >
+                          <Globe size={12} />
+                          <span>Facebook Post Link</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      )}
                     </div>
 
                     {reel.adminNote && (
@@ -229,10 +267,12 @@ export const AdminReelsTab: React.FC<AdminReelsTabProps> = ({
                       </div>
                     )}
 
-                    {/* Performance & Facebook Metrics Section */}
+                    {/* Performance & Video Metrics Section */}
                     <div className="pt-2.5 border-t border-slate-100 space-y-2">
                       <div className="flex items-center justify-between text-[10px] font-extrabold text-slate-700">
-                        <span className="uppercase text-slate-400 font-mono text-[9px] tracking-wider">Facebook Performance</span>
+                        <span className="uppercase text-slate-400 font-mono text-[9px] tracking-wider">
+                          {reel.youtubeVideoId ? 'YouTube Performance' : 'Video Performance'}
+                        </span>
                         {/* Source Badge */}
                         {reel.metricsSource === 'facebook_api' || reel.performance?.metricsSource === 'facebook_api' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black border border-emerald-200">
@@ -290,12 +330,12 @@ export const AdminReelsTab: React.FC<AdminReelsTabProps> = ({
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             onClick={() => onRefreshMetrics(reel.creatorReelId)}
-                            disabled={updatingMetricsId === reel.creatorReelId}
-                            title="Refresh Facebook Graph API Metrics"
+                            disabled={updatingMetricsId === reel.creatorReelId || (!reel.youtubeVideoId && !reel.facebookPostUrl)}
+                            title={reel.youtubeVideoId ? 'Refresh Live YouTube API Stats' : 'Refresh Facebook Graph API Metrics'}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1 disabled:opacity-50"
                           >
                             <RefreshCw size={9} className={updatingMetricsId === reel.creatorReelId ? "animate-spin" : ""} />
-                            <span>API</span>
+                            <span>{reel.youtubeVideoId ? 'YT Sync' : 'API'}</span>
                           </button>
 
                           <button

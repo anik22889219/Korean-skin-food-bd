@@ -21,6 +21,7 @@ import {
   DEFAULT_HOMEPAGE_DESCRIPTION,
   buildCanonicalUrl
 } from '../services/seoService';
+import { getSiteHostname, getSiteUrl } from '../utils/siteUrl';
 
 export const AdminSEO: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'guides' | 'global'>('overview');
@@ -948,7 +949,7 @@ export const AdminSEO: React.FC = () => {
                       <div className="flex flex-col">
                         <span className="text-[11px] font-semibold text-gray-900 leading-none">Korean Skin Food BD</span>
                         <span className="text-[10px] text-gray-500 leading-none mt-0.5 truncate max-w-xs font-mono">
-                          {SITE_URL}/product/{selectedProduct?.id || 'sample-id'}
+                          {getSiteUrl()}/product/{selectedProduct?.id || 'sample-id'}
                         </span>
                       </div>
                     </div>
@@ -984,8 +985,8 @@ export const AdminSEO: React.FC = () => {
                         KS
                       </div>
                       <div>
-                        <span className="text-[11px] font-bold text-gray-900 block leading-tight">koreanskinfood.web.app</span>
-                        <span className="text-[9px] text-gray-400 block leading-tight">https://koreanskinfood.web.app/product/{selectedProduct?.id}</span>
+                        <span className="text-[11px] font-bold text-gray-900 block leading-tight">{getSiteHostname()}</span>
+                        <span className="text-[9px] text-gray-400 block leading-tight">{getSiteUrl()}/product/{selectedProduct?.id}</span>
                       </div>
                     </div>
 
@@ -1020,7 +1021,7 @@ export const AdminSEO: React.FC = () => {
                     </div>
                     <div className="p-3.5 space-y-1 bg-gray-50 border-t border-gray-100">
                       <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">
-                        KOREANSKINFOOD.WEB.APP
+                        {getSiteHostname().toUpperCase()}
                       </span>
                       <h5 className="text-xs font-bold text-gray-900 leading-snug line-clamp-2">
                         {seoTitle}
@@ -1308,13 +1309,13 @@ export const AdminSEO: React.FC = () => {
                 <div>
                   <span className="text-[10px] uppercase font-bold text-gray-400 block">Sitemap XML Endpoint</span>
                   <p className="font-mono text-[11px] text-[#E91E8C] mt-0.5">
-                    https://koreanskinfood.web.app/sitemap.xml
+                    {getSiteUrl()}/sitemap.xml
                   </p>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-gray-400 block">Search Console Action Steps</span>
                   <p className="text-[11px] text-gray-500 leading-relaxed mt-0.5">
-                    Submit `https://koreanskinfood.web.app/sitemap.xml` directly in Google Search Console under Sitemaps tab. The Google site verification meta tag `GwiMlKnv8wLcjHMFH3GxOMi4h3eLpy2MX3ZXkzJUhXg` is permanently embedded in `index.html`.
+                    Submit `{getSiteUrl()}/sitemap.xml` directly in Google Search Console under Sitemaps tab. The Google site verification meta tag `GwiMlKnv8wLcjHMFH3GxOMi4h3eLpy2MX3ZXkzJUhXg` is permanently embedded in `index.html`.
                   </p>
                 </div>
               </div>

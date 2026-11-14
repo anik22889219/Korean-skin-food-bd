@@ -465,7 +465,7 @@ export function buildOrderBlockKit(order: Order, customHeading?: string): any[] 
   };
 
   const statusLabel = statusEmoji[order.status] || order.status;
-  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app'}/admin/orders`;
+  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.com'}/admin/orders`;
 
   return [
     {
@@ -575,7 +575,7 @@ export function buildStockAlertBlockKit(
   const isLow = product.stock > 0 && product.stock <= (product.lowStockThreshold || 5);
 
   const titleEmoji = isOut ? '🚨 OUT OF STOCK ALERT' : isLow ? '⚠️ LOW STOCK WARNING' : '✏️ Inventory Updated';
-  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app'}/admin`;
+  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.com'}/admin`;
 
   return [
     {
@@ -628,7 +628,7 @@ export function buildSteadfastCourierBlockKit(
   result: { success: boolean; message: string; courier?: CourierData }
 ): any[] {
   const isSuccess = result.success && result.courier;
-  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app'}/admin/orders`;
+  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.com'}/admin/orders`;
 
   return [
     {
@@ -704,7 +704,7 @@ export function buildProductImportBlockKit(
     re_searching: '🔍 Re-searching Metadata'
   };
 
-  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app'}/admin`;
+  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.com'}/admin`;
 
   return [
     {
@@ -812,7 +812,7 @@ export function buildSupportTicketBlockKit(
     urgent: '🔥 URGENT'
   };
 
-  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app'}/admin`;
+  const adminUrl = `${typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.com'}/admin`;
 
   const replyLines = (ticket.replies || []).map(r => 
     `• *${r.author}* (${new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}): ${r.message}`

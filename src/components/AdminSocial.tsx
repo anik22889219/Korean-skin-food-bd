@@ -11,6 +11,7 @@ import {
   Eye, X, Clock, Calendar, TrendingUp, Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getYouTubeEmbedUrl } from '../utils/youtubeUrl';
 
 export const getShelfLifeInfo = (createdAtStr?: string) => {
   if (!createdAtStr) return { days: 0, label: 'Today', badgeColor: 'bg-emerald-500 text-white', badgeLight: 'bg-emerald-50 text-emerald-800 border-emerald-200', status: 'Fresh Content' };
@@ -127,7 +128,8 @@ const ReelPreviewCard: React.FC<{ reel: ReelItem }> = ({ reel }) => {
           </>
         ) : isYouTube ? (
           <iframe
-            src={reel.videoUrl}
+            src={getYouTubeEmbedUrl(reel.videoUrl, { autoplay: true, mute: true, loop: true, controls: false })}
+            title={reel.title || 'YouTube Reel'}
             className="w-full h-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { GlobalThemeSettings, HomeThemeSettings, ShopThemeSettings } from '../../types/theme';
-import { themeService, DEFAULT_GLOBAL_THEME, DEFAULT_HOME_THEME, DEFAULT_SHOP_THEME } from '../../services/themeService';
+import { GlobalThemeSettings, HomeThemeSettings, ShopThemeSettings, PagesThemeSettings } from '../../types/theme';
+import { themeService, DEFAULT_GLOBAL_THEME, DEFAULT_HOME_THEME, DEFAULT_SHOP_THEME, DEFAULT_PAGES_THEME } from '../../services/themeService';
 import { fetchSiteSettings } from '../../services/chatbotService';
 import { queryKeys } from '../../lib/queryKeys';
 
@@ -46,6 +46,21 @@ export function useShopTheme() {
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000,
     initialData: () => themeService.getShopTheme() || DEFAULT_SHOP_THEME,
+  });
+}
+
+/**
+ * usePagesTheme - All public pages theme configuration cached with 30-minute staleTime.
+ */
+export function usePagesTheme() {
+  return useQuery<PagesThemeSettings>({
+    queryKey: queryKeys.settings.pagesTheme(),
+    queryFn: async () => {
+      return themeService.getPagesTheme() || DEFAULT_PAGES_THEME;
+    },
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000,
+    initialData: () => themeService.getPagesTheme() || DEFAULT_PAGES_THEME,
   });
 }
 
@@ -101,12 +116,24 @@ export function useSettingsMutations() {
     },
   });
 
+  const updatePagesThemeMutation = useMutation({
+    mutationFn: async (settings: Partial<PagesThemeSettings>) => {
+      const current = themeService.getPagesTheme() || DEFAULT_PAGES_THEME;
+      return themeService.savePagesTheme({ ...current, ...settings });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.pagesTheme() });
+    },
+  });
+
   return {
     saveGlobalTheme: updateGlobalThemeMutation.mutateAsync,
     saveHomeTheme: updateHomeThemeMutation.mutateAsync,
     saveShopTheme: updateShopThemeMutation.mutateAsync,
+    savePagesTheme: updatePagesThemeMutation.mutateAsync,
     isSavingGlobal: updateGlobalThemeMutation.isPending,
     isSavingHome: updateHomeThemeMutation.isPending,
     isSavingShop: updateShopThemeMutation.isPending,
+    isSavingPages: updatePagesThemeMutation.isPending,
   };
 }

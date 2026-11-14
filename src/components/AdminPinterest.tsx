@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { pinterestService, PinterestSettings, DEFAULT_PINTEREST_SETTINGS } from '../services/pinterestService';
 import { trackPinterestEvent } from '../services/pinterestTag';
+import { getSiteHostname, getSiteUrl } from '../utils/siteUrl';
 
 interface CatalogPreviewData {
   stats: {
@@ -150,7 +151,8 @@ export const AdminPinterest: React.FC = () => {
     );
   }, [catalogPreview, catalogSearch]);
 
-  const originUrl = typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.web.app';
+  const originUrl = getSiteUrl();
+  const siteHostname = getSiteHostname();
   const xmlFeedFullUrl = `${originUrl}/api/pinterest-catalog.xml`;
   const csvFeedFullUrl = `${originUrl}/api/pinterest-catalog.csv`;
   const verificationFileFullUrl = `${originUrl}/${settings.domainVerification.fileName || 'pinterest-7da08.html'}`;
@@ -389,7 +391,7 @@ export const AdminPinterest: React.FC = () => {
             <div>
               <h2 className="text-base font-bold text-slate-900">Claim Website on Pinterest</h2>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Pinterest verifies that you own <strong>koreanskinfood.web.app</strong>. Claiming gives you access to website analytics, lets you enable Pinterest Shopping, and attaches your profile picture to any Pin made from your website.
+                Pinterest verifies that you own <strong>{siteHostname}</strong>. Claiming gives you access to website analytics, lets you enable Pinterest Shopping, and attaches your profile picture to any Pin made from your website.
               </p>
             </div>
 

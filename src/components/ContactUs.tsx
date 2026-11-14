@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Mail, Phone, MessageSquare, MapPin, CheckCircle, 
@@ -6,8 +6,19 @@ import {
 } from 'lucide-react';
 import { SeoHead } from './SeoHead';
 import { buildStaticPageSeo } from '../services/seoService';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { ContactPageThemeSettings } from '../types/theme';
 
 export const ContactUs: React.FC = () => {
+  const [contactTheme, setContactTheme] = useState<ContactPageThemeSettings>(() => themeService.getPagesTheme().contact || DEFAULT_PAGES_THEME.contact);
+
+  useEffect(() => {
+    const unsub = themeService.subscribePages((pt) => {
+      setContactTheme(pt.contact || DEFAULT_PAGES_THEME.contact);
+    });
+    return () => unsub();
+  }, []);
+
   // Form State
   const [formData, setFormData] = useState({
     name: '',
@@ -24,29 +35,12 @@ export const ContactUs: React.FC = () => {
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate API lead submission
     console.log('[ContactUs] Skincare Inquiry Lead Captured:', formData);
     setIsSubmitted(true);
   };
 
-  const faqs = [
-    {
-      q: 'Are your Korean products 100% genuine and authentic?',
-      a: 'Absolutely! We pride ourselves on sourcing products directly from licensed beauty manufacturers in South Korea (Seoul). Every product is complete with manufacturer seal codes, and we back them with a 100% full money-back authenticity guarantee.'
-    },
-    {
-      q: 'What are the delivery charges in Bangladesh?',
-      a: 'We offer standard cash on delivery (COD) services across Bangladesh. The delivery fee is ৳80 inside Dhaka City and ৳150 outside Dhaka City. Free delivery is available for orders above ৳2,000.'
-    },
-    {
-      q: 'How long does delivery take?',
-      a: 'Orders inside Dhaka City are typically delivered within 24 to 48 hours. Orders outside Dhaka City are dispatched via reliable courier services and take 3 to 5 business days to arrive at your doorstep.'
-    },
-    {
-      q: 'Can I get a personalized skin consultation?',
-      a: 'Yes, we provide free skincare consultation! Fill out our contact form indicating your Skin Type and specific concern (e.g. hyperpigmentation, acne, dryness), and our beauty consultant will suggest the ideal Korean skincare routine.'
-    }
-  ];
+  const faqs = contactTheme.faqs && contactTheme.faqs.length > 0 ? contactTheme.faqs : DEFAULT_PAGES_THEME.contact.faqs;
+  const whatsappClean = (contactTheme.whatsappNumber || '+8801755837545').replace(/[^0-9]/g, '');
 
   const contactSeo = React.useMemo(() => buildStaticPageSeo(
     'Contact Us - Customer Desk & Consultations',
@@ -68,27 +62,27 @@ export const ContactUs: React.FC = () => {
       {/* Page Header */}
       <div className="text-center space-y-3 max-w-2xl mx-auto">
         <span className="bg-pink-50 text-[#E91E8C] text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border border-pink-200/50 inline-block">
-          Get In Touch
+          {contactTheme.badgeText}
         </span>
-        <h1 className="text-3xl md:text-5xl font-black text-gray-900 tracking-tight">Contact Our Skincare Desk</h1>
+        <h1 className="text-3xl md:text-5xl font-black text-gray-900 tracking-tight">{contactTheme.title}</h1>
         <p className="text-xs text-gray-500 font-semibold leading-relaxed">
-          Have questions about a product, shipping, or need professional advice? Drop us a line below or reach out directly through WhatsApp.
+          {contactTheme.subtitle}
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
         {/* Contact Info & Info Blocks - 5 cols */}
-        <div className="lg:col-span-5 space-y-8">
+        <div className={contactTheme.showInquiryForm ? "lg:col-span-5 space-y-8" : "lg:col-span-12 max-w-3xl mx-auto w-full space-y-8"}>
           <div className="bg-white p-6 rounded-[28px] border border-pink-50 shadow-sm space-y-6">
             <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
               <Wand2 className="text-[#E91E8C]" size={16} />
-              <span>Direct Support Channels</span>
+              <span>{contactTheme.channelsHeading}</span>
             </h3>
             
             <div className="space-y-4 text-xs font-semibold text-gray-700">
               {/* WhatsApp / Phone */}
               <a 
-                href="https://wa.me/8801755837545" 
+                href={`https://wa.me/${whatsappClean}`} 
                 target="_blank" 
                 rel="noreferrer"
                 className="flex items-center gap-4 p-4 rounded-2xl bg-emerald-50/40 hover:bg-emerald-50 text-emerald-800 border border-emerald-100 transition"
@@ -97,22 +91,22 @@ export const ContactUs: React.FC = () => {
                   <MessageSquare size={18} />
                 </div>
                 <div>
-                  <span className="block text-[10px] text-emerald-600 font-bold uppercase tracking-wider">WhatsApp Live Chat</span>
-                  <span className="text-sm font-extrabold font-mono">+880 1755-837545</span>
+                  <span className="block text-[10px] text-emerald-600 font-bold uppercase tracking-wider">{contactTheme.whatsappLabel}</span>
+                  <span className="text-sm font-extrabold font-mono">{contactTheme.whatsappNumber}</span>
                 </div>
               </a>
 
               {/* Email Support */}
               <a 
-                href="mailto:koreanskinfood.bd@gmail.com" 
+                href={`mailto:${contactTheme.emailAddress}`} 
                 className="flex items-center gap-4 p-4 rounded-2xl bg-pink-50/20 hover:bg-pink-50/45 text-pink-900 border border-pink-100/60 transition"
               >
                 <div className="w-10 h-10 bg-[#E91E8C] rounded-xl flex items-center justify-center text-white shrink-0 shadow-sm">
                   <Mail size={18} />
                 </div>
                 <div>
-                  <span className="block text-[10px] text-pink-600 font-bold uppercase tracking-wider">Email Assistance</span>
-                  <span className="text-xs font-extrabold truncate">koreanskinfood.bd@gmail.com</span>
+                  <span className="block text-[10px] text-pink-600 font-bold uppercase tracking-wider">{contactTheme.emailLabel}</span>
+                  <span className="text-xs font-extrabold truncate">{contactTheme.emailAddress}</span>
                 </div>
               </a>
 
@@ -122,34 +116,31 @@ export const ContactUs: React.FC = () => {
                   <MapPin size={18} />
                 </div>
                 <div>
-                  <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Skincare Hub Location</span>
-                  <span className="text-xs font-extrabold">Banani Road 11, Dhaka, Bangladesh</span>
+                  <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">{contactTheme.locationLabel}</span>
+                  <span className="text-xs font-extrabold">{contactTheme.locationAddress}</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Value badging / Trust blocks */}
+          {contactTheme.showPromiseBox && (
           <div className="bg-pink-50/15 p-6 rounded-[28px] border border-pink-100/30 space-y-4">
-            <h4 className="text-xs font-black text-pink-850 uppercase tracking-widest">Our Customer Promise</h4>
+            <h4 className="text-xs font-black text-pink-850 uppercase tracking-widest">{contactTheme.promiseHeading}</h4>
             <ul className="space-y-2.5 text-xs text-gray-650 font-bold">
-              <li className="flex items-center gap-2">
-                <CheckCircle size={14} className="text-[#E91E8C]" />
-                <span>100% Genuine, Seoul-sourced imports only</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <CheckCircle size={14} className="text-[#E91E8C]" />
-                <span>Strict batch-by-batch expiration quality checks</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <CheckCircle size={14} className="text-[#E91E8C]" />
-                <span>Safe cash on delivery with open package check</span>
-              </li>
+              {contactTheme.promises.map((promise, pIdx) => (
+                <li key={pIdx} className="flex items-center gap-2">
+                  <CheckCircle size={14} className="text-[#E91E8C] shrink-0" />
+                  <span>{promise}</span>
+                </li>
+              ))}
             </ul>
           </div>
+          )}
         </div>
 
         {/* Lead Capture Skincare Inquiry Form - 7 cols */}
+        {contactTheme.showInquiryForm && (
         <div className="lg:col-span-7">
           <div className="bg-white p-6 md:p-8 rounded-[32px] border border-pink-100 shadow-md">
             <AnimatePresence mode="wait">
@@ -163,8 +154,8 @@ export const ContactUs: React.FC = () => {
                   exit={{ opacity: 0 }}
                 >
                   <div className="space-y-1 pb-2">
-                    <h3 className="text-base font-black text-gray-900 uppercase tracking-wider">Skincare Consultation Inquiry</h3>
-                    <p className="text-[10px] text-gray-500">Provide details about your concerns for customized recommendations.</p>
+                    <h3 className="text-base font-black text-gray-900 uppercase tracking-wider">{contactTheme.formHeading}</h3>
+                    <p className="text-[10px] text-gray-500">{contactTheme.formSubtitle}</p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -248,7 +239,7 @@ export const ContactUs: React.FC = () => {
                     className="w-full bg-[#E91E8C] hover:bg-[#FF4B91] text-white py-3.5 rounded-xl font-bold cursor-pointer transition shadow-md flex items-center justify-center gap-2"
                   >
                     <Send size={14} />
-                    <span>Send Skincare Inquiry</span>
+                    <span>{contactTheme.formSubmitButtonText}</span>
                   </button>
                 </motion.form>
               ) : (
@@ -263,9 +254,9 @@ export const ContactUs: React.FC = () => {
                     <CheckCircle size={32} />
                   </div>
                   <div className="space-y-2">
-                    <h3 className="text-lg font-black text-gray-900">Inquiry Received Safely!</h3>
+                    <h3 className="text-lg font-black text-gray-900">{contactTheme.successHeading}</h3>
                     <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-                      Thank you for contacting us, <span className="font-bold text-gray-800">{formData.name}</span>. Our expert skincare counselor will review your skin parameters and get in touch with you shortly.
+                      Thank you for contacting us, <span className="font-bold text-gray-800">{formData.name}</span>. {contactTheme.successMessage}
                     </p>
                   </div>
                   <button 
@@ -279,13 +270,15 @@ export const ContactUs: React.FC = () => {
             </AnimatePresence>
           </div>
         </div>
+        )}
       </div>
 
       {/* FAQ Accordion Section */}
+      {contactTheme.showFaqs && faqs.length > 0 && (
       <div className="space-y-8">
         <div className="text-center space-y-2">
-          <h2 className="text-xl md:text-2xl font-black text-gray-900 tracking-tight">Frequently Asked Questions</h2>
-          <p className="text-xs text-gray-500 font-medium">Quick answers regarding shopping, shipping policy, and authentic cosmetics.</p>
+          <h2 className="text-xl md:text-2xl font-black text-gray-900 tracking-tight">{contactTheme.faqHeading}</h2>
+          <p className="text-xs text-gray-500 font-medium">{contactTheme.faqSubtitle}</p>
         </div>
 
         <div className="max-w-3xl mx-auto space-y-3">
@@ -293,14 +286,14 @@ export const ContactUs: React.FC = () => {
             const isOpen = activeFaq === index;
             return (
               <div 
-                key={index} 
+                key={faq.id || index} 
                 className="bg-white border border-pink-50 rounded-2xl overflow-hidden shadow-sm hover:border-pink-200 transition"
               >
                 <button
                   onClick={() => setActiveFaq(isOpen ? null : index)}
                   className="w-full px-6 py-4 flex justify-between items-center text-left font-bold text-xs md:text-sm text-gray-800 cursor-pointer hover:bg-pink-50/10 transition"
                 >
-                  <span>{faq.q}</span>
+                  <span>{faq.question}</span>
                   {isOpen ? <ChevronUp size={16} className="text-[#E91E8C]" /> : <ChevronDown size={16} className="text-[#E91E8C]" />}
                 </button>
                 <AnimatePresence>
@@ -313,7 +306,7 @@ export const ContactUs: React.FC = () => {
                       className="border-t border-pink-50"
                     >
                       <p className="px-6 py-4 text-xs leading-relaxed text-gray-500 font-semibold bg-pink-50/5">
-                        {faq.a}
+                        {faq.answer}
                       </p>
                     </motion.div>
                   )}
@@ -323,6 +316,8 @@ export const ContactUs: React.FC = () => {
           })}
         </div>
       </div>
+      )}
     </motion.div>
   );
 };
+

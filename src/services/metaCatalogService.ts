@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { productService } from './productService';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { authFetch } from './apiClient';
+import { getRuntimeOrigin, getSiteUrl, resolveConfiguredDomainUrl } from '../utils/siteUrl';
 
 export interface MetaCatalogItem {
   id: string;
@@ -179,7 +180,7 @@ export const metaCatalogService = {
       hasAccessToken: false,
       pixelId: "",
       currency: "BDT",
-      domainUrl: typeof window !== 'undefined' ? window.location.origin : "https://koreanskinfood.web.app",
+      domainUrl: getSiteUrl(),
       defaultCategory: "Health & Beauty > Personal Care > Cosmetics > Skin Care",
       lastSyncAt: null,
       lastSyncStatus: "idle",
@@ -195,6 +196,7 @@ export const metaCatalogService = {
           return {
             ...defaultSettings,
             ...data,
+            domainUrl: resolveConfiguredDomainUrl(data.domainUrl),
             hasAccessToken: !!data.accessToken,
             accessToken: data.accessToken || undefined
           };
@@ -257,7 +259,7 @@ export const metaCatalogService = {
    * Fetches the preview data, feed URLs, and diagnostic statistics
    */
   async getPreview(): Promise<MetaCatalogPreview> {
-    const origin = typeof window !== 'undefined' ? window.location.origin : "https://koreanskinfood.web.app";
+    const origin = getSiteUrl();
 
     // 1. Try server endpoint first (only if it returns genuine JSON)
     try {
@@ -278,7 +280,7 @@ export const metaCatalogService = {
 
     // 2. Direct client fallback (reliable on static Firebase Hosting)
     const settings = await this.getSettings();
-    let baseUrl = settings.domainUrl && settings.domainUrl.trim() ? settings.domainUrl.trim() : origin;
+    let baseUrl = resolveConfiguredDomainUrl(settings.domainUrl) || origin;
     baseUrl = baseUrl.replace(/\/+$/, "");
 
     let rawProducts: any[] = [];
@@ -626,7 +628,7 @@ ${itemsXml}
    * Returns current origin feed URLs
    */
   getFeedUrls(): { xml: string; csv: string } {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://koreanskinfood.web.app';
+    const origin = getRuntimeOrigin();
     return {
       xml: `${origin}/meta-catalog.xml`,
       csv: `${origin}/meta-catalog.csv`

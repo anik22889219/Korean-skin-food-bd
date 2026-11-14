@@ -617,7 +617,14 @@ export interface CreatorReel {
   videoUrl: string;
   thumbnailUrl: string;
 
-  // Cloudinary Video Metadata
+  // Upload Provider & YouTube Metadata
+  uploadProvider?: 'youtube' | 'cloudinary' | 'external';
+  youtubeVideoId?: string;
+  youtubePrivacyStatus?: 'private' | 'unlisted' | 'public';
+  youtubeChannelId?: string;
+  youtubeChannelTitle?: string;
+
+  // Cloudinary Video Metadata (legacy)
   cloudinaryPublicId?: string;
   secureUrl?: string;
   resourceType?: 'video' | 'image';
@@ -635,7 +642,7 @@ export interface CreatorReel {
   caption: string;
   description?: string;
 
-  facebookPostUrl: string;
+  facebookPostUrl?: string;
   normalizedFacebookUrl?: string;
   facebookPostId?: string;
   metricsSource?: MetricsSource;

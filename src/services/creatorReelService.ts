@@ -16,17 +16,41 @@ import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from '.
 import { CreatorReel, CreatorReelStatus } from '../types';
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from '../utils/facebookUrl';
 import { recalculateCreatorPointsAndLevel } from './creatorPointService';
+import { updateYouTubeVideoPrivacy, deleteYouTubeVideo } from './youtubeService';
 
 export const CREATOR_REELS_COLLECTION = 'creator_reels';
+export const DAILY_CREATOR_UPLOAD_LIMIT = 1;
+
+export function getDhakaDateString(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dhaka',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+export function getCreatorUploadsTodayCount(reels: CreatorReel[]): number {
+  const todayDhaka = getDhakaDateString();
+  return reels.filter((r) => {
+    if (!r.createdAt) return false;
+    return getDhakaDateString(new Date(r.createdAt)) === todayDhaka;
+  }).length;
+}
 
 /**
- * Create a new Creator Reel submission with Cloudinary metadata and Facebook URL duplicate protection
+ * Create a new Creator Reel submission (YouTube primary, optional Facebook URL)
  */
 export async function createCreatorReel(params: {
   creatorId: string;
   creatorUserId: string;
   videoUrl: string;
   thumbnailUrl?: string;
+  uploadProvider?: 'youtube' | 'cloudinary' | 'external';
+  youtubeVideoId?: string;
+  youtubePrivacyStatus?: 'private' | 'unlisted' | 'public';
+  youtubeChannelId?: string;
+  youtubeChannelTitle?: string;
   cloudinaryPublicId?: string;
   secureUrl?: string;
   resourceType?: 'video' | 'image';
@@ -36,7 +60,7 @@ export async function createCreatorReel(params: {
   videoMetadata?: Record<string, any>;
   caption: string;
   description?: string;
-  facebookPostUrl: string;
+  facebookPostUrl?: string;
   productIds?: string[];
   productNames?: string[];
 }): Promise<CreatorReel> {
@@ -57,18 +81,21 @@ export async function createCreatorReel(params: {
 
   // Guard: Never store large base64 Data URLs in Firestore
   if (params.videoUrl.startsWith('data:')) {
-    throw new Error('Direct video Data URLs cannot be saved to the database. Please upload the video to Cloudinary.');
+    throw new Error('Direct video Data URLs cannot be saved to the database.');
   }
 
-  // 1. Validate and Normalize Facebook Post/Reel URL
-  const normResult = normalizeFacebookUrl(params.facebookPostUrl);
-  if (!normResult.isValid || !normResult.normalizedUrl) {
-    throw new Error(normResult.error || 'Please enter a valid Facebook Reel or Post URL (e.g. https://facebook.com/reel/...)');
+  // 1. Optional Facebook Post/Reel URL normalization
+  const rawFbUrl = (params.facebookPostUrl || '').trim();
+  let normalizedUrl = '';
+  let facebookPostId = '';
+  if (rawFbUrl) {
+    const normResult = normalizeFacebookUrl(rawFbUrl);
+    if (!normResult.isValid || !normResult.normalizedUrl) {
+      throw new Error(normResult.error || 'Please enter a valid Facebook Reel or Post URL (e.g. https://facebook.com/reel/...)');
+    }
+    normalizedUrl = normResult.normalizedUrl;
+    facebookPostId = normResult.postId || extractFacebookPostId(rawFbUrl) || '';
   }
-
-  const normalizedUrl = normResult.normalizedUrl;
-  const originalFbUrl = params.facebookPostUrl.trim();
-  const facebookPostId = normResult.postId || extractFacebookPostId(originalFbUrl) || '';
 
   // 2. Verify creator profile & approval status
   try {
@@ -90,32 +117,54 @@ export async function createCreatorReel(params: {
     console.warn('Could not verify creator status pre-check:', creatorErr);
   }
 
-  // 3. Prevent Duplicate Facebook submissions across the network
+  // 3. Enforce 1 video/day limit & check duplicates for this creator
   try {
-    const allReelsSnap = await getDocs(collection(db, CREATOR_REELS_COLLECTION));
-    for (const reelDoc of allReelsSnap.docs) {
-      const existing = reelDoc.data() as CreatorReel;
-      if (!existing) continue;
+    const myReelsSnap = await getDocs(
+      query(
+        collection(db, CREATOR_REELS_COLLECTION),
+        where('creatorUserId', '==', params.creatorUserId)
+      )
+    );
+    const myReels: CreatorReel[] = [];
+    myReelsSnap.forEach((d) => myReels.push(d.data() as CreatorReel));
 
-      const isDuplicate = areFacebookUrlsEqual(
-        existing.normalizedFacebookUrl || existing.facebookPostUrl,
-        normalizedUrl
-      );
+    if (getCreatorUploadsTodayCount(myReels) >= DAILY_CREATOR_UPLOAD_LIMIT) {
+      throw new Error('Daily upload limit reached: A creator can upload only 1 video per day.');
+    }
 
-      if (isDuplicate) {
-        throw new Error('This Facebook Reel/Post URL has already been submitted to the creator program.');
-      }
+    if (params.youtubeVideoId && myReels.some((r) => r.youtubeVideoId === params.youtubeVideoId)) {
+      throw new Error('This YouTube video has already been submitted.');
+    }
 
-      // If both have post IDs, compare IDs directly
-      if (facebookPostId && existing.facebookPostId && existing.facebookPostId === facebookPostId) {
-        throw new Error('This Facebook Reel/Post ID has already been submitted to the creator program.');
+    if (normalizedUrl) {
+      const allReelsSnap = await getDocs(collection(db, CREATOR_REELS_COLLECTION));
+      for (const reelDoc of allReelsSnap.docs) {
+        const existing = reelDoc.data() as CreatorReel;
+        if (!existing) continue;
+
+        if (existing.normalizedFacebookUrl || existing.facebookPostUrl) {
+          const isDuplicate = areFacebookUrlsEqual(
+            existing.normalizedFacebookUrl || existing.facebookPostUrl || '',
+            normalizedUrl
+          );
+          if (isDuplicate) {
+            throw new Error('This Facebook Reel/Post URL has already been submitted to the creator program.');
+          }
+        }
+
+        if (facebookPostId && existing.facebookPostId && existing.facebookPostId === facebookPostId) {
+          throw new Error('This Facebook Reel/Post ID has already been submitted to the creator program.');
+        }
       }
     }
   } catch (dupErr: any) {
-    if (dupErr.message.includes('already been submitted')) {
+    if (
+      dupErr.message.includes('already been submitted') ||
+      dupErr.message.includes('Daily upload limit')
+    ) {
       throw dupErr;
     }
-    console.warn('Duplicate Facebook Reel URL pre-check warning:', dupErr);
+    console.warn('Reel pre-check warning:', dupErr);
   }
 
   // 4. Construct Reel Document with initial pending status and 0 points
@@ -125,6 +174,11 @@ export async function createCreatorReel(params: {
     creatorUserId: params.creatorUserId,
     videoUrl: params.videoUrl,
     thumbnailUrl: params.thumbnailUrl || 'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=600&auto=format&fit=crop&q=60',
+    uploadProvider: params.uploadProvider || (params.youtubeVideoId ? 'youtube' : 'external'),
+    youtubeVideoId: params.youtubeVideoId || undefined,
+    youtubePrivacyStatus: params.youtubePrivacyStatus || undefined,
+    youtubeChannelId: params.youtubeChannelId || undefined,
+    youtubeChannelTitle: params.youtubeChannelTitle || undefined,
     cloudinaryPublicId: params.cloudinaryPublicId || '',
     secureUrl: params.secureUrl || params.videoUrl,
     resourceType: params.resourceType || 'video',
@@ -134,9 +188,9 @@ export async function createCreatorReel(params: {
     videoMetadata: params.videoMetadata || {},
     caption: params.caption.trim(),
     description: params.description ? params.description.trim() : '',
-    facebookPostUrl: originalFbUrl,
-    normalizedFacebookUrl: normalizedUrl,
-    facebookPostId: facebookPostId,
+    facebookPostUrl: rawFbUrl || undefined,
+    normalizedFacebookUrl: normalizedUrl || undefined,
+    facebookPostId: facebookPostId || undefined,
     productIds: params.productIds || [],
     productNames: params.productNames || [],
     status: 'pending', // Always initial pending status for moderation
@@ -209,7 +263,8 @@ export async function getAllCreatorReelsForAdmin(): Promise<CreatorReel[]> {
 }
 
 /**
- * Admin action: Update status (approve, reject, publish) & admin note
+ * Admin action: Update status (approve, reject, publish) & admin note.
+ * Automatically updates YouTube privacy status (public on approve/publish, private on reject).
  */
 export async function updateReelStatusByAdmin(
   creatorReelId: string,
@@ -235,11 +290,24 @@ export async function updateReelStatusByAdmin(
       updatePayload.adminNote = adminNote;
     }
 
+    // Sync YouTube privacy status if this reel is hosted on YouTube
+    if (reelData.youtubeVideoId) {
+      const targetPrivacy: 'public' | 'unlisted' | 'private' =
+        status === 'approved' || status === 'published'
+          ? 'public'
+          : status === 'rejected'
+          ? 'private'
+          : 'unlisted';
+
+      const ytRes = await updateYouTubeVideoPrivacy(reelData.youtubeVideoId, targetPrivacy);
+      updatePayload.youtubePrivacyStatus = ytRes.privacyStatus;
+    }
+
     if (status === 'approved') {
       updatePayload.approvedAt = now;
     } else if (status === 'published') {
       updatePayload.publishedAt = now;
-      if (!updatePayload.approvedAt) {
+      if (!reelData.approvedAt) {
         updatePayload.approvedAt = now;
       }
     }
@@ -258,13 +326,24 @@ export async function updateReelStatusByAdmin(
 }
 
 /**
- * Delete a creator reel and recalculate creator totals
+ * Delete a creator reel and recalculate creator totals.
+ * If deleteFromYouTube is true and the reel has a youtubeVideoId, removes it from YouTube as well.
  */
-export async function deleteCreatorReel(creatorReelId: string): Promise<void> {
+export async function deleteCreatorReel(
+  creatorReelId: string,
+  options: { deleteFromYouTube?: boolean } = {}
+): Promise<void> {
   try {
     const docRef = doc(db, CREATOR_REELS_COLLECTION, creatorReelId);
     const snap = await getDoc(docRef);
-    const creatorUserId = snap.exists() ? (snap.data() as CreatorReel).creatorUserId : null;
+    const reelData = snap.exists() ? (snap.data() as CreatorReel) : null;
+    const creatorUserId = reelData?.creatorUserId || null;
+
+    if (options.deleteFromYouTube && reelData?.youtubeVideoId) {
+      await deleteYouTubeVideo(reelData.youtubeVideoId).catch((err) => {
+        console.warn('Could not delete YouTube video during reel deletion:', err);
+      });
+    }
 
     await deleteDoc(docRef);
 

@@ -12,8 +12,8 @@ import { db } from '../services/firebase';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { fetchSiteSettings, formatWhatsAppNumber } from '../services/chatbotService';
 import { analytics } from '../services/analyticsService';
-import { themeService, DEFAULT_GLOBAL_THEME } from '../services/themeService';
-import { GlobalThemeSettings } from '../types/theme';
+import { themeService, DEFAULT_GLOBAL_THEME, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { GlobalThemeSettings, ProductDetailPageThemeSettings } from '../types/theme';
 import { 
   ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
@@ -50,6 +50,7 @@ export const ProductDetail: React.FC = () => {
   const [selectedMainImage, setSelectedMainImage] = useState<string>('');
   const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
+  const [pageTheme, setPageTheme] = useState<ProductDetailPageThemeSettings>(DEFAULT_PAGES_THEME.productDetail);
   const [copiedLink, setCopiedLink] = useState(false);
 
   // Sync main image when product changes
@@ -157,12 +158,18 @@ export const ProductDetail: React.FC = () => {
     ? (comboSavingsData ? comboSavingsData.finalPrice : getRetailPrice(product))
     : (isWholesaleUser ? currentWholesalePrice : getRetailPrice(product));
 
-  // Subscribe to Global Theme for store logo and branding
+  // Subscribe to Global & Page Theme for store logo, branding, and product detail copy
   useEffect(() => {
     const unsubscribe = themeService.subscribeGlobal((gt) => {
       setGlobalTheme(gt);
     });
-    return () => unsubscribe();
+    const unsubscribePages = themeService.subscribePages((p) => {
+      if (p?.productDetail) setPageTheme(p.productDetail);
+    });
+    return () => {
+      unsubscribe();
+      unsubscribePages();
+    };
   }, []);
 
   // Load site settings for WhatsApp contact number
@@ -691,11 +698,12 @@ export const ProductDetail: React.FC = () => {
           )}
           
           <div className="flex items-center justify-between text-[11px] text-gray-400 bg-pink-50/10 p-3.5 rounded-xl border border-pink-100/30">
-            <span className="flex items-center gap-1"><ShieldCheck size={13} className="text-emerald-500" /> 100% Authentic Import</span>
-            <span className="flex items-center gap-1"><RefreshCw size={13} className="text-pink-500" /> 7-Day Refund Guard</span>
+            <span className="flex items-center gap-1"><ShieldCheck size={13} className="text-emerald-500" /> {pageTheme.trustBadge1}</span>
+            <span className="flex items-center gap-1"><RefreshCw size={13} className="text-pink-500" /> {pageTheme.trustBadge2}</span>
           </div>
 
           {/* Social Media Sharing & Brand Logo Section (Desktop: Below Image) */}
+          {pageTheme.showSocialShareBox && (
           <div id="product_social_share_section" className="hidden lg:block bg-gradient-to-br from-pink-50/60 via-white to-pink-50/30 rounded-2xl p-4 border border-pink-100/90 shadow-2xs space-y-3">
             {/* Top Brand Logo & Share Title */}
             <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-pink-100/60">
@@ -713,10 +721,10 @@ export const ProductDetail: React.FC = () => {
                 )}
                 <div>
                   <h4 className="text-xs font-black text-gray-900 leading-tight tracking-tight">
-                    {language === 'bn' ? 'পণ্যটি শেয়ার করুন' : 'Share This Product'}
+                    {language === 'bn' ? 'পণ্যটি শেয়ার করুন' : pageTheme.shareBoxTitle}
                   </h4>
                   <p className="text-[10px] text-gray-500 font-medium">
-                    {language === 'bn' ? 'বন্ধু ও পরিবারের সাথে বিউটি সিক্রেট শেয়ার করুন' : 'Spread the authentic K-Beauty glow'}
+                    {language === 'bn' ? 'বন্ধু ও পরিবারের সাথে বিউটি সিক্রেট শেয়ার করুন' : pageTheme.shareBoxSubtitle}
                   </p>
                 </div>
               </div>
@@ -840,6 +848,7 @@ export const ProductDetail: React.FC = () => {
               </button>
             </div>
           </div>
+          )}
         </div>
 
         {/* Right Column: Skincare Specs and Add to Cart */}
@@ -1322,7 +1331,7 @@ export const ProductDetail: React.FC = () => {
                 <span>
                   {language === 'bn' 
                     ? `হোলসেল কার্টে যোগ ও চেকআউট করুন (${quantity} পিস)` 
-                    : `Order Wholesale & Proceed to Checkout (${quantity} pcs)`}
+                    : `${pageTheme.wholesaleCtaLabel} (${quantity} pcs)`}
                 </span>
               </button>
             )}
@@ -1411,7 +1420,7 @@ export const ProductDetail: React.FC = () => {
                   {effectiveStock > 0 
                     ? (product.isCombo 
                         ? (product.comboConfig?.type === 'customizable' ? 'Add Complete Routine Set to Basket' : `Add Combo Package to Basket`)
-                        : (quantity > 1 ? `Add ${quantity} to Skincare Basket` : "Add to Skincare Basket")) 
+                        : (quantity > 1 ? `${pageTheme.addToBasketLabel} (${quantity})` : pageTheme.addToBasketLabel)) 
                     : "Sold Out"}
                 </span>
               </button>
@@ -1424,11 +1433,12 @@ export const ProductDetail: React.FC = () => {
               className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white font-extrabold rounded-2xl cursor-pointer transition shadow-md shadow-emerald-100 flex items-center justify-center gap-2.5 text-sm"
             >
               <MessageCircle size={19} className="fill-white" />
-              <span>Order via WhatsApp ({quantity} pcs)</span>
+              <span>{pageTheme.whatsappCtaLabel} ({quantity} pcs)</span>
             </button>
           </div>
 
           {/* Social Media Sharing & Brand Logo Section (Mobile Only: Below Order Buttons) */}
+          {pageTheme.showSocialShareBox && (
           <div id="product_social_share_section_mobile" className="lg:hidden bg-gradient-to-br from-pink-50/60 via-white to-pink-50/30 rounded-2xl p-4 border border-pink-100/90 shadow-2xs space-y-3 mt-4">
             {/* Top Brand Logo & Share Title */}
             <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-pink-100/60">
@@ -1446,10 +1456,10 @@ export const ProductDetail: React.FC = () => {
                 )}
                 <div>
                   <h4 className="text-xs font-black text-gray-900 leading-tight tracking-tight">
-                    {language === 'bn' ? 'পণ্যটি শেয়ার করুন' : 'Share This Product'}
+                    {language === 'bn' ? 'পণ্যটি শেয়ার করুন' : pageTheme.shareBoxTitle}
                   </h4>
                   <p className="text-[10px] text-gray-500 font-medium">
-                    {language === 'bn' ? 'বন্ধু ও পরিবারের সাথে বিউটি সিক্রেট শেয়ার করুন' : 'Spread the authentic K-Beauty glow'}
+                    {language === 'bn' ? 'বন্ধু ও পরিবারের সাথে বিউটি সিক্রেট শেয়ার করুন' : pageTheme.shareBoxSubtitle}
                   </p>
                 </div>
               </div>
@@ -1573,10 +1583,12 @@ export const ProductDetail: React.FC = () => {
               </button>
             </div>
           </div>
+          )}
         </div>
       </div>
 
       {/* 3. Verified Product Reviews & Rating Section */}
+      {pageTheme.showReviewsSection && (
       <div id="reviews-section" className="bg-white p-6 md:p-8 rounded-[32px] border border-pink-100 shadow-sm space-y-8">
         
         {/* Section Header */}
@@ -1589,7 +1601,7 @@ export const ProductDetail: React.FC = () => {
             </div>
             <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2 mt-1">
               <MessageSquare className="text-[#E91E8C]" size={22} />
-              <span>Customer Reviews & Photos</span>
+              <span>{pageTheme.reviewsHeading}</span>
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
               Read authentic feedback and skin transformation photos submitted by verified buyers in Bangladesh.
@@ -1986,12 +1998,14 @@ export const ProductDetail: React.FC = () => {
         </div>
 
       </div>
+      )}
 
       {/* 4. Related products row */}
+      {pageTheme.showRelatedSection && (
       <div className="space-y-4">
         <div>
-          <h3 className="text-lg font-black text-slate-900 tracking-tight">Discover More K-Beauty</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Handpicked related skin nourishment formulations.</p>
+          <h3 className="text-lg font-black text-slate-900 tracking-tight">{pageTheme.relatedHeading}</h3>
+          <p className="text-xs text-gray-400 mt-0.5">{pageTheme.relatedSubtext}</p>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
@@ -2004,6 +2018,7 @@ export const ProductDetail: React.FC = () => {
           ))}
         </div>
       </div>
+      )}
 
     </div>
   );

@@ -109,7 +109,7 @@ export async function updateAdminVerifiedMetrics(params: {
     }
 
     const reelData = reelSnap.data() as CreatorReel;
-    const postId = reelData.facebookPostId || extractFacebookPostId(reelData.facebookPostUrl) || '';
+    const postId = reelData.facebookPostId || (reelData.facebookPostUrl ? extractFacebookPostId(reelData.facebookPostUrl) : '') || '';
 
     const previousValues = {
       views: Number(reelData.performance?.views || 0),
@@ -191,7 +191,14 @@ export async function fetchReelMetricsFromApi(creatorReelId: string): Promise<{
   error?: string;
 }> {
   try {
-    const response = await fetch(`/api/creator/reels/${creatorReelId}/metrics`);
+    const user = auth.currentUser;
+    const token = user ? await user.getIdToken() : null;
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`/api/creator/reels/${creatorReelId}/metrics`, { headers });
     const data = await response.json();
     return data;
   } catch (err: any) {

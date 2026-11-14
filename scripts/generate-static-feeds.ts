@@ -25,7 +25,7 @@ function escapeCsv(s: any): string {
   return `"${String(s).replace(/"/g, '""')}"`;
 }
 
-const baseUrl = 'https://koreanskinfood.web.app';
+const baseUrl = (process.env.SITE_URL || process.env.APP_URL || 'https://koreanskinfood.com').trim().replace(/\/+$/, '');
 const products = INITIAL_PRODUCTS || [];
 
 // XML

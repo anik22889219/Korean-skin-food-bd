@@ -21,9 +21,12 @@ import {
   Play, 
   X,
   Globe,
-  ShieldCheck
+  ShieldCheck,
+  Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { isYouTubeUrl, getYouTubeEmbedUrl, getYouTubeThumbnailUrl } from '../utils/youtubeUrl';
+import { getCreatorUploadsTodayCount, DAILY_CREATOR_UPLOAD_LIMIT } from '../services/creatorReelService';
 
 export const CreatorReelsPage: React.FC = () => {
   const { user, isApprovedCreator } = useAuth();
@@ -93,7 +96,17 @@ export const CreatorReelsPage: React.FC = () => {
               </button>
 
               <div className="aspect-video bg-black flex items-center justify-center">
-                <video src={activeVideoModalUrl} controls autoPlay className="w-full h-full object-contain" />
+                {isYouTubeUrl(activeVideoModalUrl) ? (
+                  <iframe
+                    src={getYouTubeEmbedUrl(activeVideoModalUrl, { autoplay: true, controls: true })}
+                    title="YouTube Reel Player"
+                    className="w-full h-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <video src={activeVideoModalUrl} controls autoPlay className="w-full h-full object-contain" />
+                )}
               </div>
             </div>
           </motion.div>
@@ -111,13 +124,18 @@ export const CreatorReelsPage: React.FC = () => {
             <p className="text-xs text-slate-500">Track reel moderation status, views, and engagement metrics</p>
           </div>
 
-          <Link
-            to="/creator/reels/upload"
-            className="px-4 py-2.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white text-xs font-black rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition shrink-0"
-          >
-            <PlusCircle size={16} />
-            <span>Upload New Reel</span>
-          </Link>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-black">
+              Today: {getCreatorUploadsTodayCount(reels)}/{DAILY_CREATOR_UPLOAD_LIMIT}
+            </span>
+            <Link
+              to="/creator/reels/upload"
+              className="px-4 py-2.5 bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 text-white text-xs font-black rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition shrink-0"
+            >
+              <PlusCircle size={16} />
+              <span>Upload New Video</span>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -224,17 +242,26 @@ export const CreatorReelsPage: React.FC = () => {
                 <div>
                   {/* Thumbnail / Video Container */}
                   <div className="relative aspect-video bg-slate-900 overflow-hidden group">
-                    {reel.videoUrl ? (
-                      <video 
-                        src={reel.videoUrl} 
+                    {reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl) ? (
+                      <img
+                        src={
+                          reel.thumbnailUrl ||
+                          (reel.youtubeVideoId ? getYouTubeThumbnailUrl(reel.youtubeVideoId) : '')
+                        }
+                        alt={reel.caption}
+                        className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition duration-300"
+                      />
+                    ) : reel.videoUrl ? (
+                      <video
+                        src={reel.videoUrl}
                         className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition duration-300"
                         preload="metadata"
                       />
                     ) : (
-                      <img 
-                        src={reel.thumbnailUrl} 
-                        alt={reel.caption} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300" 
+                      <img
+                        src={reel.thumbnailUrl}
+                        alt={reel.caption}
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       />
                     )}
 
@@ -242,18 +269,28 @@ export const CreatorReelsPage: React.FC = () => {
                     {reel.videoUrl && (
                       <button
                         onClick={() => setActiveVideoModalUrl(reel.videoUrl)}
-                        className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-pink-600/90 text-white flex items-center justify-center shadow-xl hover:bg-pink-700 hover:scale-110 transition cursor-pointer"
+                        className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-red-600/90 text-white flex items-center justify-center shadow-xl hover:bg-red-700 hover:scale-110 transition cursor-pointer"
                       >
                         <Play size={20} className="fill-white ml-0.5" />
                       </button>
                     )}
 
                     {/* Status Badge Overlay */}
-                    <div className="absolute top-3 left-3">
+                    <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5">
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase border shadow-sm backdrop-blur-md ${statusConfig.bg}`}>
                         <StatusIcon size={12} />
                         <span>{statusConfig.label}</span>
                       </span>
+                      {reel.youtubeVideoId && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-black uppercase border shadow-sm backdrop-blur-md ${
+                          reel.youtubePrivacyStatus === 'public'
+                            ? 'bg-emerald-950/80 text-emerald-200 border-emerald-500/40'
+                            : 'bg-slate-950/80 text-amber-200 border-amber-500/40'
+                        }`}>
+                          <Youtube size={10} />
+                          <span>{reel.youtubePrivacyStatus === 'public' ? 'YT Public' : 'YT Unpublished'}</span>
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -290,18 +327,35 @@ export const CreatorReelsPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Facebook Link & Metrics Source */}
+                    {/* External Video / Facebook Link & Metrics Source */}
                     <div className="pt-2 flex items-center justify-between gap-2">
-                      <a
-                        href={reel.facebookPostUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline truncate max-w-full"
-                      >
-                        <Globe size={13} className="shrink-0" />
-                        <span className="truncate">View on Facebook</span>
-                        <ExternalLink size={11} className="shrink-0" />
-                      </a>
+                      {reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl) ? (
+                        <a
+                          href={reel.videoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-bold text-red-600 hover:text-red-800 hover:underline truncate max-w-full"
+                        >
+                          <Youtube size={13} className="shrink-0" />
+                          <span className="truncate">
+                            {reel.youtubePrivacyStatus === 'public' ? 'Watch on YouTube' : 'YouTube Link (Unpublished)'}
+                          </span>
+                          <ExternalLink size={11} className="shrink-0" />
+                        </a>
+                      ) : reel.facebookPostUrl ? (
+                        <a
+                          href={reel.facebookPostUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline truncate max-w-full"
+                        >
+                          <Globe size={13} className="shrink-0" />
+                          <span className="truncate">View on Facebook</span>
+                          <ExternalLink size={11} className="shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 font-semibold">Creator Video</span>
+                      )}
 
                       {/* Source Badge */}
                       {reel.metricsSource === 'facebook_api' || reel.performance?.metricsSource === 'facebook_api' ? (

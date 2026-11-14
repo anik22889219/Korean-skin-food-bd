@@ -16,10 +16,16 @@ export interface CartItem {
   comboComponents?: ComboComponentDetail[];
 }
 
+export interface AddToCartOptions {
+  openDrawer?: boolean;
+}
+
 interface CartContextType {
   cart: CartItem[];
   isSubmitting: boolean;
-  addToCart: (product: Product, quantity?: number, comboComponents?: ComboComponentDetail[]) => void;
+  checkoutError: string | null;
+  setCheckoutError: (err: string | null) => void;
+  addToCart: (product: Product, quantity?: number, comboComponents?: ComboComponentDetail[], options?: AddToCartOptions) => void;
   removeFromCart: (productId: string) => void;
   updateCartQty: (productId: string, delta: number) => void;
   clearCart: () => void;
@@ -45,7 +51,7 @@ interface CartContextType {
   setLastCreatedOrder: (order: Order | null) => void;
   calculateCartSubtotal: () => number;
   calculateShipping: () => number;
-  handleCheckoutSubmit: (e: React.FormEvent) => Promise<void>;
+  handleCheckoutSubmit: (e?: React.FormEvent) => Promise<Order | null>;
   activeTranslations: any;
   // Loyalty Points
   useLoyaltyPoints: boolean;
@@ -87,7 +93,9 @@ const TRANSLATIONS = {
     trackOrder: "Track Order",
     billingInfo: "Billing & Delivery Info",
     fullName: "Full Name",
-    phone: "Phone Number (SMS OTP login)",
+    phone: "Phone Number",
+    deliveryCity: "Delivery Zone",
+    address: "Full Delivery Address",
     deliveryAddress: "Full Delivery Address",
     selectDelivery: "Select Delivery Zone",
     details: "Details",
@@ -118,9 +126,9 @@ const TRANSLATIONS = {
     staffEmail: "Staff Work Email",
     staffLogin: "Log in as Staff",
     currency: "৳",
-    loginToOrder: "Login Required to Place Order",
-    loginToOrderDesc: "You must be logged in with your account to complete your purchase and earn K-Beauty Loyalty Points.",
-    loginToOrderBtn: "Log In / Register with Google"
+    loginToOrder: "Sign In for Loyalty Rewards",
+    loginToOrderDesc: "Optional: Log in with Google to earn and redeem K-Beauty Loyalty Points on your order.",
+    loginToOrderBtn: "Continue with Google"
   },
   bn: {
     tagline: "নিজেকে ভালোবাসুন, নিজের ত্বকের যত্ন নিন",
@@ -145,7 +153,9 @@ const TRANSLATIONS = {
     trackOrder: "অর্ডার ট্র্যাক করুন",
     billingInfo: "বিলিং ও ডেলিভারি তথ্য",
     fullName: "পূর্ণ নাম",
-    phone: "মোবাইল নম্বর (ওটিপি লগইন)",
+    phone: "মোবাইল নম্বর",
+    deliveryCity: "ডেলিভারি জোন",
+    address: "সম্পূর্ণ ডেলিভারি ঠিকানা",
     deliveryAddress: "সম্পূর্ণ ডেলিভারি ঠিকানা",
     selectDelivery: "ডেলিভারি জোন নির্বাচন করুন",
     details: "বিস্তারিত",
@@ -176,8 +186,8 @@ const TRANSLATIONS = {
     staffEmail: "স্টাফ কাজের ইমেইল",
     staffLogin: "স্টাফ হিসেবে লগইন",
     currency: "৳",
-    loginToOrder: "অর্ডার করতে লগইন করা আবশ্যক",
-    loginToOrderDesc: "অর্ডার সম্পন্ন করতে এবং লয়ালটি পয়েন্ট অর্জন করতে আপনার গুগল অ্যাকাউন্ট দিয়ে লগইন করুন।",
+    loginToOrder: "লয়্যালটি পয়েন্টের জন্য লগইন করুন",
+    loginToOrderDesc: "ঐচ্ছিক: প্রতিটি অর্ডারে গ্লো লয়্যালটি পয়েন্ট অর্জন ও ব্যবহার করতে গুগল দিয়ে লগইন করুন।",
     loginToOrderBtn: "গুগল দিয়ে লগইন করুন"
   }
 };
@@ -190,8 +200,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [language, setLanguage] = useState<'en' | 'bn'>('en');
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'details' | 'success'>('cart');
-  const [lastCreatedOrder, setLastCreatedOrder] = useState<Order | null>(null);
+  const [lastCreatedOrder, setLastCreatedOrder] = useState<Order | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('ksf_last_order');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const [useLoyaltyPoints, setUseLoyaltyPoints] = useState<boolean>(false);
 
@@ -330,9 +348,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('ksf_applied_coupon');
   };
 
-  // 1 Point = ৳1 discount. Maximum discount cannot exceed subtotal.
-  const pointsDiscount = useLoyaltyPoints 
-    ? Math.min(calculateCartSubtotal(), availablePoints) 
+  // 1 Point = ৳1 discount. Maximum discount cannot exceed subtotal (only for signed-in users).
+  const pointsDiscount = user && useLoyaltyPoints
+    ? Math.min(calculateCartSubtotal(), availablePoints)
     : 0;
 
   const calculateGrandTotal = () => {
@@ -348,8 +366,14 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return Math.floor(total / 10);
   };
 
-  const addToCart = (product: Product, quantity: number = 1, comboComponents?: ComboComponentDetail[]) => {
+  const addToCart = (
+    product: Product,
+    quantity: number = 1,
+    comboComponents?: ComboComponentDetail[],
+    options?: AddToCartOptions
+  ) => {
     const validQty = Math.max(1, Number(quantity) || 1);
+    const shouldOpenDrawer = options?.openDrawer !== false;
     setCart((prev) => {
       // For products with custom combo components, match both productId and components
       const existingIdx = prev.findIndex((item) => {
@@ -363,13 +387,18 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (existingIdx !== -1) {
         const updated = [...prev];
-        updated[existingIdx].quantity += validQty;
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          quantity: updated[existingIdx].quantity + validQty
+        };
         return updated;
       }
       return [...prev, { product, quantity: validQty, comboComponents }];
     });
-    setIsCartOpen(true);
-    setCheckoutStep('cart');
+    if (shouldOpenDrawer) {
+      setIsCartOpen(true);
+      setCheckoutStep('cart');
+    }
     // Track Add To Cart
     analytics.trackAddToCart(product, validQty);
   };
@@ -404,20 +433,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearCart = () => {
     setCart([]);
     setCheckoutStep('cart');
-    setLastCreatedOrder(null);
     setUseLoyaltyPoints(false);
+    setCheckoutError(null);
     removeCoupon();
   };
 
-  const handleCheckoutSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (cart.length === 0 || isSubmitting) return;
+  const handleCheckoutSubmit = async (e?: React.FormEvent): Promise<Order | null> => {
+    if (e) e.preventDefault();
+    if (cart.length === 0 || isSubmitting) return null;
 
-    if (!user) {
-      alert(language === 'bn' ? 'অর্ডার সম্পন্ন করতে আপনাকে অবশ্যই প্রথমে লগইন করতে হবে।' : 'Login Required: You must be logged in to place an order.');
-      return;
-    }
-
+    setCheckoutError(null);
     setIsSubmitting(true);
     try {
       const isWholesale = profile?.wholesaleAccess === true;
@@ -440,19 +465,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       });
 
+      const shippingCharge = calculateShipping();
       const grandTotal = calculateGrandTotal();
-      const earnedPts = calculatePointsEarned();
-      const redeemedPts = pointsDiscount; // 1 point = ৳1
+      const earnedPts = user ? calculatePointsEarned() : 0;
+      const redeemedPts = user ? pointsDiscount : 0; // 1 point = ৳1
       const totalDiscount = redeemedPts + couponDiscount;
       const attribution = getStoredAttribution();
-      
+
       const attributionPayload: Record<string, any> = {};
       const utm_source = attribution.last_touch?.utm_source || attribution.first_touch?.utm_source;
       const utm_medium = attribution.last_touch?.utm_medium || attribution.first_touch?.utm_medium;
       const utm_campaign = attribution.last_touch?.utm_campaign || attribution.first_touch?.utm_campaign;
       const utm_content = attribution.last_touch?.utm_content || attribution.first_touch?.utm_content;
       const utm_term = attribution.last_touch?.utm_term || attribution.first_touch?.utm_term;
-      
+
       if (utm_source) attributionPayload.utm_source = utm_source;
       if (utm_medium) attributionPayload.utm_medium = utm_medium;
       if (utm_campaign) attributionPayload.utm_campaign = utm_campaign;
@@ -469,17 +495,17 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const idempotencyKey = `idem_web_${user?.uid || 'guest'}_${Date.now()}_${cartChecksum}`;
 
       const orderData = {
-        customerName: checkoutForm.name,
-        customerPhone: checkoutForm.phone,
+        customerName: checkoutForm.name.trim(),
+        customerPhone: checkoutForm.phone.trim(),
         customerEmail: user?.email || null,
-        address: checkoutForm.address,
+        address: checkoutForm.address.trim(),
         items: orderItems,
         totalAmount: grandTotal,
         discountAmount: totalDiscount,
         couponCode: appliedCoupon?.code || undefined,
         couponDiscount: couponDiscount > 0 ? couponDiscount : undefined,
         isFreeDelivery: isFreeDelivery || undefined,
-        shippingCharge: calculateShipping(),
+        shippingCharge,
         pointsEarned: earnedPts,
         pointsRedeemed: redeemedPts,
         paymentMethod: 'COD' as const,
@@ -496,11 +522,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             items: orderItems,
-            customerName: checkoutForm.name,
-            customerPhone: checkoutForm.phone,
+            customerName: checkoutForm.name.trim(),
+            customerPhone: checkoutForm.phone.trim(),
             customerEmail: user?.email || '',
-            address: checkoutForm.address,
+            address: checkoutForm.address.trim(),
             deliveryArea: checkoutForm.area,
+            isFreeDelivery,
+            shippingCharge,
             customer_uid: user?.uid || null,
             couponCode: appliedCoupon?.code || undefined,
             couponDiscount: couponDiscount > 0 ? couponDiscount : undefined,
@@ -518,16 +546,46 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
           }
         } else {
-          console.warn('[CartContext] Server checkout returned non-ok status:', response.status);
+          const errBody = await response.json().catch(() => null);
+          if (response.status >= 400 && response.status < 500 && response.status !== 404 && errBody?.error) {
+            throw new Error(errBody.error);
+          }
+          console.warn('[CartContext] Server checkout returned non-ok status:', response.status, errBody?.error);
           createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
         }
-      } catch (srvErr) {
+      } catch (srvErr: any) {
+        // Re-throw explicit validation errors (e.g. insufficient stock) instead of bypassing them
+        if (srvErr?.message && /insufficient stock|does not exist|cannot be empty|rate limit/i.test(srvErr.message)) {
+          throw srvErr;
+        }
         console.warn('[CartContext] Server transactional checkout call failed, falling back to client posService:', srvErr);
         createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
       }
 
+      // Ensure client receipt always has image metadata & summary fields for Thank You page display
+      const enrichedOrder: Order = {
+        ...createdOrder,
+        shippingCharge: createdOrder.shippingCharge ?? shippingCharge,
+        isFreeDelivery: createdOrder.isFreeDelivery ?? (isFreeDelivery || undefined),
+        couponCode: createdOrder.couponCode ?? (appliedCoupon?.code || undefined),
+        couponDiscount: createdOrder.couponDiscount ?? (couponDiscount > 0 ? couponDiscount : undefined),
+        discountAmount: createdOrder.discountAmount ?? totalDiscount,
+        pointsEarned: createdOrder.pointsEarned ?? earnedPts,
+        pointsRedeemed: createdOrder.pointsRedeemed ?? redeemedPts,
+      };
+
+      // Persist receipt in sessionStorage so /thank-you/:orderId works seamlessly across reloads (including guests)
+      try {
+        sessionStorage.setItem('ksf_last_order', JSON.stringify(enrichedOrder));
+        if (enrichedOrder.id) {
+          sessionStorage.setItem(`ksf_order_${enrichedOrder.id}`, JSON.stringify(enrichedOrder));
+        }
+      } catch (storageErr) {
+        console.warn('[CartContext] Could not cache order receipt in sessionStorage:', storageErr);
+      }
+
       // Track Authoritative Purchase immediately on order placement
-      analytics.trackPurchase(createdOrder).catch(console.warn);
+      analytics.trackPurchase(enrichedOrder).catch(console.warn);
 
       // Record coupon redemption count if applicable
       if (appliedCoupon?.id) {
@@ -547,15 +605,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      setLastCreatedOrder(createdOrder);
+      setLastCreatedOrder(enrichedOrder);
       setCheckoutStep('success');
       setCart([]);
       setUseLoyaltyPoints(false);
       removeCoupon();
       localStorage.removeItem('ksf_online_cart_v1');
-    } catch (err) {
+      return enrichedOrder;
+    } catch (err: any) {
       console.error('Online checkout failed:', err);
-      alert('Order Placement Failed. Please try again.');
+      const errMsg = language === 'bn'
+        ? 'অর্ডার সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+        : (err?.message || 'Order placement failed. Please verify your details and try again.');
+      setCheckoutError(errMsg);
+      return null;
     } finally {
       setIsSubmitting(false);
     }
@@ -568,6 +631,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         cart,
         isSubmitting,
+        checkoutError,
+        setCheckoutError,
         addToCart,
         removeFromCart,
         updateCartQty,

@@ -150,7 +150,7 @@ service cloud.firestore {
     match /creator_reels/{reelId} {
       allow read: if isStaff() || (
         resource != null && (
-          resource.data.status == 'approved' ||
+          resource.data.status in ['approved', 'published'] ||
           (isSignedIn() && (resource.data.creatorUserId == request.auth.uid || resource.data.userId == request.auth.uid))
         )
       );
@@ -167,7 +167,15 @@ service cloud.firestore {
           'status', 'earnedPoints', 'verifiedMetrics', 'rejectionReason', 'reviewedBy', 'reviewedAt'
         ])
       );
-      allow delete: if isStaff();
+      allow delete: if isStaff() || (
+        isSignedIn() &&
+        (resource.data.creatorUserId == request.auth.uid || resource.data.userId == request.auth.uid) &&
+        resource.data.status in ['pending', 'rejected']
+      );
+    }
+
+    match /private_integrations/{docId} {
+      allow read, write: if isAdminOrSuperAdmin();
     }
 
     // ==========================================

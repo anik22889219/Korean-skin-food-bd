@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { applyForCreatorProfile } from '../services/creatorService';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { BecomeCreatorPageThemeSettings } from '../types/theme';
 import { 
   Sparkles, 
   Star, 
@@ -116,6 +118,13 @@ const FAQS = [
 export const BecomeCreatorPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, profile, creatorProfile, loading, signInWithGoogle } = useAuth();
+  const [pageTheme, setPageTheme] = useState<BecomeCreatorPageThemeSettings>(DEFAULT_PAGES_THEME.becomeCreator);
+
+  useEffect(() => {
+    return themeService.subscribePages((p) => {
+      if (p?.becomeCreator) setPageTheme(p.becomeCreator);
+    });
+  }, []);
 
   // Application form state
   const [username, setUsername] = useState('');
@@ -195,39 +204,34 @@ export const BecomeCreatorPage: React.FC = () => {
         <div className="relative z-10 text-center max-w-4xl mx-auto space-y-6">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-100 border border-pink-200/80 text-pink-700 text-xs font-black uppercase tracking-wider shadow-xs">
             <Sparkles size={14} className="text-pink-600 animate-pulse" />
-            <span>Official K-Beauty Creator Network</span>
+            <span>{pageTheme.heroBadge}</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-gray-900 tracking-tight leading-[1.1]">
-            Turn Your Skincare Passion Into <br className="hidden sm:inline" />
+            {pageTheme.heroTitleLine1} <br className="hidden sm:inline" />
             <span className="bg-gradient-to-r from-[#E91E8C] via-rose-500 to-purple-600 bg-clip-text text-transparent">
-              Rewards, PR Gifts & Fame
+              {pageTheme.heroTitleHighlight}
             </span>
           </h1>
 
           <p className="text-sm sm:text-base md:text-lg text-gray-600 font-medium max-w-2xl mx-auto leading-relaxed">
-            Join Korean Skin Food BD's exclusive Creator Program. Create authentic Facebook & Instagram reels, earn verified engagement points, climb the live leaderboard, and get free imported cosmeceuticals straight from Seoul.
+            {pageTheme.heroSubtitle}
           </p>
 
           {/* Quick Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto pt-2">
-            <div className="bg-white/80 backdrop-blur-sm p-3.5 rounded-2xl border border-pink-100 shadow-xs">
-              <span className="text-xl sm:text-2xl font-black text-[#E91E8C]">100%</span>
-              <p className="text-[11px] font-bold text-gray-600 uppercase mt-0.5">Seoul Genuine</p>
+          {pageTheme.showStats && pageTheme.stats.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-3xl mx-auto pt-2">
+              {pageTheme.stats.map((stat, idx) => {
+                const statColors = ['text-[#E91E8C]', 'text-purple-600', 'text-emerald-600', 'text-amber-600'];
+                return (
+                  <div key={stat.id || idx} className="bg-white/80 backdrop-blur-sm p-3.5 rounded-2xl border border-pink-100 shadow-xs">
+                    <span className={`text-xl sm:text-2xl font-black ${statColors[idx % statColors.length]}`}>{stat.value}</span>
+                    <p className="text-[11px] font-bold text-gray-600 uppercase mt-0.5">{stat.label}</p>
+                  </div>
+                );
+              })}
             </div>
-            <div className="bg-white/80 backdrop-blur-sm p-3.5 rounded-2xl border border-pink-100 shadow-xs">
-              <span className="text-xl sm:text-2xl font-black text-purple-600">6 Tiers</span>
-              <p className="text-[11px] font-bold text-gray-600 uppercase mt-0.5">Progressive Levels</p>
-            </div>
-            <div className="bg-white/80 backdrop-blur-sm p-3.5 rounded-2xl border border-pink-100 shadow-xs">
-              <span className="text-xl sm:text-2xl font-black text-emerald-600">Free PR</span>
-              <p className="text-[11px] font-bold text-gray-600 uppercase mt-0.5">Product Hampers</p>
-            </div>
-            <div className="bg-white/80 backdrop-blur-sm p-3.5 rounded-2xl border border-pink-100 shadow-xs">
-              <span className="text-xl sm:text-2xl font-black text-amber-600">Cash & Perks</span>
-              <p className="text-[11px] font-bold text-gray-600 uppercase mt-0.5">Monetization</p>
-            </div>
-          </div>
+          )}
 
           {/* CTAs */}
           <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
@@ -236,197 +240,142 @@ export const BecomeCreatorPage: React.FC = () => {
               className="px-8 py-4 bg-gradient-to-r from-[#E91E8C] via-rose-500 to-[#E91E8C] hover:from-pink-700 hover:to-rose-600 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-lg shadow-pink-500/25 flex items-center gap-2.5 transition-all hover:scale-105 active:scale-95 cursor-pointer"
             >
               <Sparkles size={18} />
-              <span>Apply to Become a Creator</span>
+              <span>{pageTheme.primaryCtaText}</span>
               <ArrowRight size={18} />
             </button>
 
             <Link
-              to="/creator/leaderboard"
+              to={pageTheme.secondaryCtaLink || '/creator/leaderboard'}
               className="px-6 py-4 bg-white hover:bg-pink-50 text-gray-800 hover:text-pink-600 font-extrabold text-sm sm:text-base rounded-2xl border border-pink-200/80 shadow-xs flex items-center gap-2 transition-all"
             >
               <Flame size={18} className="text-amber-500" />
-              <span>View Live Leaderboard</span>
+              <span>{pageTheme.secondaryCtaText}</span>
             </Link>
           </div>
         </div>
       </section>
 
       {/* 2. PROGRAM PERKS & BENEFITS */}
-      <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="text-center max-w-2xl mx-auto mb-10">
-          <span className="text-xs font-black uppercase text-[#E91E8C] tracking-widest block mb-1">
-            Why Join Our Creator Squad
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-            Everything You Need to Grow & Shine
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-3xl border border-pink-100 shadow-sm hover:shadow-md transition-shadow group">
-            <div className="w-12 h-12 rounded-2xl bg-pink-50 text-[#E91E8C] flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Gift size={24} />
-            </div>
-            <h3 className="text-base font-extrabold text-gray-900">Authentic Seoul PR Boxes</h3>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
-              Receive 100% genuine imported Korean skincare products (sun creams, snail mucin, barrier serums, cleansers) delivered straight to your door across Bangladesh.
-            </p>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-purple-100 shadow-sm hover:shadow-md transition-shadow group">
-            <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Zap size={24} />
-            </div>
-            <h3 className="text-base font-extrabold text-gray-900">Points on Views & Likes</h3>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
-              Every Facebook Reel you share generates points based on verified views, likes, and comments. Turn your audience engagement into measurable creator credit.
-            </p>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-rose-100 shadow-sm hover:shadow-md transition-shadow group">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Award size={24} />
-            </div>
-            <h3 className="text-base font-extrabold text-gray-900">6-Tier Level Progression</h3>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
-              Advance from Novice to Glow Ambassador. Higher tiers unlock personal store discounts, exclusive creator hampers, and paid sponsorship opportunities.
-            </p>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-amber-100 shadow-sm hover:shadow-md transition-shadow group">
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <TrendingUp size={24} />
-            </div>
-            <h3 className="text-base font-extrabold text-gray-900">Live Public Leaderboard</h3>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
-              Get showcased on the Korean Skin Food BD store leaderboard. Gain new followers, build credibility as a trusted skincare advisor, and gain industry recognition.
-            </p>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-emerald-100 shadow-sm hover:shadow-md transition-shadow group">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Video size={24} />
-            </div>
-            <h3 className="text-base font-extrabold text-gray-900">Home Store Showcase</h3>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
-              Top performing reels are featured in our Community Live carousel right on our website homepage, seen by thousands of daily skincare shoppers in BD.
-            </p>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-blue-100 shadow-sm hover:shadow-md transition-shadow group">
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <MessageCircle size={24} />
-            </div>
-            <h3 className="text-base font-extrabold text-gray-900">VIP Creator WhatsApp Group</h3>
-            <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
-              Connect directly with Korean beauty specialists, get product formulation guides, early news on new Seoul arrivals, and priority admin support.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* 3. STEP-BY-STEP PROCESS */}
-      <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="bg-slate-900 rounded-3xl p-8 sm:p-12 text-white shadow-xl relative overflow-hidden">
-          <div className="absolute right-0 bottom-0 w-96 h-96 bg-pink-600/10 rounded-full blur-3xl pointer-events-none" />
-
+      {pageTheme.showPerks && (
+        <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
           <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs font-black uppercase text-pink-400 tracking-widest block mb-1">
-              Easy 4-Step Process
+            <span className="text-xs font-black uppercase text-[#E91E8C] tracking-widest block mb-1">
+              {pageTheme.perksEyebrow}
             </span>
-            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              How to Become an Official Creator
+            <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+              {pageTheme.perksTitle}
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10">
-            <div className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/60 relative">
-              <span className="w-8 h-8 rounded-xl bg-pink-600 text-white font-black text-xs flex items-center justify-center mb-4 shadow-md">
-                1
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {pageTheme.perks.map((perk, idx) => {
+              const perkStyles = [
+                { border: 'border-pink-100', box: 'bg-pink-50 text-[#E91E8C]', Icon: Gift },
+                { border: 'border-purple-100', box: 'bg-purple-50 text-purple-600', Icon: Zap },
+                { border: 'border-rose-100', box: 'bg-rose-50 text-rose-600', Icon: Award },
+                { border: 'border-amber-100', box: 'bg-amber-50 text-amber-600', Icon: TrendingUp },
+                { border: 'border-emerald-100', box: 'bg-emerald-50 text-emerald-600', Icon: Video },
+                { border: 'border-blue-100', box: 'bg-blue-50 text-blue-600', Icon: MessageCircle },
+              ];
+              const style = perkStyles[idx % perkStyles.length];
+              const IconComp = style.Icon;
+              return (
+                <div key={perk.id || idx} className={`bg-white p-6 rounded-3xl border ${style.border} shadow-sm hover:shadow-md transition-shadow group`}>
+                  <div className={`w-12 h-12 rounded-2xl ${style.box} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
+                    <IconComp size={24} />
+                  </div>
+                  <h3 className="text-base font-extrabold text-gray-900">{perk.title}</h3>
+                  <p className="text-xs text-gray-600 mt-2 leading-relaxed font-medium">
+                    {perk.desc}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 3. STEP-BY-STEP PROCESS */}
+      {pageTheme.showSteps && (
+        <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+          <div className="bg-slate-900 rounded-3xl p-8 sm:p-12 text-white shadow-xl relative overflow-hidden">
+            <div className="absolute right-0 bottom-0 w-96 h-96 bg-pink-600/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="text-center max-w-2xl mx-auto mb-10">
+              <span className="text-xs font-black uppercase text-pink-400 tracking-widest block mb-1">
+                {pageTheme.stepsEyebrow}
               </span>
-              <h3 className="text-sm font-black text-white">Apply with Your Profile</h3>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                Fill out the quick creator registration form below with your handle, phone, and skincare niche.
-              </p>
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                {pageTheme.stepsTitle}
+              </h2>
             </div>
 
-            <div className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/60 relative">
-              <span className="w-8 h-8 rounded-xl bg-purple-600 text-white font-black text-xs flex items-center justify-center mb-4 shadow-md">
-                2
-              </span>
-              <h3 className="text-sm font-black text-white">Admin Verification</h3>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                Our team reviews your submission within 24-48 hours and activates your verified Creator Account.
-              </p>
-            </div>
-
-            <div className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/60 relative">
-              <span className="w-8 h-8 rounded-xl bg-emerald-600 text-white font-black text-xs flex items-center justify-center mb-4 shadow-md">
-                3
-              </span>
-              <h3 className="text-sm font-black text-white">Create & Post Reels</h3>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                Create engaging Facebook & Instagram reels testing Korean skincare, and submit the link in your dashboard.
-              </p>
-            </div>
-
-            <div className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/60 relative">
-              <span className="w-8 h-8 rounded-xl bg-amber-500 text-white font-black text-xs flex items-center justify-center mb-4 shadow-md">
-                4
-              </span>
-              <h3 className="text-sm font-black text-white">Earn Points & PR Gifts</h3>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                Climb the 6 tiers, level up to Glow Ambassador, claim free PR boxes, and earn cash rewards.
-              </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10">
+              {pageTheme.steps.map((step, idx) => {
+                const badgeColors = ['bg-pink-600', 'bg-purple-600', 'bg-emerald-600', 'bg-amber-500'];
+                return (
+                  <div key={step.id || idx} className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/60 relative">
+                    <span className={`w-8 h-8 rounded-xl ${badgeColors[idx % badgeColors.length]} text-white font-black text-xs flex items-center justify-center mb-4 shadow-md`}>
+                      {idx + 1}
+                    </span>
+                    <h3 className="text-sm font-black text-white">{step.title}</h3>
+                    <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                      {step.desc}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* 4. CREATOR TIERS MATRIX */}
-      <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="text-center max-w-2xl mx-auto mb-10">
-          <span className="text-xs font-black uppercase text-[#E91E8C] tracking-widest block mb-1">
-            Progression Roadmap
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-            Creator Tiers & Exclusive Perks
-          </h2>
-          <p className="text-xs text-gray-600 mt-2">
-            The more quality reels you post and engagement you generate, the higher your tier and rewards.
-          </p>
-        </div>
+      {pageTheme.showTiers && (
+        <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+          <div className="text-center max-w-2xl mx-auto mb-10">
+            <span className="text-xs font-black uppercase text-[#E91E8C] tracking-widest block mb-1">
+              {pageTheme.tiersEyebrow}
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+              {pageTheme.tiersTitle}
+            </h2>
+            <p className="text-xs text-gray-600 mt-2">
+              {pageTheme.tiersSubtitle}
+            </p>
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {CREATOR_TIERS.map((tier) => (
-            <div 
-              key={tier.level}
-              className={`rounded-3xl p-6 border bg-gradient-to-br ${tier.color} transition-all hover:scale-[1.02]`}
-            >
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${tier.badgeBg}`}>
-                  Level {tier.level}
-                </span>
-                <span className="text-xs font-mono font-black">{tier.points}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {CREATOR_TIERS.map((tier) => (
+              <div 
+                key={tier.level}
+                className={`rounded-3xl p-6 border bg-gradient-to-br ${tier.color} transition-all hover:scale-[1.02]`}
+              >
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${tier.badgeBg}`}>
+                    Level {tier.level}
+                  </span>
+                  <span className="text-xs font-mono font-black">{tier.points}</span>
+                </div>
+
+                <h3 className="text-lg font-black">{tier.name}</h3>
+
+                <div className="mt-4 pt-4 border-t border-black/10 space-y-2">
+                  <p className="text-[11px] font-black uppercase tracking-wider opacity-70">Tier Privileges:</p>
+                  <ul className="space-y-1.5">
+                    {tier.perks.map((perk, i) => (
+                      <li key={i} className="text-xs font-semibold flex items-start gap-2">
+                        <CheckCircle2 size={14} className="shrink-0 mt-0.5 opacity-80" />
+                        <span>{perk}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
-
-              <h3 className="text-lg font-black">{tier.name}</h3>
-
-              <div className="mt-4 pt-4 border-t border-black/10 space-y-2">
-                <p className="text-[11px] font-black uppercase tracking-wider opacity-70">Tier Privileges:</p>
-                <ul className="space-y-1.5">
-                  {tier.perks.map((perk, i) => (
-                    <li key={i} className="text-xs font-semibold flex items-start gap-2">
-                      <CheckCircle2 size={14} className="shrink-0 mt-0.5 opacity-80" />
-                      <span>{perk}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 5. INTERACTIVE REGISTRATION & APPLICATION FORM */}
       <section id="apply_form_section" className="py-12 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
@@ -438,9 +387,9 @@ export const BecomeCreatorPage: React.FC = () => {
               <span className="px-3 py-1 rounded-full bg-white/20 text-white text-xs font-black uppercase tracking-wider inline-flex items-center gap-1.5 mb-2">
                 <Sparkles size={13} /> Official Registration
               </span>
-              <h2 className="text-2xl sm:text-3xl font-black">Creator Application Form</h2>
+              <h2 className="text-2xl sm:text-3xl font-black">{pageTheme.formTitle}</h2>
               <p className="text-xs text-white/90 mt-1">
-                Fill in your creator handle, social links, and phone number to apply for review.
+                {pageTheme.formSubtitle}
               </p>
             </div>
           </div>
@@ -785,84 +734,88 @@ export const BecomeCreatorPage: React.FC = () => {
       </section>
 
       {/* 6. FAQ ACCORDION SECTION */}
-      <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-        <div className="text-center max-w-2xl mx-auto mb-8">
-          <span className="text-xs font-black uppercase text-[#E91E8C] tracking-widest block mb-1">
-            Questions & Answers
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-            Frequently Asked Questions
-          </h2>
-        </div>
+      {pageTheme.showFaqs && pageTheme.faqs.length > 0 && (
+        <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+          <div className="text-center max-w-2xl mx-auto mb-8">
+            <span className="text-xs font-black uppercase text-[#E91E8C] tracking-widest block mb-1">
+              {pageTheme.faqsEyebrow}
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+              {pageTheme.faqsTitle}
+            </h2>
+          </div>
 
-        <div className="space-y-3">
-          {FAQS.map((faq, index) => {
-            const isOpen = openFaqIndex === index;
-            return (
-              <div 
-                key={index}
-                className="bg-white rounded-2xl border border-pink-100/80 shadow-xs overflow-hidden"
-              >
-                <button
-                  type="button"
-                  onClick={() => setOpenFaqIndex(isOpen ? null : index)}
-                  className="w-full px-6 py-4 text-left flex items-center justify-between gap-4 font-bold text-xs sm:text-sm text-gray-900 hover:text-[#E91E8C] transition"
+          <div className="space-y-3">
+            {pageTheme.faqs.map((faq, index) => {
+              const isOpen = openFaqIndex === index;
+              return (
+                <div 
+                  key={faq.id || index}
+                  className="bg-white rounded-2xl border border-pink-100/80 shadow-xs overflow-hidden"
                 >
-                  <span className="flex items-center gap-2.5">
-                    <HelpCircle size={16} className="text-[#E91E8C] shrink-0" />
-                    {faq.q}
-                  </span>
-                  {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                    className="w-full px-6 py-4 text-left flex items-center justify-between gap-4 font-bold text-xs sm:text-sm text-gray-900 hover:text-[#E91E8C] transition"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <HelpCircle size={16} className="text-[#E91E8C] shrink-0" />
+                      {faq.question}
+                    </span>
+                    {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
 
-                <AnimatePresence>
-                  {isOpen && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="px-6 pb-4 pt-1 text-xs text-gray-600 leading-relaxed font-medium border-t border-pink-50"
-                    >
-                      {faq.a}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+                  <AnimatePresence>
+                    {isOpen && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="px-6 pb-4 pt-1 text-xs text-gray-600 leading-relaxed font-medium border-t border-pink-50"
+                      >
+                        {faq.answer}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* 7. BOTTOM INSPIRATION CALLOUT */}
-      <section className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center">
-        <div className="bg-gradient-to-r from-pink-50 via-rose-50 to-purple-50 p-8 rounded-3xl border border-pink-100 flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="text-left space-y-1">
-            <h3 className="text-lg font-black text-gray-900">Have Questions Before Applying?</h3>
-            <p className="text-xs text-gray-600 font-medium">
-              Talk directly with our Creator Management team on WhatsApp or Messenger.
-            </p>
+      {pageTheme.showBottomBanner && (
+        <section className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center">
+          <div className="bg-gradient-to-r from-pink-50 via-rose-50 to-purple-50 p-8 rounded-3xl border border-pink-100 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div className="text-left space-y-1">
+              <h3 className="text-lg font-black text-gray-900">{pageTheme.bottomTitle}</h3>
+              <p className="text-xs text-gray-600 font-medium">
+                {pageTheme.bottomSubtitle}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <a
+                href={pageTheme.bottomMessengerUrl || 'https://m.me/651561268050601'}
+                target="_blank"
+                rel="noreferrer"
+                className="px-5 py-3 bg-[#1877F2] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              >
+                <MessageCircle size={16} />
+                <span>{pageTheme.bottomMessengerLabel}</span>
+              </a>
+              <button
+                onClick={scrollToForm}
+                className="px-5 py-3 bg-[#E91E8C] hover:bg-pink-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm"
+              >
+                <Sparkles size={16} />
+                <span>{pageTheme.bottomApplyLabel}</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <a
-              href="https://m.me/651561268050601"
-              target="_blank"
-              rel="noreferrer"
-              className="px-5 py-3 bg-[#1877F2] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm"
-            >
-              <MessageCircle size={16} />
-              <span>Messenger Chat</span>
-            </a>
-            <button
-              onClick={scrollToForm}
-              className="px-5 py-3 bg-[#E91E8C] hover:bg-pink-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm"
-            >
-              <Sparkles size={16} />
-              <span>Apply Now</span>
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
     </div>
   );

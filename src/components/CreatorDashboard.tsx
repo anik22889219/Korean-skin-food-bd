@@ -21,12 +21,14 @@ import {
   Play,
   X,
   RefreshCw,
-  Tag
+  Tag,
+  Youtube
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { CreatorReel } from '../types';
 import { subscribeToCreatorReels } from '../services/creatorReelService';
+import { isYouTubeUrl, getYouTubeEmbedUrl, getYouTubeThumbnailUrl } from '../utils/youtubeUrl';
 
 export const CreatorDashboard: React.FC = () => {
   const { creatorProfile, user } = useAuth();
@@ -94,7 +96,17 @@ export const CreatorDashboard: React.FC = () => {
                 <X size={16} />
               </button>
               <div className="aspect-video bg-black flex items-center justify-center">
-                <video src={previewVideoUrl} controls autoPlay className="w-full h-full object-contain" />
+                {isYouTubeUrl(previewVideoUrl) ? (
+                  <iframe
+                    src={getYouTubeEmbedUrl(previewVideoUrl, { autoplay: true, controls: true })}
+                    title="YouTube Reel Preview"
+                    className="w-full h-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <video src={previewVideoUrl} controls autoPlay className="w-full h-full object-contain" />
+                )}
               </div>
             </div>
           </motion.div>
@@ -362,7 +374,16 @@ export const CreatorDashboard: React.FC = () => {
                   <div>
                     {/* Video / Thumbnail Container */}
                     <div className="relative aspect-video bg-slate-900 overflow-hidden group">
-                      {reel.videoUrl ? (
+                      {reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl) ? (
+                        <img
+                          src={
+                            reel.thumbnailUrl ||
+                            (reel.youtubeVideoId ? getYouTubeThumbnailUrl(reel.youtubeVideoId) : '')
+                          }
+                          alt={reel.caption}
+                          className="w-full h-full object-cover opacity-90"
+                        />
+                      ) : reel.videoUrl ? (
                         <video 
                           src={reel.videoUrl} 
                           className="w-full h-full object-cover opacity-90" 
@@ -377,7 +398,7 @@ export const CreatorDashboard: React.FC = () => {
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-4 text-center">
                           <Video size={32} className="text-slate-600 mb-1" />
-                          <span className="text-[10px] font-bold">Facebook Reel</span>
+                          <span className="text-[10px] font-bold">Creator Video</span>
                         </div>
                       )}
 
@@ -385,7 +406,7 @@ export const CreatorDashboard: React.FC = () => {
                       {reel.videoUrl && (
                         <button
                           onClick={() => setPreviewVideoUrl(reel.videoUrl)}
-                          className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-pink-600/90 text-white flex items-center justify-center shadow-xl hover:bg-pink-700 hover:scale-110 transition cursor-pointer"
+                          className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-red-600/90 text-white flex items-center justify-center shadow-xl hover:bg-red-700 hover:scale-110 transition cursor-pointer"
                           title="Play video preview"
                         >
                           <Play size={20} className="fill-white ml-0.5" />
@@ -393,7 +414,16 @@ export const CreatorDashboard: React.FC = () => {
                       )}
 
                       {/* Status Badge overlay */}
-                      <div className="absolute top-2.5 right-2.5">
+                      <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                        {reel.youtubeVideoId && (
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border shadow-sm ${
+                            reel.youtubePrivacyStatus === 'public'
+                              ? 'bg-red-600 text-white border-red-400'
+                              : 'bg-slate-900/90 text-amber-300 border-amber-500/40'
+                          }`}>
+                            {reel.youtubePrivacyStatus === 'public' ? 'YT Public' : 'YT Unpublished'}
+                          </span>
+                        )}
                         <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase border shadow-sm ${
                           reel.status === 'approved' || reel.status === 'published'
                             ? 'bg-emerald-500 text-white border-emerald-400'
@@ -445,18 +475,32 @@ export const CreatorDashboard: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Facebook Post Link */}
-                      <div>
-                        <a
-                          href={reel.facebookPostUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
-                        >
-                          <Globe size={13} className="text-blue-500" />
-                          <span className="truncate max-w-[220px]">View on Facebook</span>
-                          <ExternalLink size={11} />
-                        </a>
+                      {/* YouTube / Facebook Links */}
+                      <div className="flex flex-wrap items-center gap-3">
+                        {(reel.youtubeVideoId || isYouTubeUrl(reel.videoUrl)) && (
+                          <a
+                            href={reel.videoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-red-600 hover:text-red-700 hover:underline"
+                          >
+                            <Youtube size={13} className="text-red-500" />
+                            <span>YouTube</span>
+                            <ExternalLink size={11} />
+                          </a>
+                        )}
+                        {reel.facebookPostUrl && (
+                          <a
+                            href={reel.facebookPostUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                          >
+                            <Globe size={13} className="text-blue-500" />
+                            <span className="truncate max-w-[180px]">View on Facebook</span>
+                            <ExternalLink size={11} />
+                          </a>
+                        )}
                       </div>
 
                       {/* Metrics Performance Counter */}

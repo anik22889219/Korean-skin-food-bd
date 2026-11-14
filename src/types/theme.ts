@@ -181,6 +181,26 @@ export type SectionKey =
   | 'reachReliability'
   | 'communityLive';
 
+export interface FooterLinkItem {
+  id: string;
+  label: string;
+  to: string;
+  enabled: boolean;
+  isExternal?: boolean;
+  highlight?: boolean;
+}
+
+export interface FooterColumnGroup {
+  title: string;
+  links: FooterLinkItem[];
+}
+
+export interface FooterColumnsSettings {
+  store: FooterColumnGroup;
+  partners: FooterColumnGroup;
+  legal: FooterColumnGroup;
+}
+
 export interface GlobalThemeSettings {
   faviconUrl: string;
   logoUrl: string;
@@ -196,6 +216,7 @@ export interface GlobalThemeSettings {
   siteTagline: string;
   contactPhone: string;
   contactEmail: string;
+  contactAddress?: string;
   currencySymbol: string;
   facebookUrl: string;
   instagramUrl: string;
@@ -204,6 +225,7 @@ export interface GlobalThemeSettings {
   announcementText: string;
   enableAnnouncement: boolean;
   footerText: string;
+  footerColumns?: FooterColumnsSettings;
   updatedAt?: string;
 }
 
@@ -230,6 +252,309 @@ export interface ShopThemeSettings {
   quoteAuthor: string;
   itemsPerPage: number;
   defaultSort: string;
+  updatedAt?: string;
+}
+
+export type PageThemeKey =
+  | 'about'
+  | 'contact'
+  | 'privacy'
+  | 'terms'
+  | 'becomeCreator'
+  | 'brandsIndex'
+  | 'brandLanding'
+  | 'guidesIndex'
+  | 'guideDetail'
+  | 'productDetail'
+  | 'login'
+  | 'notFound';
+
+export interface FaqEntry {
+  id: string;
+  question: string;
+  answer: string;
+}
+
+export interface LegalArticleSection {
+  id: string;
+  title: string;
+  body: string;
+  bullets?: string[];
+}
+
+export interface AboutPageThemeSettings {
+  showHero: boolean;
+  heroBadge: string;
+  heroTitleLine1: string;
+  heroTitleHighlight: string;
+  heroSubtitle: string;
+  heroPrimaryBtnText: string;
+  heroSecondaryBtnText: string;
+  heroSecondaryBtnLink: string;
+  heroImageUrl: string;
+  showFoundersStory: boolean;
+  foundersSubtitle: string;
+  foundersTitle: string;
+  foundersQuote: string;
+  foundersBody: string;
+  foundersEstYear: string;
+  foundersCouncilLabel: string;
+  foundersImageUrl: string;
+  showHeritageEssentials: boolean;
+  heritageSubtitle: string;
+  heritageTitle: string;
+  showQualityAssurance: boolean;
+  qaSubtitle: string;
+  qaTitle: string;
+  qaDescription: string;
+  qaMainImageUrl: string;
+  qaNoteTitle: string;
+  qaNoteQuote: string;
+  qaNoteImageUrl: string;
+  showValidatedScience: boolean;
+  validatedSubtitle: string;
+  validatedTitle: string;
+  validatedDescription: string;
+  showHumanConnection: boolean;
+  humanSubtitle: string;
+  humanTitle: string;
+  humanQuote: string;
+  humanAttribution: string;
+  humanImageUrl: string;
+  showPartnershipSelection: boolean;
+  partnershipSubtitle: string;
+  partnershipTitle: string;
+  showSharedJourney: boolean;
+  sharedJourneySubtitle: string;
+  sharedJourneyTitle: string;
+  showReachReliability: boolean;
+  reachSubtitle: string;
+  reachTitle: string;
+  reachDescription: string;
+  showBestsellingRituals: boolean;
+  bestsellingSubtitle: string;
+  bestsellingTitle: string;
+  bestsellingDescription: string;
+  showBottomBanner: boolean;
+  bottomBannerSubtitle: string;
+  bottomBannerTitle: string;
+  bottomBannerDescription: string;
+  bottomPrimaryBtnText: string;
+  bottomPrimaryBtnLink: string;
+  bottomSecondaryBtnText: string;
+  bottomSecondaryBtnLink: string;
+}
+
+export interface ContactPageThemeSettings {
+  badgeText: string;
+  title: string;
+  subtitle: string;
+  channelsHeading: string;
+  whatsappLabel: string;
+  whatsappNumber: string;
+  emailLabel: string;
+  emailAddress: string;
+  locationLabel: string;
+  locationAddress: string;
+  showPromiseBox: boolean;
+  promiseHeading: string;
+  promises: string[];
+  showInquiryForm: boolean;
+  formHeading: string;
+  formSubtitle: string;
+  formSubmitButtonText: string;
+  successHeading: string;
+  successMessage: string;
+  showFaqs: boolean;
+  faqHeading: string;
+  faqSubtitle: string;
+  faqs: FaqEntry[];
+}
+
+export interface PrivacyPageThemeSettings {
+  heroBadge: string;
+  title: string;
+  subtitle: string;
+  lastUpdatedLabel: string;
+  appliesToLabel: string;
+  showGuaranteeBox: boolean;
+  guaranteeTitle: string;
+  guaranteeBody: string;
+  sections: LegalArticleSection[];
+  contactEmail: string;
+  contactPhone: string;
+  contactAddress: string;
+  showFooterNav: boolean;
+}
+
+export interface TermsPageThemeSettings {
+  heroBadge: string;
+  title: string;
+  subtitle: string;
+  effectiveDateLabel: string;
+  jurisdictionLabel: string;
+  showAuthenticityCard: boolean;
+  authenticityCardTitle: string;
+  authenticityCardBody: string;
+  showShippingRates: boolean;
+  insideDhakaRate: string;
+  outsideDhakaRate: string;
+  freeShippingThreshold: string;
+  sections: LegalArticleSection[];
+  contactEmail: string;
+  contactPhone: string;
+  contactAddress: string;
+  showFooterNav: boolean;
+}
+
+export interface CreatorStepItem {
+  id: string;
+  title: string;
+  desc: string;
+}
+
+export interface CreatorPerkItem {
+  id: string;
+  title: string;
+  desc: string;
+}
+
+export interface BecomeCreatorPageThemeSettings {
+  heroBadge: string;
+  heroTitleLine1: string;
+  heroTitleHighlight: string;
+  heroSubtitle: string;
+  primaryCtaText: string;
+  secondaryCtaText: string;
+  secondaryCtaLink: string;
+  showStats: boolean;
+  stats: Array<{ id: string; value: string; label: string }>;
+  showPerks: boolean;
+  perksEyebrow: string;
+  perksTitle: string;
+  perks: CreatorPerkItem[];
+  showSteps: boolean;
+  stepsEyebrow: string;
+  stepsTitle: string;
+  steps: CreatorStepItem[];
+  showTiers: boolean;
+  tiersEyebrow: string;
+  tiersTitle: string;
+  tiersSubtitle: string;
+  formTitle: string;
+  formSubtitle: string;
+  showFaqs: boolean;
+  faqsEyebrow: string;
+  faqsTitle: string;
+  faqs: FaqEntry[];
+  showBottomBanner: boolean;
+  bottomTitle: string;
+  bottomSubtitle: string;
+  bottomMessengerLabel: string;
+  bottomMessengerUrl: string;
+  bottomApplyLabel: string;
+}
+
+export interface BrandsIndexPageThemeSettings {
+  badgeText: string;
+  title: string;
+  subtitle: string;
+  searchPlaceholder: string;
+  showFeaturedSection: boolean;
+  featuredTitle: string;
+  featuredCtaLabel: string;
+  showDirectorySection: boolean;
+  directoryTitle: string;
+}
+
+export interface BrandLandingPageThemeSettings {
+  authenticityBadge: string;
+  defaultHeroImage: string;
+  catalogHeadingPrefix: string;
+  catalogSubtext: string;
+  emptyStateTitle: string;
+  emptyStateCtaLabel: string;
+  emptyStateCtaLink: string;
+  showSignatureIngredients: boolean;
+  showFaqs: boolean;
+  faqHeadingPrefix: string;
+  faqSubtext: string;
+}
+
+export interface GuidesIndexPageThemeSettings {
+  badgeText: string;
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  readGuideLabelEN: string;
+  readGuideLabelBN: string;
+  showLanguageSwitcher: boolean;
+  showCategoryTabs: boolean;
+}
+
+export interface GuideDetailPageThemeSettings {
+  showLanguageSwitcher: boolean;
+  featuredActivesHeading: string;
+  showFaqs: boolean;
+  faqHeadingEN: string;
+  faqHeadingBN: string;
+  faqSubtext: string;
+  showRelatedProducts: boolean;
+  relatedHeading: string;
+  relatedSubtext: string;
+  relatedCtaLabel: string;
+}
+
+export interface ProductDetailPageThemeSettings {
+  trustBadge1: string;
+  trustBadge2: string;
+  showSocialShareBox: boolean;
+  shareBoxTitle: string;
+  shareBoxSubtitle: string;
+  addToBasketLabel: string;
+  wholesaleCtaLabel: string;
+  whatsappCtaLabel: string;
+  showReviewsSection: boolean;
+  reviewsHeading: string;
+  showRelatedSection: boolean;
+  relatedHeading: string;
+  relatedSubtext: string;
+}
+
+export interface LoginPageThemeSettings {
+  title: string;
+  subtitle: string;
+  googleButtonText: string;
+  securityBadgeText: string;
+  backToShopLabel: string;
+  backToShopLink: string;
+}
+
+export interface NotFoundPageThemeSettings {
+  badgeText: string;
+  title: string;
+  description: string;
+  homeBtnLabel: string;
+  shopBtnLabel: string;
+  brandsBtnLabel: string;
+  guidesBtnLabel: string;
+  showQuickLinks: boolean;
+}
+
+export interface PagesThemeSettings {
+  about: AboutPageThemeSettings;
+  contact: ContactPageThemeSettings;
+  privacy: PrivacyPageThemeSettings;
+  terms: TermsPageThemeSettings;
+  becomeCreator: BecomeCreatorPageThemeSettings;
+  brandsIndex: BrandsIndexPageThemeSettings;
+  brandLanding: BrandLandingPageThemeSettings;
+  guidesIndex: GuidesIndexPageThemeSettings;
+  guideDetail: GuideDetailPageThemeSettings;
+  productDetail: ProductDetailPageThemeSettings;
+  login: LoginPageThemeSettings;
+  notFound: NotFoundPageThemeSettings;
   updatedAt?: string;
 }
 
