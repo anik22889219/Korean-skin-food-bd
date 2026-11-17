@@ -30,7 +30,7 @@ export const DEFAULT_FOOTER_COLUMNS: FooterColumnsSettings = {
       { id: 'st-shop', label: 'Shop All Skincare', to: '/shop', enabled: true },
       { id: 'st-brands', label: 'Korean Brands Directory', to: '/brands', enabled: true },
       { id: 'st-guides', label: 'Skincare Routine Guides', to: '/guides', enabled: true },
-      { id: 'st-reviews', label: 'Google Reviews (4.9 ★)', to: 'https://share.google/lEQv5trQv88b0w8WT', enabled: true, isExternal: true, highlight: true },
+      { id: 'st-reviews', label: 'Google Business Reviews', to: 'https://share.google/lEQv5trQv88b0w8WT', enabled: true, isExternal: true, highlight: true },
     ]
   },
   partners: {

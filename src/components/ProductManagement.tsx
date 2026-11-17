@@ -333,6 +333,34 @@ export const ProductManagement: React.FC = () => {
     };
   }, [singleProducts]);
 
+  // Memoized unique brands synced strictly with Categories page brand list (for the primary Brand Filter)
+  const categorySyncedBrandsForFilter = useMemo(() => {
+    const taxonomyBrands = allTaxonomies.filter((t) => t.type === 'brand');
+    const brandMap = new Map<string, string>();
+
+    if (taxonomyBrands.length > 0) {
+      taxonomyBrands
+        .filter((t) => t.isActive !== false)
+        .forEach((t) => {
+          const trimmed = (t.name || '').trim();
+          if (trimmed && !brandMap.has(trimmed.toLowerCase())) {
+            brandMap.set(trimmed.toLowerCase(), trimmed);
+          }
+        });
+    } else {
+      singleProducts.forEach((p) => {
+        const trimmed = (p.brand || '').trim();
+        if (trimmed && !brandMap.has(trimmed.toLowerCase())) {
+          brandMap.set(trimmed.toLowerCase(), getCanonicalBrandName(trimmed));
+        }
+      });
+    }
+
+    return Array.from(brandMap.values()).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+  }, [allTaxonomies, singleProducts]);
+
   // Memoized unique brands for single products filter
   const availableBrandsForFilter = useMemo(() => {
     const taxBrands = allTaxonomies.filter((t) => t.type === 'brand' && t.isActive).map((t) => t.name);
@@ -1626,7 +1654,7 @@ export const ProductManagement: React.FC = () => {
           className="px-4 py-2 text-slate-600 hover:text-rose-700 hover:bg-white/60 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer"
         >
           <SlidersHorizontal size={14} className="text-rose-600" />
-          <span>Taxonomies & Filters (ফিল্টার ও ট্যাক্সোনমি)</span>
+          <span>Categories (ক্যাটাগরিসমূহ)</span>
         </button>
       </div>
 
@@ -1887,7 +1915,7 @@ export const ProductManagement: React.FC = () => {
               </select>
             </div>
 
-            {/* Brand Filter (Dynamic from taxonomies) */}
+            {/* Brand Filter (Dynamic from Categories/Taxonomies) */}
             <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-100 shadow-xs">
               <Tag size={13} className="text-[#E91E8C] shrink-0" />
               <select
@@ -1896,8 +1924,8 @@ export const ProductManagement: React.FC = () => {
                 className="bg-transparent text-xs text-slate-800 font-bold outline-none cursor-pointer max-w-[130px] truncate"
                 title="Filter by K-Beauty brand"
               >
-                <option value="All">All Brands ({availableBrandsForFilter.length})</option>
-                {availableBrandsForFilter.map((b) => (
+                <option value="All">All Brands ({categorySyncedBrandsForFilter.length})</option>
+                {categorySyncedBrandsForFilter.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>

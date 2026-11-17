@@ -4,75 +4,10 @@ import { ProductReview } from '../types';
 import { productService } from './productService';
 import { cloudinaryService } from './cloudinaryService';
 
-// Seeded reviews for immediate authentic display across products
-const SEEDED_REVIEWS: ProductReview[] = [
-  {
-    id: 'rev-seed-101',
-    productId: 'cosrx-snail-96',
-    userId: 'user-seed-1',
-    userName: 'Anika Rahman',
-    userEmail: 'anika.rahman@gmail.com',
-    rating: 5,
-    title: 'Holy grail for glass skin in Dhaka weather!',
-    comment: 'Truly game-changing. Under Dhaka\'s extreme summer heat, most heavy moisturizers feel so sticky, but this snail mucin essence is incredibly lightweight! My skin texture feels so smooth and hydrated.',
-    photos: [
-      'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60'
-    ],
-    isVerifiedPurchaser: true,
-    createdAt: '2026-07-02T10:15:00Z',
-    helpfulCount: 12,
-    helpfulVoters: []
-  },
-  {
-    id: 'rev-seed-102',
-    productId: 'cosrx-snail-96',
-    userId: 'user-seed-2',
-    userName: 'Sajid Hasan',
-    userEmail: 'sajid.hasan@yahoo.com',
-    rating: 5,
-    title: '100% Authentic import quality',
-    comment: 'Bought this for my combination skin. Very soothing after shaving and sun exposure. Highly recommend Korean Skin Food BD for genuine authentic items.',
-    photos: [],
-    isVerifiedPurchaser: true,
-    createdAt: '2026-06-18T14:20:00Z',
-    helpfulCount: 8,
-    helpfulVoters: []
-  },
-  {
-    id: 'rev-seed-103',
-    productId: 'beauty-of-joseon-relief-sun',
-    userId: 'user-seed-3',
-    userName: 'Nusrat Jahan',
-    userEmail: 'nusrat.jahan@gmail.com',
-    rating: 5,
-    title: 'Zero white cast and no greasy shine',
-    comment: 'Best sunscreen I have ever used in Bangladesh! Absorbs within 30 seconds with no white cast at all. Perfect under makeup too.',
-    photos: [
-      'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=600&auto=format&fit=crop&q=60'
-    ],
-    isVerifiedPurchaser: true,
-    createdAt: '2026-07-10T09:40:00Z',
-    helpfulCount: 15,
-    helpfulVoters: []
-  },
-  {
-    id: 'rev-seed-104',
-    productId: 'some-by-mi-miracle-toner',
-    userId: 'user-seed-4',
-    userName: 'Tanvir Ahmed',
-    userEmail: 'tanvir.bd@gmail.com',
-    rating: 4,
-    title: 'Noticeable breakout control in 2 weeks',
-    comment: 'Cleared up my acne flare-ups significantly. Gentle exfoliation without stripping humidity barrier.',
-    photos: [],
-    isVerifiedPurchaser: true,
-    createdAt: '2026-07-05T16:00:00Z',
-    helpfulCount: 6,
-    helpfulVoters: []
-  }
-];
+// No dummy reviews — only real customer reviews stored in Firestore product_reviews
+const SEEDED_REVIEWS: ProductReview[] = [];
 
-let reviewsCache: ProductReview[] = [...SEEDED_REVIEWS];
+let reviewsCache: ProductReview[] = [];
 
 // Live Firestore Listener for product_reviews
 onSnapshot(

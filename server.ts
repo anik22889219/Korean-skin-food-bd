@@ -355,11 +355,30 @@ app.post("/api/notifications/send-push", verifyAdminAuth, async (req, res) => {
   }
 });
 
+// Unified Google API key helper (one key can power Gemini AI & Places API when configured in Google Cloud)
+function getUnifiedGoogleApiKey(): string | undefined {
+  const candidates = [
+    process.env.GOOGLE_API_KEY,
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_PLACES_API_KEY,
+    process.env.GOOGLE_MAPS_API_KEY,
+    process.env.VITE_GOOGLE_MAPS_API_KEY,
+  ];
+  for (const val of candidates) {
+    const trimmed = typeof val === "string" ? val.trim() : "";
+    if (trimmed && trimmed !== "MY_GEMINI_API_KEY") {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
 // Initialize Gemini safely
 let ai: any = null;
 try {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (apiKey && apiKey !== "MY_GEMINI_API_KEY") {
+  const rawGeminiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = (rawGeminiKey && rawGeminiKey !== "MY_GEMINI_API_KEY" ? rawGeminiKey : undefined) || getUnifiedGoogleApiKey();
+  if (apiKey) {
     const clientOptions = {
       apiKey,
       httpOptions: {
@@ -372,14 +391,14 @@ try {
     ai = new GoogleGenAI(clientOptions);
     console.log("Gemini API initialized successfully.");
   } else {
-    console.warn("GEMINI_API_KEY is not set. Falling back to simulated AI generation.");
+    console.warn("GEMINI_API_KEY / GOOGLE_API_KEY is not set. Falling back to simulated AI generation.");
   }
 } catch (error) {
   console.error("Failed to initialize Gemini API:", error);
 }
 
 /**
- * Universal Gemini API invocation with multi-tier model fallback (gemini-3.7-flash -> gemini-flash-latest -> gemini-3.1-flash-lite)
+ * Universal Gemini API invocation with multi-tier model fallback (gemini-4-hydrogen -> gemini-3.1-flash-lite)
  * Automatically handles 504 timeouts/deadline expirations, 503 high demand spikes, 429 quota limits, multimodal normalization, and transient network errors gracefully.
  */
 async function callGeminiGenerate(params: {
@@ -395,8 +414,10 @@ async function callGeminiGenerate(params: {
     normalizedContents = normalizedContents.parts;
   }
 
-  const preferred = params.preferredModel || "gemini-3.7-flash";
-  const defaultList = ["gemini-3.7-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+  const preferred = params.preferredModel && params.preferredModel !== "gemini-3.7-flash"
+    ? params.preferredModel
+    : "gemini-4-hydrogen";
+  const defaultList = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
   const modelsToTry = [preferred, ...defaultList.filter(m => m !== preferred)];
 
   let lastError: any = null;
@@ -464,9 +485,9 @@ app.get("/api/health", (req, res) => {
 });
 
 // ==========================================
-// GOOGLE BUSINESS REVIEWS & MAPS GROUNDING
+// GOOGLE BUSINESS PROFILE (GMB) REVIEWS & SYNC
 // ==========================================
-const DEFAULT_GOOGLE_BUSINESS_DATA = {
+const EMPTY_GOOGLE_BUSINESS_DATA = {
   businessName: 'Korean Skin Food BD',
   googleMapsUrl: 'https://share.google/lEQv5trQv88b0w8WT',
   writeReviewUrl: 'https://g.page/r/CaiTn1_7AA34EAE/review',
@@ -476,215 +497,658 @@ const DEFAULT_GOOGLE_BUSINESS_DATA = {
   city: 'Dhaka',
   country: 'Bangladesh',
   phoneNumber: '+880 1755-837545',
-  overallRating: 4.9,
-  totalReviewsCount: 148,
+  overallRating: 0,
+  totalReviewsCount: 0,
   ratingBreakdown: {
-    fiveStar: 139,
-    fourStar: 7,
-    threeStar: 2,
+    fiveStar: 0,
+    fourStar: 0,
+    threeStar: 0,
     twoStar: 0,
     oneStar: 0
   },
-  reviews: [
-    {
-      id: 'g-rev-1',
-      authorName: 'Nusrat Jahan Chowdhury',
-      authorPhotoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      rating: 5,
-      relativeTimeDescription: '3 days ago',
-      publishTime: '2026-09-18T10:30:00Z',
-      isVerifiedCustomer: true,
-      isLocalGuide: true,
-      productPurchased: 'COSRX Advanced Snail 96 Mucin & BOJ Sunscreen',
-      text: 'Undoubtedly the best and most trustworthy place for genuine Korean skincare in Dhaka! I bought the COSRX Snail Mucin and Beauty of Joseon Relief Sun Rice + Probiotics. Both barcode scans proved 100% original imported from Seoul. Skin barrier is finally healed within 2 weeks!',
-      likesCount: 28,
-      reply: {
-        text: 'Thank you so much, Nusrat! We are thrilled your skin barrier is glowing. 100% authentic cosmeceuticals straight from Seoul is our lifetime promise! ðŸŒ¸',
-        replyDate: '2 days ago'
-      }
-    },
-    {
-      id: 'g-rev-2',
-      authorName: 'Tanvir Ahmed Shanto',
-      authorPhotoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-      rating: 5,
-      relativeTimeDescription: '1 week ago',
-      publishTime: '2026-09-14T14:15:00Z',
-      isVerifiedCustomer: true,
-      isLocalGuide: false,
-      productPurchased: 'Anua Heartleaf 77% Soothing Toner',
-      text: 'Fastest delivery in Banani, Dhaka! Ordered through WhatsApp and received it within 24 hours with cash on delivery and sealed packaging. The Anua 77 toner calmed my redness almost overnight. Great customer support team that guides you step-by-step.',
-      likesCount: 19,
-      reply: {
-        text: 'Thank you Tanvir! Glad our rapid delivery team got your soothing toner to you right on time. Enjoy your glowing routine!',
-        replyDate: '6 days ago'
-      }
-    },
-    {
-      id: 'g-rev-3',
-      authorName: 'Sadia Rahman Mim',
-      authorPhotoUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-      rating: 5,
-      relativeTimeDescription: '2 weeks ago',
-      publishTime: '2026-09-07T08:45:00Z',
-      isVerifiedCustomer: true,
-      isLocalGuide: true,
-      productPurchased: 'Skinfood Black Sugar Mask & Rice Wash Off',
-      text: 'I have been ordering from Korean Skin Food for over 2 years now. In a market flooded with counterfeits, this shop is a true sanctuary for K-beauty lovers. Their packaging with bubble wrap and batch authentication QR is unmatched. Highly recommend!',
-      likesCount: 42,
-      reply: {
-        text: 'Sadia apu, your continued trust means the world to our team! Thank you for walking this glowing botanical journey with us. âœ¨',
-        replyDate: '13 days ago'
-      }
-    },
-    {
-      id: 'g-rev-4',
-      authorName: 'Dr. Farhana Yasmin',
-      authorPhotoUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-      rating: 5,
-      relativeTimeDescription: '3 weeks ago',
-      publishTime: '2026-08-30T11:20:00Z',
-      isVerifiedCustomer: true,
-      isLocalGuide: true,
-      productPurchased: 'Round Lab Birch Juice Moisturizing Cream',
-      text: 'As a dermatologist, I frequently advise my patients to only purchase authentic cosmeceuticals with legitimate expiration dates. Korean Skin Food consistently provides verified batches. Outstanding service and authentic quality.',
-      likesCount: 65,
-      reply: {
-        text: 'Honored and deeply grateful for your clinical recommendation, Dr. Farhana! Our climate-controlled storage keeps all active formulations at peak potency.',
-        replyDate: '3 weeks ago'
-      }
-    },
-    {
-      id: 'g-rev-5',
-      authorName: 'Mahmudul Hasan Rifat',
-      authorPhotoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-      rating: 5,
-      relativeTimeDescription: '1 month ago',
-      publishTime: '2026-08-20T16:00:00Z',
-      isVerifiedCustomer: true,
-      isLocalGuide: false,
-      productPurchased: 'TirTir Mask Fit Red Cushion Foundation',
-      text: 'Bought the TirTir Red Cushion for my sister. The shade match recommendation given on their live chat was 100% spot on! Authentic sealed box and pristine finish. Will be ordering again soon.',
-      likesCount: 15
-    },
-    {
-      id: 'g-rev-6',
-      authorName: 'Samira Anjum',
-      authorPhotoUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
-      rating: 5,
-      relativeTimeDescription: '1 month ago',
-      publishTime: '2026-08-12T09:10:00Z',
-      isVerifiedCustomer: true,
-      isLocalGuide: true,
-      productPurchased: 'Haruharu WONDER Black Rice Hyaluronic Toner',
-      text: 'Super gentle on sensitive skin. Zero artificial fragrances. Korean Skin Food is my default go-to store in Bangladesh. The Google Business reviews were totally accurateâ€”10/10 experience!',
-      likesCount: 22
-    }
-  ],
-  lastSyncedAt: new Date().toISOString(),
-  status: 'verified',
-  groundingSource: 'Google Maps Grounding (Dhaka, Bangladesh)'
+  reviews: [] as any[],
+  lastSyncedAt: '',
+  status: 'disconnected',
+  connectionMethod: 'none'
 };
+
+const LEGACY_DUMMY_GMB_IDS = new Set([
+  'g-rev-1', 'g-rev-2', 'g-rev-3', 'g-rev-4', 'g-rev-5', 'g-rev-6'
+]);
+
+const LEGACY_DUMMY_GMB_AUTHORS = new Set([
+  'Nusrat Jahan Chowdhury',
+  'Tanvir Ahmed Shanto',
+  'Sadia Rahman Mim',
+  'Dr. Farhana Yasmin',
+  'Mahmudul Hasan Rifat',
+  'Samira Anjum'
+]);
+
+function isRealSyncedGmbReview(rev: any): boolean {
+  if (!rev || typeof rev !== 'object') return false;
+  if (rev.source === 'google_business_api' || rev.source === 'google_places_api') {
+    return true;
+  }
+  if (LEGACY_DUMMY_GMB_IDS.has(rev.id) || LEGACY_DUMMY_GMB_AUTHORS.has(rev.authorName)) {
+    return false;
+  }
+  return Boolean(rev.reviewName);
+}
+
+function sanitizeGoogleBusinessProfileDoc(raw: any) {
+  if (!raw || typeof raw !== 'object') {
+    return { ...EMPTY_GOOGLE_BUSINESS_DATA };
+  }
+  const rawReviews = Array.isArray(raw.reviews) ? raw.reviews : [];
+  const realReviews = rawReviews.filter(isRealSyncedGmbReview);
+  const hadLegacyDummy = rawReviews.length !== realReviews.length;
+
+  const isConnected =
+    raw.connectionMethod === 'google_business_oauth' ||
+    raw.connectionMethod === 'google_places_api' ||
+    realReviews.length > 0;
+
+  if (!isConnected) {
+    return {
+      ...EMPTY_GOOGLE_BUSINESS_DATA,
+      businessName: raw.businessName || EMPTY_GOOGLE_BUSINESS_DATA.businessName,
+      googleMapsUrl: raw.googleMapsUrl || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
+      writeReviewUrl: raw.writeReviewUrl || EMPTY_GOOGLE_BUSINESS_DATA.writeReviewUrl,
+      shareUrl: raw.shareUrl || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
+      placeId: raw.placeId || '',
+      address: raw.address || EMPTY_GOOGLE_BUSINESS_DATA.address,
+      reviews: [],
+      overallRating: 0,
+      totalReviewsCount: 0,
+      ratingBreakdown: { fiveStar: 0, fourStar: 0, threeStar: 0, twoStar: 0, oneStar: 0 },
+      status: 'disconnected',
+      connectionMethod: 'none',
+      _hadLegacyDummy: hadLegacyDummy
+    };
+  }
+
+  return {
+    ...EMPTY_GOOGLE_BUSINESS_DATA,
+    ...raw,
+    reviews: realReviews,
+    _hadLegacyDummy: hadLegacyDummy
+  };
+}
+
+function mapGmbStarRating(starRating: any): number {
+  if (typeof starRating === 'number') return Math.min(5, Math.max(1, starRating));
+  switch (String(starRating || '').toUpperCase()) {
+    case 'FIVE': return 5;
+    case 'FOUR': return 4;
+    case 'THREE': return 3;
+    case 'TWO': return 2;
+    case 'ONE': return 1;
+    default: return 5;
+  }
+}
+
+function formatRelativeTime(isoDate?: string): string {
+  if (!isoDate) return 'Recently';
+  const ts = new Date(isoDate).getTime();
+  if (Number.isNaN(ts)) return 'Recently';
+  const diffMs = Date.now() - ts;
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays <= 0) return 'Today';
+  if (diffDays === 1) return '1 day ago';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffWeeks === 1) return '1 week ago';
+  if (diffWeeks < 5) return `${diffWeeks} weeks ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths === 1) return '1 month ago';
+  if (diffMonths < 12) return `${diffMonths} months ago`;
+  const diffYears = Math.floor(diffDays / 365);
+  return diffYears === 1 ? '1 year ago' : `${diffYears} years ago`;
+}
+
+function computeRatingBreakdown(reviews: any[]) {
+  const breakdown = { fiveStar: 0, fourStar: 0, threeStar: 0, twoStar: 0, oneStar: 0 };
+  for (const r of reviews) {
+    const stars = Math.round(Number(r.rating) || 0);
+    if (stars === 5) breakdown.fiveStar++;
+    else if (stars === 4) breakdown.fourStar++;
+    else if (stars === 3) breakdown.threeStar++;
+    else if (stars === 2) breakdown.twoStar++;
+    else if (stars === 1) breakdown.oneStar++;
+  }
+  return breakdown;
+}
+
+function formatStorefrontAddress(addr: any): string {
+  if (!addr || typeof addr !== 'object') return '';
+  const parts = [
+    ...(Array.isArray(addr.addressLines) ? addr.addressLines : []),
+    addr.locality,
+    addr.administrativeArea,
+    addr.postalCode
+  ].filter(Boolean);
+  return parts.join(', ');
+}
 
 app.get("/api/google-business/reviews", async (req, res) => {
   try {
+    let rawData: any = null;
     if (db) {
       const snap = await getDoc(doc(db, "settings", "google_business_profile"));
       if (snap.exists()) {
-        const data = snap.data();
-        return res.json({ success: true, data: { ...DEFAULT_GOOGLE_BUSINESS_DATA, ...data } });
+        rawData = snap.data();
       }
     }
-    return res.json({ success: true, data: DEFAULT_GOOGLE_BUSINESS_DATA });
+    if (!rawData) {
+      rawData = await getFirestoreDocWithToken("settings", "google_business_profile");
+    }
+
+    const sanitized = sanitizeGoogleBusinessProfileDoc(rawData);
+    const { _hadLegacyDummy, ...cleanData } = sanitized as any;
+
+    return res.json({ success: true, data: cleanData });
   } catch (err: any) {
     console.warn("[GoogleBusiness API] Error fetching profile doc:", err);
-    return res.json({ success: true, data: DEFAULT_GOOGLE_BUSINESS_DATA });
+    return res.json({ success: true, data: EMPTY_GOOGLE_BUSINESS_DATA });
   }
 });
 
-// Update Google Business profile and reviews
-app.put("/api/google-business/reviews", async (req, res) => {
+// List connected user's Google Business Profile accounts & locations via OAuth access token
+app.post("/api/google-business/oauth/locations", verifyAdminAuth, async (req, res) => {
+  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  if (!googleToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Missing Google Business OAuth access token. Please connect your Google Business account."
+    });
+  }
+
   try {
-    const payload = req.body;
-    if (!payload || typeof payload !== "object") {
-      return res.status(400).json({ success: false, error: "Invalid payload" });
+    const accountsRes = await fetch("https://mybusinessaccountmanagement.googleapis.com/v1/accounts", {
+      headers: { Authorization: `Bearer ${googleToken}` }
+    });
+    const accountsJson: any = await accountsRes.json().catch(() => ({}));
+
+    if (!accountsRes.ok) {
+      const apiMsg = accountsJson?.error?.message || `Google API returned HTTP ${accountsRes.status}`;
+      const isApiDisabledOrQuota =
+        accountsRes.status === 403 ||
+        accountsRes.status === 429 ||
+        apiMsg.toLowerCase().includes("not been used") ||
+        apiMsg.toLowerCase().includes("disabled") ||
+        apiMsg.toLowerCase().includes("quota");
+      return res.status(accountsRes.status === 401 ? 401 : 400).json({
+        success: false,
+        needsApiAccess: isApiDisabledOrQuota,
+        error: isApiDisabledOrQuota
+          ? `Google Business Profile API access is not yet enabled on your Google Cloud project (${apiMsg}). Enable the Google Business Profile APIs in Google Cloud Console or sync using your Place ID.`
+          : apiMsg
+      });
     }
 
-    const updatedData = {
-      ...DEFAULT_GOOGLE_BUSINESS_DATA,
-      ...payload,
-      lastSyncedAt: new Date().toISOString()
-    };
+    const accounts = Array.isArray(accountsJson.accounts) ? accountsJson.accounts : [];
+    if (accounts.length === 0) {
+      return res.json({
+        success: true,
+        locations: [],
+        message: "No Google Business Profile accounts were found for this Google account."
+      });
+    }
 
-    if (db) {
-      await setDoc(doc(db, "settings", "google_business_profile"), updatedData, { merge: true });
+    const locations: any[] = [];
+    for (const acc of accounts) {
+      const accountName = acc.name;
+      const accountDisplayName = acc.accountName || acc.name;
+      const locUrl = `https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title,storefrontAddress,websiteUri,metadata,phoneNumbers&pageSize=100`;
+      const locRes = await fetch(locUrl, {
+        headers: { Authorization: `Bearer ${googleToken}` }
+      });
+      if (!locRes.ok) continue;
+      const locJson: any = await locRes.json().catch(() => ({}));
+      const locs = Array.isArray(locJson.locations) ? locJson.locations : [];
+      for (const loc of locs) {
+        locations.push({
+          accountName,
+          accountDisplayName,
+          locationName: loc.name,
+          title: loc.title || accountDisplayName,
+          address: formatStorefrontAddress(loc.storefrontAddress),
+          placeId: loc.metadata?.placeId || "",
+          mapsUri: loc.metadata?.mapsUri || "",
+          newReviewUri: loc.metadata?.newReviewUri || "",
+          phoneNumber: loc.phoneNumbers?.primaryPhone || ""
+        });
+      }
     }
 
     return res.json({
       success: true,
-      message: "Google Business reviews updated successfully!",
-      data: updatedData
+      locations,
+      message: locations.length > 0
+        ? `Found ${locations.length} Google Business Profile location(s).`
+        : "Connected to Google account, but no verified Business Profile locations were found."
     });
   } catch (err: any) {
-    console.error("[GoogleBusiness API] Error updating reviews:", err);
+    console.error("[GoogleBusiness OAuth] Error listing locations:", err);
     return res.status(500).json({
       success: false,
-      error: err?.message || "Failed to update Google Business reviews"
+      error: err?.message || "Failed to fetch Google Business Profile locations."
     });
   }
 });
 
-app.post("/api/google-business/sync", async (req, res) => {
-  let updatedData = { ...DEFAULT_GOOGLE_BUSINESS_DATA, lastSyncedAt: new Date().toISOString() };
-  let syncMsg = "Synced successfully with Google Maps.";
+// Fetch ALL genuine reviews for a selected GMB location and save to Firestore
+app.post("/api/google-business/oauth/sync-reviews", verifyAdminAuth, async (req, res) => {
+  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  const { location, connectedEmail } = req.body || {};
 
-  // Maps Grounding using gemini-3.5-flash with googleMaps tool as required by specification
-  if (ai) {
-    try {
-      console.log("[GoogleBusiness] Running Google Maps Grounding with gemini-3.5-flash...");
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: "Find the official Google Business profile, customer reviews, ratings, and physical location for Korean Skin Food in Bangladesh (Google Maps: https://share.google/lEQv5trQv88b0w8WT or knowledge graph /g/11zf4cyzwf in Dhaka). Summarize current reviews and ratings.",
-        config: {
-          tools: [{ googleMaps: {} }],
-          toolConfig: {
-            retrievalConfig: {
-              latLng: {
-                latitude: 23.8103, // Dhaka, Bangladesh
-                longitude: 90.4125
-              }
-            }
-          }
-        }
+  if (!googleToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Google Business OAuth session expired. Please reconnect your Google Business account."
+    });
+  }
+  if (!location?.accountName || !location?.locationName) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing GMB accountName or locationName."
+    });
+  }
+
+  try {
+    const cleanAccount = String(location.accountName).replace(/^\/+/, "");
+    const cleanLocation = String(location.locationName).replace(/^\/+/, "");
+    const parentPath = cleanLocation.startsWith("accounts/")
+      ? cleanLocation
+      : `${cleanAccount}/${cleanLocation}`;
+
+    const allReviews: any[] = [];
+    let pageToken: string | undefined;
+    let averageRating = 0;
+    let totalReviewCount = 0;
+
+    for (let page = 0; page < 10; page++) {
+      const qs = new URLSearchParams({ pageSize: "50" });
+      if (pageToken) qs.set("pageToken", pageToken);
+      const reviewsUrl = `https://mybusiness.googleapis.com/v4/${parentPath}/reviews?${qs.toString()}`;
+      const revRes = await fetch(reviewsUrl, {
+        headers: { Authorization: `Bearer ${googleToken}` }
       });
+      const revJson: any = await revRes.json().catch(() => ({}));
 
-      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (groundingChunks && Array.isArray(groundingChunks) && groundingChunks.length > 0) {
-        console.log(`[GoogleBusiness] Maps Grounding returned ${groundingChunks.length} chunks.`);
-        (updatedData as any).groundingChunks = groundingChunks;
-        updatedData.groundingSource = "Google Maps Grounding API (Dhaka, Bangladesh)";
-        syncMsg = "Real-time Google Maps Grounding data retrieved successfully.";
+      if (!revRes.ok) {
+        const apiMsg = revJson?.error?.message || `Google Reviews API returned HTTP ${revRes.status}`;
+        return res.status(revRes.status === 401 ? 401 : 400).json({
+          success: false,
+          error: apiMsg
+        });
       }
-    } catch (apiErr: any) {
-      console.log("[GoogleBusiness] Maps grounding notice:", apiErr?.message?.slice(0, 100) || "Quota/Network notice");
-      syncMsg = "Google Business profile loaded from verified Google Maps profile.";
+
+      if (typeof revJson.averageRating === "number") {
+        averageRating = revJson.averageRating;
+      }
+      if (typeof revJson.totalReviewCount === "number") {
+        totalReviewCount = revJson.totalReviewCount;
+      }
+
+      const items = Array.isArray(revJson.reviews) ? revJson.reviews : [];
+      for (const item of items) {
+        const rating = mapGmbStarRating(item.starRating);
+        const publishTime = item.createTime || item.updateTime || new Date().toISOString();
+        allReviews.push({
+          id: item.reviewId || item.name || `gmb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          reviewName: item.name || "",
+          source: "google_business_api",
+          authorName: item.reviewer?.displayName || "Google Customer",
+          authorPhotoUrl: item.reviewer?.profilePhotoUrl || "",
+          rating,
+          relativeTimeDescription: formatRelativeTime(publishTime),
+          publishTime,
+          updateTime: item.updateTime || publishTime,
+          isVerifiedCustomer: true,
+          isLocalGuide: false,
+          text: item.comment || "",
+          reply: item.reviewReply?.comment
+            ? {
+                text: item.reviewReply.comment,
+                replyDate: formatRelativeTime(item.reviewReply.updateTime)
+              }
+            : undefined
+        });
+      }
+
+      if (!revJson.nextPageToken) break;
+      pageToken = revJson.nextPageToken;
     }
+
+    const breakdown = computeRatingBreakdown(allReviews);
+    const computedAvg =
+      averageRating > 0
+        ? Number(averageRating.toFixed(1))
+        : allReviews.length > 0
+          ? Number((allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length).toFixed(1))
+          : 0;
+
+    const profileDoc = {
+      businessName: location.title || "Korean Skin Food BD",
+      googleMapsUrl: location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
+      writeReviewUrl: location.newReviewUri || location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.writeReviewUrl,
+      shareUrl: location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
+      placeId: location.placeId || "",
+      address: location.address || EMPTY_GOOGLE_BUSINESS_DATA.address,
+      phoneNumber: location.phoneNumber || EMPTY_GOOGLE_BUSINESS_DATA.phoneNumber,
+      overallRating: computedAvg,
+      totalReviewsCount: totalReviewCount || allReviews.length,
+      ratingBreakdown: breakdown,
+      reviews: allReviews,
+      lastSyncedAt: new Date().toISOString(),
+      status: "verified",
+      connectionMethod: "google_business_oauth",
+      connectedAccountName: cleanAccount,
+      connectedLocationName: cleanLocation,
+      connectedEmail: connectedEmail || (req as any).user?.email || "",
+      groundingSource: "Google Business Profile API (Live OAuth Sync)"
+    };
+
+    const idToken = (req as any).idToken;
+    await setFirestoreDocWithToken("settings", "google_business_profile", profileDoc, idToken, false);
+
+    return res.json({
+      success: true,
+      message: `Synced ${allReviews.length} genuine review(s) from your Google Business Profile (${profileDoc.businessName}).`,
+      data: profileDoc
+    });
+  } catch (err: any) {
+    console.error("[GoogleBusiness OAuth] Sync reviews error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Failed to sync Google Business Profile reviews."
+    });
+  }
+});
+
+// Reply to a genuine Google Business Profile review via GMB API
+app.post("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res) => {
+  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  const { reviewName, comment } = req.body || {};
+
+  if (!googleToken) {
+    return res.status(401).json({ success: false, error: "Google Business OAuth session expired. Please reconnect." });
+  }
+  if (!reviewName || !comment || !String(comment).trim()) {
+    return res.status(400).json({ success: false, error: "reviewName and reply comment are required." });
   }
 
-  // Persist to Firestore
-  if (db) {
-    try {
-      await setDoc(doc(db, "settings", "google_business_profile"), updatedData, { merge: true });
-    } catch (saveErr) {
-      console.warn("[GoogleBusiness] Error writing to settings/google_business_profile:", saveErr);
+  try {
+    const cleanReviewName = String(reviewName).replace(/^\/+/, "");
+    const replyUrl = `https://mybusiness.googleapis.com/v4/${cleanReviewName}/reply`;
+    const gmbRes = await fetch(replyUrl, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${googleToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ comment: String(comment).trim() })
+    });
+    const gmbJson: any = await gmbRes.json().catch(() => ({}));
+    if (!gmbRes.ok) {
+      return res.status(gmbRes.status === 401 ? 401 : 400).json({
+        success: false,
+        error: gmbJson?.error?.message || `Google Business API reply failed (HTTP ${gmbRes.status})`
+      });
     }
+
+    const idToken = (req as any).idToken;
+    const existing = await getFirestoreDocWithToken("settings", "google_business_profile", idToken);
+    const sanitized = sanitizeGoogleBusinessProfileDoc(existing);
+    const updatedReviews = (sanitized.reviews || []).map((r: any) =>
+      r.reviewName === reviewName
+        ? { ...r, reply: { text: String(comment).trim(), replyDate: "Just now" } }
+        : r
+    );
+    const updatedDoc = {
+      ...sanitized,
+      reviews: updatedReviews,
+      lastSyncedAt: new Date().toISOString()
+    };
+    delete (updatedDoc as any)._hadLegacyDummy;
+    await setFirestoreDocWithToken("settings", "google_business_profile", updatedDoc, idToken, false);
+
+    return res.json({
+      success: true,
+      message: "Reply published directly to your Google Business Profile!",
+      data: updatedDoc
+    });
+  } catch (err: any) {
+    console.error("[GoogleBusiness OAuth] Reply error:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Failed to publish reply." });
+  }
+});
+
+// Delete owner reply from a Google Business Profile review
+app.delete("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res) => {
+  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  const { reviewName } = req.body || {};
+
+  if (!googleToken) {
+    return res.status(401).json({ success: false, error: "Google Business OAuth session expired. Please reconnect." });
+  }
+  if (!reviewName) {
+    return res.status(400).json({ success: false, error: "reviewName is required." });
   }
 
-  return res.json({
-    success: true,
-    data: updatedData,
-    message: syncMsg
-  });
+  try {
+    const cleanReviewName = String(reviewName).replace(/^\/+/, "");
+    const replyUrl = `https://mybusiness.googleapis.com/v4/${cleanReviewName}/reply`;
+    const gmbRes = await fetch(replyUrl, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${googleToken}` }
+    });
+    if (!gmbRes.ok) {
+      const gmbJson: any = await gmbRes.json().catch(() => ({}));
+      return res.status(gmbRes.status === 401 ? 401 : 400).json({
+        success: false,
+        error: gmbJson?.error?.message || `Failed to delete reply (HTTP ${gmbRes.status})`
+      });
+    }
+
+    const idToken = (req as any).idToken;
+    const existing = await getFirestoreDocWithToken("settings", "google_business_profile", idToken);
+    const sanitized = sanitizeGoogleBusinessProfileDoc(existing);
+    const updatedReviews = (sanitized.reviews || []).map((r: any) => {
+      if (r.reviewName === reviewName) {
+        const copy = { ...r };
+        delete copy.reply;
+        return copy;
+      }
+      return r;
+    });
+    const updatedDoc = {
+      ...sanitized,
+      reviews: updatedReviews,
+      lastSyncedAt: new Date().toISOString()
+    };
+    delete (updatedDoc as any)._hadLegacyDummy;
+    await setFirestoreDocWithToken("settings", "google_business_profile", updatedDoc, idToken, false);
+
+    return res.json({
+      success: true,
+      message: "Reply removed from Google Business Profile.",
+      data: updatedDoc
+    });
+  } catch (err: any) {
+    console.error("[GoogleBusiness OAuth] Delete reply error:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Failed to delete reply." });
+  }
+});
+
+// Sync via Google Places API (New) using Places/Maps or unified Google API key
+app.post("/api/google-business/places/sync", verifyAdminAuth, async (req, res) => {
+  const placesApiKey =
+    process.env.GOOGLE_PLACES_API_KEY?.trim() ||
+    process.env.GOOGLE_MAPS_API_KEY?.trim() ||
+    process.env.VITE_GOOGLE_MAPS_API_KEY?.trim() ||
+    getUnifiedGoogleApiKey();
+
+  if (!placesApiKey) {
+    return res.status(400).json({
+      success: false,
+      error: "Google Places / unified Google API key is not configured on the server. Use 'Connect Google Business Profile' above to sync directly with your Google My Business account."
+    });
+  }
+
+  const queryOrPlaceId = String(req.body?.queryOrPlaceId || "").trim();
+  if (!queryOrPlaceId) {
+    return res.status(400).json({ success: false, error: "Please enter your Google Place ID or Business Name." });
+  }
+
+  try {
+    let placeId = queryOrPlaceId;
+    if (!queryOrPlaceId.startsWith("ChIJ") || queryOrPlaceId.includes(" ")) {
+      const searchRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": placesApiKey,
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress"
+        },
+        body: JSON.stringify({ textQuery: queryOrPlaceId })
+      });
+      const searchJson: any = await searchRes.json().catch(() => ({}));
+      if (!searchRes.ok) {
+        const msg = searchJson?.error?.message || "Failed to search Google Places.";
+        return res.status(searchRes.status === 403 ? 403 : 400).json({
+          success: false,
+          error: searchRes.status === 403
+            ? `${msg} (Enable 'Places API (New)' and remove HTTP Referrer restriction on your server API key in Google Cloud Console.)`
+            : msg
+        });
+      }
+      if (!searchJson.places?.[0]?.id) {
+        return res.status(404).json({
+          success: false,
+          error: `No Google Place found matching "${queryOrPlaceId}".`
+        });
+      }
+      placeId = searchJson.places[0].id;
+    }
+
+    const detailsRes = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+      headers: {
+        "X-Goog-Api-Key": placesApiKey,
+        "X-Goog-FieldMask": "id,displayName,formattedAddress,rating,userRatingCount,googleMapsUri,nationalPhoneNumber,reviews"
+      }
+    });
+    const detailsJson: any = await detailsRes.json().catch(() => ({}));
+    if (!detailsRes.ok) {
+      const msg = detailsJson?.error?.message || "Failed to fetch Place details from Google Places API.";
+      return res.status(detailsRes.status === 403 ? 403 : 400).json({
+        success: false,
+        error: detailsRes.status === 403
+          ? `${msg} (Enable 'Places API (New)' and remove HTTP Referrer restriction on your server API key in Google Cloud Console.)`
+          : msg
+      });
+    }
+
+    const placesReviews = Array.isArray(detailsJson.reviews) ? detailsJson.reviews : [];
+    const mappedReviews = placesReviews.map((rev: any, idx: number) => ({
+      id: rev.name || `places-rev-${idx}-${Date.now()}`,
+      reviewName: rev.name || "",
+      source: "google_places_api",
+      authorName: rev.authorAttribution?.displayName || "Google Customer",
+      authorPhotoUrl: rev.authorAttribution?.photoUri || "",
+      profileUrl: rev.authorAttribution?.uri || "",
+      rating: Number(rev.rating) || 5,
+      relativeTimeDescription: rev.relativePublishTimeDescription || formatRelativeTime(rev.publishTime),
+      publishTime: rev.publishTime || new Date().toISOString(),
+      isVerifiedCustomer: true,
+      text: rev.text?.text || rev.originalText?.text || ""
+    }));
+
+    const profileDoc = {
+      businessName: detailsJson.displayName?.text || "Korean Skin Food BD",
+      googleMapsUrl: detailsJson.googleMapsUri || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
+      writeReviewUrl: `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`,
+      shareUrl: detailsJson.googleMapsUri || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
+      placeId,
+      address: detailsJson.formattedAddress || EMPTY_GOOGLE_BUSINESS_DATA.address,
+      phoneNumber: detailsJson.nationalPhoneNumber || EMPTY_GOOGLE_BUSINESS_DATA.phoneNumber,
+      overallRating: Number(detailsJson.rating) || 0,
+      totalReviewsCount: Number(detailsJson.userRatingCount) || mappedReviews.length,
+      ratingBreakdown: computeRatingBreakdown(mappedReviews),
+      reviews: mappedReviews,
+      lastSyncedAt: new Date().toISOString(),
+      status: "verified",
+      connectionMethod: "google_places_api",
+      groundingSource: "Google Places API (Live)"
+    };
+
+    const idToken = (req as any).idToken;
+    await setFirestoreDocWithToken("settings", "google_business_profile", profileDoc, idToken, false);
+
+    return res.json({
+      success: true,
+      message: `Synced ${mappedReviews.length} review(s) from Google Places for ${profileDoc.businessName}.`,
+      data: profileDoc
+    });
+  } catch (err: any) {
+    console.error("[GooglePlaces Sync] Error:", err);
+    return res.status(500).json({ success: false, error: err?.message || "Places sync failed." });
+  }
+});
+
+// Disconnect GMB and purge all reviews (removes any legacy dummy reviews too)
+app.post("/api/google-business/disconnect", verifyAdminAuth, async (req, res) => {
+  try {
+    const idToken = (req as any).idToken;
+    const cleanEmpty = {
+      ...EMPTY_GOOGLE_BUSINESS_DATA,
+      lastSyncedAt: new Date().toISOString(),
+      status: "disconnected",
+      connectionMethod: "none"
+    };
+    await setFirestoreDocWithToken("settings", "google_business_profile", cleanEmpty, idToken, false);
+    return res.json({
+      success: true,
+      message: "Disconnected Google Business Profile and removed all cached/dummy reviews.",
+      data: cleanEmpty
+    });
+  } catch (err: any) {
+    console.error("[GoogleBusiness Disconnect] Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Failed to disconnect Google Business Profile."
+    });
+  }
+});
+
+// Safe refresh endpoint (never writes dummy data)
+app.post("/api/google-business/sync", verifyAdminAuth, async (req, res) => {
+  try {
+    const idToken = (req as any).idToken;
+    const existing = await getFirestoreDocWithToken("settings", "google_business_profile", idToken);
+    const sanitized = sanitizeGoogleBusinessProfileDoc(existing);
+    const hadLegacyDummy = Boolean((sanitized as any)._hadLegacyDummy);
+    delete (sanitized as any)._hadLegacyDummy;
+
+    if (hadLegacyDummy) {
+      await setFirestoreDocWithToken("settings", "google_business_profile", sanitized, idToken, false);
+    }
+
+    return res.json({
+      success: sanitized.connectionMethod !== "none",
+      data: sanitized,
+      message: sanitized.connectionMethod === "none"
+        ? "Please click 'Connect Google Business Profile' to sync your real GMB reviews."
+        : "Loaded your connected Google Business Profile reviews."
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || "Failed to refresh Google Business Profile."
+    });
+  }
 });
 
 // SLACK FOUNDATION & AUTHENTICATION ENDPOINTS
@@ -1608,6 +2072,9 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; em
     } catch (e) {
       console.warn("Could not read apiKey from config file:", e);
     }
+  }
+  if (!apiKey) {
+    apiKey = getUnifiedGoogleApiKey();
   }
 
   if (!apiKey) {
@@ -5292,7 +5759,7 @@ Return your response strictly as a JSON object with exactly these five keys:
 Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts outside the parseable JSON structure.`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -5466,7 +5933,7 @@ Return your response strictly as a JSON array of objects, where each object has:
 Do not write backticks (\`\`\`json) or standard conversational padding around the output. return parseable json array only.`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -5558,7 +6025,7 @@ English Name: "${name}"
 Return ONLY the translated/transliterated Bangla name as a plain string. Do not include any quotes, extra words, explanations, or markdown.`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: prompt,
     });
 
@@ -5615,7 +6082,7 @@ Return strictly a JSON object with:
 Do not wrap in markdown or backticks. Return ONLY valid parseable JSON.`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: [imagePart, { text: promptText }],
       config: {
         responseMimeType: "application/json"
@@ -5809,7 +6276,7 @@ Return strictly as JSON object with keys:
 Do not write backticks (\`\`\`json) or standard conversational padding around the output. Return ONLY a parseable JSON object.`;
 
       const response = await callGeminiGenerate({
-        preferredModel: "gemini-3.7-flash",
+        preferredModel: "gemini-4-hydrogen",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
@@ -5943,7 +6410,7 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
       };
 
       const response = await callGeminiGenerate({
-        preferredModel: "gemini-3.7-flash",
+        preferredModel: "gemini-4-hydrogen",
         contents: [imagePart, textPart],
         config: {
           responseMimeType: "application/json"
@@ -5978,7 +6445,7 @@ Return the result as a strict JSON object with exactly these keys:
 Do not write backticks (\`\`\`json) or standard conversational padding around the output. Return ONLY a parseable JSON object.`;
 
       const response = await callGeminiGenerate({
-        preferredModel: "gemini-3.7-flash",
+        preferredModel: "gemini-4-hydrogen",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
@@ -6113,7 +6580,7 @@ Instructions:
 Return ONLY valid JSON. Do NOT wrap in backticks or markdown formatting.`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: [imagePart, { text: promptText }],
       config: {
         responseMimeType: "application/json"
@@ -6455,7 +6922,7 @@ For each product, provide:
    - Otherwise, set "imageUrl" to "https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=600&auto=format&fit=crop&q=60"`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -6524,7 +6991,7 @@ The audience is in Bangladesh, and they value 100% authentic imported Korean ski
 Return the result as a strict JSON object with exactly two keys: "seo" and "social". Do not include any markdown formatting or backticks around the JSON.`;
 
     const response = await callGeminiGenerate({
-      preferredModel: "gemini-3.7-flash",
+      preferredModel: "gemini-4-hydrogen",
       contents: prompt,
       config: {
         responseMimeType: "application/json"

@@ -123,8 +123,8 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/shipments', label: 'Shipments & Intake', badge: 'Intake', icon: PackageCheck },
     { to: '/admin/products', label: 'Single Products', badge: 'Stock', icon: Boxes },
     { to: '/admin/combos', label: 'Combo Packages', badge: 'Bundles', icon: Layers },
-    { to: '/admin/taxonomies', label: 'Taxonomies & Filters', badge: 'Filters', icon: SlidersHorizontal },
-    { to: '/admin/testimonials', label: 'Testimonials & Reviews', badge: '4.9★', icon: MessageSquareQuote },
+    { to: '/admin/taxonomies', label: 'Categories', badge: 'Catalog', icon: SlidersHorizontal },
+    { to: '/admin/testimonials', label: 'Customer Review', badge: 'GMB', icon: MessageSquareQuote },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
     { to: '/admin/meta-catalog', label: 'Meta Catalog', badge: 'Sync', icon: Share2 },
     { to: '/admin/pinterest', label: 'Pinterest Hub', badge: 'Sync', icon: Pin },
@@ -140,6 +140,7 @@ export const AdminLayout: React.FC = () => {
     '/admin/products',
     '/admin/combos',
     '/admin/taxonomies',
+    '/admin/categories',
     '/admin/reports',
     '/admin/analytics',
     '/admin/orders',
@@ -154,6 +155,9 @@ export const AdminLayout: React.FC = () => {
     '/admin/orders',
     '/admin/chat-leads',
     '/admin/testimonials',
+    '/admin/customer-review',
+    '/admin/customer-reviews',
+    '/admin/reviews',
   ];
 
   const hrAllowedPaths = [

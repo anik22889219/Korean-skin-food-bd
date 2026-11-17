@@ -1,66 +1,93 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Star, MessageSquareQuote, Plus, Edit2, Trash2, Check, X, 
-  Search, ExternalLink, RefreshCw, AlertCircle, CheckCircle2, 
-  Reply, Sparkles, ShieldCheck, MapPin, ThumbsUp, User, 
-  Filter, Copy, Share2, Eye, EyeOff, Image as ImageIcon,
-  MessageCircle, Heart, Award
+import {
+  Star,
+  MessageSquareQuote,
+  Check,
+  X,
+  Search,
+  ExternalLink,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Reply,
+  ShieldCheck,
+  MapPin,
+  Copy,
+  Trash2,
+  Link2,
+  Unlink,
+  Building2,
+  ChevronRight,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import { GoogleBusinessProfileData, GoogleBusinessReview, Product } from '../types';
-import { googleBusinessService, VERIFIED_GOOGLE_BUSINESS_DATA } from '../services/googleBusinessService';
-import { useProducts } from '../hooks/queries/products';
-import { MediaLibraryModal } from './MediaLibraryModal';
+import {
+  GoogleBusinessLocationOption,
+  GoogleBusinessProfileData,
+  GoogleBusinessReview,
+} from '../types';
+import {
+  EMPTY_GOOGLE_BUSINESS_DATA,
+  googleBusinessService,
+} from '../services/googleBusinessService';
 
 export const AdminTestimonials: React.FC = () => {
-  const { profile } = useAuth();
-  const isAdminOrSuperAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
-
-  const { data: products = [] } = useProducts();
-
-  // Profile data & reviews state
   const [profileData, setProfileData] = useState<GoogleBusinessProfileData>(() =>
     googleBusinessService.getProfileData()
   );
+  const [isLoading, setIsLoading] = useState(true);
+  const [isConnectingGmb, setIsConnectingGmb] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+
+  // Location selector when Google Business account has multiple locations
+  const [availableLocations, setAvailableLocations] = useState<GoogleBusinessLocationOption[]>([]);
+  const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
+  const [connectedGoogleEmail, setConnectedGoogleEmail] = useState<string | null>(() =>
+    googleBusinessService.getConnectedEmail()
+  );
+
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [ratingFilter, setRatingFilter] = useState<string>('all');
   const [replyFilter, setReplyFilter] = useState<'all' | 'replied' | 'unreplied'>('all');
 
-  // Modals state
-  const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
-  const [editingReview, setEditingReview] = useState<GoogleBusinessReview | null>(null);
-  const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+  // Reply modal + confirmation state
   const [isReplyModalOpen, setIsReplyModalOpen] = useState(false);
   const [reviewToReply, setReviewToReply] = useState<GoogleBusinessReview | null>(null);
   const [replyText, setReplyText] = useState('');
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isConfirmReplyOpen, setIsConfirmReplyOpen] = useState(false);
+  const [pendingDeleteReplyReview, setPendingDeleteReplyReview] =
+    useState<GoogleBusinessReview | null>(null);
 
-  // Form State for Add / Edit Testimonial
-  const [formAuthorName, setFormAuthorName] = useState('');
-  const [formAuthorPhotoUrl, setFormAuthorPhotoUrl] = useState('');
-  const [formRating, setFormRating] = useState<number>(5);
-  const [formRelativeTime, setFormRelativeTime] = useState('Recently');
-  const [formProductPurchased, setFormProductPurchased] = useState('');
-  const [formText, setFormText] = useState('');
-  const [formIsVerifiedCustomer, setFormIsVerifiedCustomer] = useState(true);
-  const [formIsLocalGuide, setFormIsLocalGuide] = useState(false);
-  const [formReplyText, setFormReplyText] = useState('');
+  // Disconnect / purge confirmation modal
+  const [isDisconnectModalOpen, setIsDisconnectModalOpen] = useState(false);
 
-  // Notification Toast
-  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  // Optional Place ID sync fallback (when GBP API approval is pending in Google Cloud)
+  const [showPlaceIdSync, setShowPlaceIdSync] = useState(false);
+  const [placeIdInput, setPlaceIdInput] = useState('');
+
+  // Notification Toast & clipboard
+  const [toast, setToast] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
-    googleBusinessService.getProfile().then((data) => {
-      if (isMounted && data) {
-        setProfileData(data);
-      }
-    }).catch((err) => {
-      console.warn('Failed to load initial reviews:', err);
-    });
+    setIsLoading(true);
+    googleBusinessService
+      .getProfile()
+      .then((data) => {
+        if (isMounted && data) {
+          setProfileData(data);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load Google Business Profile reviews:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
+      });
     return () => {
       isMounted = false;
     };
@@ -68,164 +95,126 @@ export const AdminTestimonials: React.FC = () => {
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ text, type });
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), 5000);
   };
 
-  // Sync with Google Maps
-  const handleSyncGoogle = async () => {
+  const isGmbConnected =
+    profileData.connectionMethod === 'google_business_oauth' ||
+    profileData.connectionMethod === 'google_places_api' ||
+    (profileData.reviews && profileData.reviews.length > 0);
+
+  // Connect Google My Business (GMB) via Google OAuth
+  const handleConnectGoogleBusiness = async () => {
+    setIsConnectingGmb(true);
+    try {
+      const result = await googleBusinessService.connectWithGoogleOAuth();
+      setConnectedGoogleEmail(result.email || null);
+
+      if (!result.locations || result.locations.length === 0) {
+        showToast(
+          result.message ||
+            'Connected to Google, but no Google Business Profile locations were found on this account.',
+          'info'
+        );
+        return;
+      }
+
+      if (result.locations.length === 1) {
+        // Automatically sync the single verified GMB location
+        const syncRes = await googleBusinessService.syncOAuthLocationReviews(result.locations[0]);
+        setProfileData(syncRes.data);
+        showToast(
+          syncRes.message ||
+            `Connected and synced ${syncRes.data.reviews.length} genuine GMB reviews!`
+        );
+      } else {
+        setAvailableLocations(result.locations);
+        setIsLocationPickerOpen(true);
+      }
+    } catch (err: any) {
+      if (err?.needsApiAccess) {
+        setShowPlaceIdSync(true);
+      }
+      showToast(
+        err?.message || 'Could not connect Google Business Profile. Please check permissions.',
+        'error'
+      );
+    } finally {
+      setIsConnectingGmb(false);
+    }
+  };
+
+  // Pick a specific GMB location from multi-location account
+  const handleSelectLocation = async (loc: GoogleBusinessLocationOption) => {
     setIsSyncing(true);
     try {
-      const result = await googleBusinessService.syncWithMaps();
-      if (result.data) {
-        setProfileData(result.data);
-      }
-      showToast(result.message || 'Google Business Profile synchronized successfully!');
+      const syncRes = await googleBusinessService.syncOAuthLocationReviews(loc);
+      setProfileData(syncRes.data);
+      setIsLocationPickerOpen(false);
+      showToast(
+        syncRes.message || `Synced ${syncRes.data.reviews.length} genuine reviews from ${loc.title}.`
+      );
     } catch (err: any) {
-      showToast(err.message || 'Failed to sync with Google Business Profile.', 'error');
+      showToast(err?.message || 'Failed to sync selected location reviews.', 'error');
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // Filtered reviews
-  const filteredReviews = useMemo(() => {
-    let list = profileData.reviews || [];
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter(
-        (r) =>
-          r.authorName.toLowerCase().includes(q) ||
-          r.text.toLowerCase().includes(q) ||
-          (r.productPurchased && r.productPurchased.toLowerCase().includes(q))
-      );
-    }
-
-    if (ratingFilter !== 'all') {
-      const star = parseInt(ratingFilter);
-      list = list.filter((r) => r.rating === star);
-    }
-
-    if (replyFilter === 'replied') {
-      list = list.filter((r) => !!r.reply && !!r.reply.text);
-    } else if (replyFilter === 'unreplied') {
-      list = list.filter((r) => !r.reply || !r.reply.text);
-    }
-
-    return list;
-  }, [profileData.reviews, searchQuery, ratingFilter, replyFilter]);
-
-  // Open Create Modal
-  const handleOpenAddModal = () => {
-    setEditingReview(null);
-    setFormAuthorName('');
-    setFormAuthorPhotoUrl('');
-    setFormRating(5);
-    setFormRelativeTime('Just now');
-    setFormProductPurchased('');
-    setFormText('');
-    setFormIsVerifiedCustomer(true);
-    setFormIsLocalGuide(false);
-    setFormReplyText('');
-    setIsAddEditModalOpen(true);
-  };
-
-  // Open Edit Modal
-  const handleOpenEditModal = (rev: GoogleBusinessReview) => {
-    setEditingReview(rev);
-    setFormAuthorName(rev.authorName);
-    setFormAuthorPhotoUrl(rev.authorPhotoUrl || '');
-    setFormRating(rev.rating || 5);
-    setFormRelativeTime(rev.relativeTimeDescription || 'Recently');
-    setFormProductPurchased(rev.productPurchased || '');
-    setFormText(rev.text || '');
-    setFormIsVerifiedCustomer(rev.isVerifiedCustomer ?? true);
-    setFormIsLocalGuide(rev.isLocalGuide ?? false);
-    setFormReplyText(rev.reply?.text || '');
-    setIsAddEditModalOpen(true);
-  };
-
-  // Save Testimonial / Review
-  const handleSaveReview = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formAuthorName.trim() || !formText.trim()) {
-      showToast('Please provide both reviewer name and feedback text.', 'error');
-      return;
-    }
-
-    setIsSaving(true);
+  // Refresh / Re-sync reviews from connected GMB location
+  const handleSyncReviews = async () => {
+    setIsSyncing(true);
     try {
-      const currentReviews = [...(profileData.reviews || [])];
-
-      if (editingReview) {
-        // Update existing
-        const updatedList = currentReviews.map((r) => {
-          if (r.id === editingReview.id) {
-            return {
-              ...r,
-              authorName: formAuthorName.trim(),
-              authorPhotoUrl: formAuthorPhotoUrl.trim() || undefined,
-              rating: formRating,
-              relativeTimeDescription: formRelativeTime.trim() || 'Recently',
-              productPurchased: formProductPurchased.trim() || undefined,
-              text: formText.trim(),
-              isVerifiedCustomer: formIsVerifiedCustomer,
-              isLocalGuide: formIsLocalGuide,
-              reply: formReplyText.trim()
-                ? {
-                    text: formReplyText.trim(),
-                    replyDate: r.reply?.replyDate || 'Recently',
-                  }
-                : undefined,
-            };
-          }
-          return r;
-        });
-
-        const newProfile = { ...profileData, reviews: updatedList };
-        await googleBusinessService.updateProfile(newProfile);
-        setProfileData(newProfile);
-        showToast(`Testimonial from "${formAuthorName}" updated.`);
-      } else {
-        // Create new
-        const newReview: GoogleBusinessReview = {
-          id: `g-rev-${Date.now()}`,
-          authorName: formAuthorName.trim(),
-          authorPhotoUrl: formAuthorPhotoUrl.trim() || undefined,
-          rating: formRating,
-          relativeTimeDescription: formRelativeTime.trim() || 'Just now',
-          publishTime: new Date().toISOString(),
-          isVerifiedCustomer: formIsVerifiedCustomer,
-          isLocalGuide: formIsLocalGuide,
-          productPurchased: formProductPurchased.trim() || undefined,
-          text: formText.trim(),
-          likesCount: 0,
-          reply: formReplyText.trim()
-            ? {
-                text: formReplyText.trim(),
-                replyDate: 'Just now',
-              }
-            : undefined,
-        };
-
-        const updatedList = [newReview, ...currentReviews];
-        const newTotal = (profileData.totalReviewsCount || 0) + 1;
-        const newProfile = {
-          ...profileData,
-          totalReviewsCount: newTotal,
-          reviews: updatedList,
-        };
-
-        await googleBusinessService.updateProfile(newProfile);
-        setProfileData(newProfile);
-        showToast(`New testimonial from "${formAuthorName}" added.`);
+      if (!googleBusinessService.hasOAuthToken() && profileData.connectionMethod !== 'google_places_api') {
+        await handleConnectGoogleBusiness();
+        return;
       }
-
-      setIsAddEditModalOpen(false);
+      const res = await googleBusinessService.syncWithMaps();
+      if (res.data) {
+        setProfileData(res.data);
+      }
+      if (res.success) {
+        showToast(res.message || 'Google Business Profile reviews synced successfully!');
+      } else {
+        showToast(res.message || 'Please connect your Google Business Profile first.', 'info');
+      }
     } catch (err: any) {
-      showToast(`Error saving review: ${err.message}`, 'error');
+      showToast(err?.message || 'Failed to sync Google Business reviews.', 'error');
     } finally {
-      setIsSaving(false);
+      setIsSyncing(false);
+    }
+  };
+
+  // Sync via Place ID / Business Search (if server Places API is enabled)
+  const handlePlaceIdSync = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!placeIdInput.trim()) return;
+    setIsSyncing(true);
+    try {
+      const res = await googleBusinessService.syncByPlaceIdOrSearch(placeIdInput.trim());
+      setProfileData(res.data);
+      setShowPlaceIdSync(false);
+      showToast(res.message || 'Google Business reviews synced!');
+    } catch (err: any) {
+      showToast(err?.message || 'Place ID sync failed.', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Disconnect & remove all reviews
+  const handleConfirmDisconnect = async () => {
+    setIsSyncing(true);
+    try {
+      const cleared = await googleBusinessService.disconnectAndClearReviews();
+      setProfileData(cleared || EMPTY_GOOGLE_BUSINESS_DATA);
+      setConnectedGoogleEmail(null);
+      setIsDisconnectModalOpen(false);
+      showToast('Google Business Profile disconnected and all cached/dummy reviews removed.');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to disconnect.', 'error');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -233,68 +222,65 @@ export const AdminTestimonials: React.FC = () => {
   const handleOpenReplyModal = (rev: GoogleBusinessReview) => {
     setReviewToReply(rev);
     setReplyText(rev.reply?.text || '');
+    setIsConfirmReplyOpen(false);
     setIsReplyModalOpen(true);
   };
 
-  // Save Store Reply
-  const handleSaveReply = async (e: React.FormEvent) => {
+  // Step 1 of Reply: ask explicit confirmation before mutating Google Business Profile data
+  const handleRequestReplySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reviewToReply) return;
+    if (!replyText.trim() || !reviewToReply) return;
+    setIsConfirmReplyOpen(true);
+  };
 
-    setIsSaving(true);
+  // Step 2 of Reply: execute GMB API reply
+  const handleConfirmPublishReply = async () => {
+    if (!reviewToReply || !reviewToReply.reviewName) {
+      showToast('Missing Google review resource ID. Please reconnect and sync GMB first.', 'error');
+      return;
+    }
+    setIsSubmittingReply(true);
     try {
-      const updatedList = (profileData.reviews || []).map((r) => {
-        if (r.id === reviewToReply.id) {
-          return {
-            ...r,
-            reply: replyText.trim()
-              ? {
-                  text: replyText.trim(),
-                  replyDate: 'Just now',
-                }
-              : undefined,
-          };
-        }
-        return r;
-      });
-
-      const newProfile = { ...profileData, reviews: updatedList };
-      await googleBusinessService.updateProfile(newProfile);
-      setProfileData(newProfile);
-      showToast(`Official reply updated for "${reviewToReply.authorName}".`);
+      if (!googleBusinessService.hasOAuthToken()) {
+        await googleBusinessService.connectWithGoogleOAuth();
+      }
+      const res = await googleBusinessService.replyToGmbReview(
+        reviewToReply.reviewName,
+        replyText.trim()
+      );
+      setProfileData(res.data);
+      setIsConfirmReplyOpen(false);
       setIsReplyModalOpen(false);
       setReviewToReply(null);
+      showToast(res.message || 'Reply published to your Google Business Profile!');
     } catch (err: any) {
-      showToast(`Failed to save reply: ${err.message}`, 'error');
+      showToast(err?.message || 'Failed to publish reply to Google Business Profile.', 'error');
     } finally {
-      setIsSaving(false);
+      setIsSubmittingReply(false);
     }
   };
 
-  // Delete Review
-  const handleDeleteReview = async (reviewId: string) => {
-    setIsSaving(true);
+  // Execute Delete Reply after confirmation
+  const handleConfirmDeleteReply = async () => {
+    if (!pendingDeleteReplyReview?.reviewName) return;
+    setIsSubmittingReply(true);
     try {
-      const updatedList = (profileData.reviews || []).filter((r) => r.id !== reviewId);
-      const newTotal = Math.max(0, (profileData.totalReviewsCount || 0) - 1);
-      const newProfile = {
-        ...profileData,
-        totalReviewsCount: newTotal,
-        reviews: updatedList,
-      };
-
-      await googleBusinessService.updateProfile(newProfile);
-      setProfileData(newProfile);
-      showToast('Testimonial deleted.');
-      setDeleteConfirmId(null);
+      if (!googleBusinessService.hasOAuthToken()) {
+        await googleBusinessService.connectWithGoogleOAuth();
+      }
+      const res = await googleBusinessService.deleteGmbReply(
+        pendingDeleteReplyReview.reviewName
+      );
+      setProfileData(res.data);
+      setPendingDeleteReplyReview(null);
+      showToast(res.message || 'Reply removed from Google Business Profile.');
     } catch (err: any) {
-      showToast(`Failed to delete: ${err.message}`, 'error');
+      showToast(err?.message || 'Failed to delete reply.', 'error');
     } finally {
-      setIsSaving(false);
+      setIsSubmittingReply(false);
     }
   };
 
-  // Copy Google Review Link
   const handleCopyReviewLink = () => {
     if (!profileData.writeReviewUrl) return;
     navigator.clipboard.writeText(profileData.writeReviewUrl);
@@ -303,7 +289,38 @@ export const AdminTestimonials: React.FC = () => {
     setTimeout(() => setCopiedLink(false), 3000);
   };
 
-  const repliedCount = (profileData.reviews || []).filter((r) => !!r.reply?.text).length;
+  const reviews = profileData.reviews || [];
+
+  const filteredReviews = useMemo(() => {
+    let list = reviews;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (r) =>
+          r.authorName.toLowerCase().includes(q) ||
+          r.text.toLowerCase().includes(q)
+      );
+    }
+
+    if (ratingFilter !== 'all') {
+      const star = parseInt(ratingFilter, 10);
+      list = list.filter((r) => Math.round(r.rating) === star);
+    }
+
+    if (replyFilter === 'replied') {
+      list = list.filter((r) => Boolean(r.reply?.text));
+    } else if (replyFilter === 'unreplied') {
+      list = list.filter((r) => !r.reply?.text);
+    }
+
+    return list;
+  }, [reviews, searchQuery, ratingFilter, replyFilter]);
+
+  const repliedCount = reviews.filter((r) => Boolean(r.reply?.text)).length;
+  const fiveStarCount =
+    profileData.ratingBreakdown?.fiveStar ||
+    reviews.filter((r) => Math.round(r.rating) === 5).length;
 
   return (
     <div className="space-y-6">
@@ -313,78 +330,135 @@ export const AdminTestimonials: React.FC = () => {
 
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5 relative z-10">
           <div>
-            <div className="flex items-center gap-2 mb-1.5 text-xs font-bold text-amber-600">
-              <span className="flex items-center gap-1 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
-                <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                Google Verified Profile
-              </span>
-              <span className="text-slate-400">·</span>
-              <span className="text-slate-500 flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                {profileData.address || 'Banani, Dhaka'}
-              </span>
+            <div className="flex items-center flex-wrap gap-2 mb-1.5 text-xs font-bold">
+              {isGmbConnected ? (
+                <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  GMB Connected{connectedGoogleEmail ? ` (${connectedGoogleEmail})` : ''}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full border border-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                  Not Connected to Google Business Profile
+                </span>
+              )}
+              {profileData.address && (
+                <>
+                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-500 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                    {profileData.address}
+                  </span>
+                </>
+              )}
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
-              Customer Testimonials & Google Reviews
+              Customer Review
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl leading-relaxed">
-              Curate customer love, manage 4.9★ Google Business reviews, reply to verified shopper feedback, and showcase authentic Seoul beauty experiences.
+              Connect directly with your Google My Business (Google Business Profile) account to display only genuine customer reviews on your storefront and reply directly to customers.
             </p>
           </div>
 
           {/* Action Buttons */}
           <div className="flex items-center flex-wrap gap-2.5 shrink-0">
             <button
+              type="button"
+              onClick={handleConnectGoogleBusiness}
+              disabled={isConnectingGmb || isSyncing}
+              className="inline-flex items-center gap-2.5 px-4 py-2.5 text-xs font-bold text-slate-800 bg-white hover:bg-slate-50 rounded-xl border border-slate-300 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 48 48">
+                <path
+                  fill="#EA4335"
+                  d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+                />
+              </svg>
+              <span>
+                {isConnectingGmb
+                  ? 'Connecting...'
+                  : isGmbConnected
+                    ? 'Reconnect Google Business'
+                    : 'Connect Google Business Profile'}
+              </span>
+            </button>
+
+            {isGmbConnected && (
+              <button
+                type="button"
+                onClick={handleSyncReviews}
+                disabled={isSyncing || isConnectingGmb}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync GMB Reviews'}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
               onClick={handleCopyReviewLink}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all border border-slate-200"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all border border-slate-200 cursor-pointer"
               title="Copy public Google review link for customers"
             >
-              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedLink ? (
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
               <span>{copiedLink ? 'Link Copied!' : 'Copy Review Link'}</span>
             </button>
 
-            <button
-              onClick={handleSyncGoogle}
-              disabled={isSyncing}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all border border-slate-200"
-              title="Sync with Google Business grounding data"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-rose-600' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync with Google'}</span>
-            </button>
+            {profileData.googleMapsUrl && (
+              <a
+                href={profileData.googleMapsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all border border-slate-200"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Google Maps</span>
+              </a>
+            )}
 
-            <a
-              href={profileData.googleMapsUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all border border-slate-200"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Google Maps</span>
-            </a>
-
-            <button
-              onClick={handleOpenAddModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Testimonial</span>
-            </button>
+            {isGmbConnected && (
+              <button
+                type="button"
+                onClick={() => setIsDisconnectModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all border border-rose-200 cursor-pointer"
+                title="Disconnect GMB and clear synced reviews"
+              >
+                <Unlink className="w-3.5 h-3.5" />
+                <span>Disconnect</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* METRICS & RATING CARDS */}
+        {/* METRICS & RATING CARDS (Real GMB Data Only — Zero Dummy Numbers) */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100 text-xs">
           <div className="flex items-center gap-3 p-3 bg-amber-50/60 rounded-2xl border border-amber-100/80">
             <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-black text-lg shadow-sm shadow-amber-200">
               ★
             </div>
             <div>
-              <span className="text-slate-500 font-medium block">Overall Rating</span>
+              <span className="text-slate-500 font-medium block">GMB Overall Rating</span>
               <div className="flex items-baseline gap-1">
                 <span className="text-xl font-black text-slate-900 font-mono tabular-nums">
-                  {profileData.overallRating || 4.9}
+                  {profileData.overallRating > 0 ? profileData.overallRating.toFixed(1) : '—'}
                 </span>
                 <span className="text-slate-400 font-bold">/ 5.0</span>
               </div>
@@ -396,9 +470,9 @@ export const AdminTestimonials: React.FC = () => {
               <MessageSquareQuote className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-slate-500 font-medium block">Total Reviews</span>
+              <span className="text-slate-500 font-medium block">Total GMB Reviews</span>
               <span className="text-xl font-black text-slate-900 font-mono tabular-nums">
-                {profileData.totalReviewsCount || 148}+
+                {profileData.totalReviewsCount || reviews.length}
               </span>
             </div>
           </div>
@@ -408,9 +482,9 @@ export const AdminTestimonials: React.FC = () => {
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-slate-500 font-medium block">5-Star Satisfaction</span>
+              <span className="text-slate-500 font-medium block">5-Star Reviews</span>
               <span className="text-xl font-black text-emerald-700 font-mono tabular-nums">
-                {profileData.ratingBreakdown?.fiveStar || 139} (94%)
+                {fiveStarCount}
               </span>
             </div>
           </div>
@@ -420,7 +494,7 @@ export const AdminTestimonials: React.FC = () => {
               <Reply className="w-5 h-5" />
             </div>
             <div>
-              <span className="text-slate-500 font-medium block">Store Responses</span>
+              <span className="text-slate-500 font-medium block">Owner Replies</span>
               <span className="text-xl font-black text-rose-700 font-mono tabular-nums">
                 {repliedCount} Replied
               </span>
@@ -436,15 +510,15 @@ export const AdminTestimonials: React.FC = () => {
             toast.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : toast.type === 'error'
-              ? 'bg-rose-50 border-rose-200 text-rose-800'
-              : 'bg-blue-50 border-blue-200 text-blue-800'
+                ? 'bg-rose-50 border-rose-200 text-rose-800'
+                : 'bg-blue-50 border-blue-200 text-blue-800'
           }`}
         >
           <div className="flex items-center gap-2">
             {toast.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600" />
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
             )}
             <span className="font-semibold">{toast.text}</span>
           </div>
@@ -454,113 +528,201 @@ export const AdminTestimonials: React.FC = () => {
         </div>
       )}
 
-      {/* FILTER & SEARCH BAR */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        {/* Search */}
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by customer, review, or product..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Filters */}
-        <div className="flex items-center flex-wrap gap-2.5 w-full sm:w-auto">
-          {/* Rating filter */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200/80 text-xs">
-            <button
-              onClick={() => setRatingFilter('all')}
-              className={`px-3 py-1 font-medium rounded-lg transition-all ${
-                ratingFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              All Stars
-            </button>
-            <button
-              onClick={() => setRatingFilter('5')}
-              className={`px-3 py-1 font-medium rounded-lg transition-all flex items-center gap-1 ${
-                ratingFilter === '5' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <span>5★</span>
-            </button>
-            <button
-              onClick={() => setRatingFilter('4')}
-              className={`px-3 py-1 font-medium rounded-lg transition-all flex items-center gap-1 ${
-                ratingFilter === '4' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <span>4★</span>
-            </button>
-          </div>
-
-          {/* Reply status filter */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200/80 text-xs">
-            <button
-              onClick={() => setReplyFilter('all')}
-              className={`px-3 py-1 font-medium rounded-lg transition-all ${
-                replyFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setReplyFilter('unreplied')}
-              className={`px-3 py-1 font-medium rounded-lg transition-all ${
-                replyFilter === 'unreplied' ? 'bg-white text-rose-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Needs Reply
-            </button>
-            <button
-              onClick={() => setReplyFilter('replied')}
-              className={`px-3 py-1 font-medium rounded-lg transition-all ${
-                replyFilter === 'replied' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Replied
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* REVIEWS GRID / LIST */}
-      <div className="space-y-4">
-        {filteredReviews.length === 0 ? (
-          <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm">
-            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <Star className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-900 mb-1">No testimonials found</h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-              {searchQuery
-                ? `No reviews match "${searchQuery}". Try clearing search filter.`
-                : 'No reviews match the selected filter.'}
+      {/* OPTIONAL PLACE ID FALLBACK BAR */}
+      {showPlaceIdSync && (
+        <form
+          onSubmit={handlePlaceIdSync}
+          className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 text-xs"
+        >
+          <div className="flex-1">
+            <p className="font-bold text-amber-900">
+              Sync by Google Place ID or Business Name (Fallback)
             </p>
+            <p className="text-[11px] text-amber-800 mt-0.5">
+              If Google Business Profile API access is still pending on your Cloud project, you can sync verified reviews using your Google Place ID (if Places API is enabled on the server).
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={placeIdInput}
+              onChange={(e) => setPlaceIdInput(e.target.value)}
+              placeholder="e.g. ChIJ... or Korean Skin Food BD"
+              className="px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs text-slate-900 w-64 focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
             <button
-              onClick={handleOpenAddModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
+              type="submit"
+              disabled={isSyncing}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl cursor-pointer disabled:opacity-50"
             >
-              <Plus className="w-4 h-4" />
-              Add Customer Testimonial
+              Sync Place
             </button>
+            <button
+              type="button"
+              onClick={() => setShowPlaceIdSync(false)}
+              className="p-2 text-amber-700 hover:bg-amber-100 rounded-xl"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* FILTER & SEARCH BAR */}
+      {reviews.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search customer name or review text..."
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center flex-wrap gap-2.5 w-full sm:w-auto">
+            <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200/80 text-xs">
+              {['all', '5', '4', '3', '2', '1'].map((val) => (
+                <button
+                  key={val}
+                  onClick={() => setRatingFilter(val)}
+                  className={`px-2.5 py-1 font-medium rounded-lg transition-all ${
+                    ratingFilter === val
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {val === 'all' ? 'All Stars' : `${val}★`}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200/80 text-xs">
+              <button
+                onClick={() => setReplyFilter('all')}
+                className={`px-3 py-1 font-medium rounded-lg transition-all ${
+                  replyFilter === 'all'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setReplyFilter('unreplied')}
+                className={`px-3 py-1 font-medium rounded-lg transition-all ${
+                  replyFilter === 'unreplied'
+                    ? 'bg-white text-rose-700 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Needs Reply
+              </button>
+              <button
+                onClick={() => setReplyFilter('replied')}
+                className={`px-3 py-1 font-medium rounded-lg transition-all ${
+                  replyFilter === 'replied'
+                    ? 'bg-white text-emerald-700 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Replied
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REVIEWS GRID / EMPTY STATE */}
+      <div className="space-y-4">
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[1, 2, 3, 4].map((idx) => (
+              <div
+                key={idx}
+                className="bg-white rounded-3xl p-5 border border-slate-200 animate-pulse space-y-3"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-slate-200" />
+                  <div className="space-y-1.5 flex-1">
+                    <div className="h-4 bg-slate-200 rounded w-1/3" />
+                    <div className="h-3 bg-slate-100 rounded w-1/4" />
+                  </div>
+                </div>
+                <div className="h-3 bg-slate-100 rounded w-full" />
+                <div className="h-3 bg-slate-100 rounded w-3/4" />
+              </div>
+            ))}
+          </div>
+        ) : filteredReviews.length === 0 ? (
+          <div className="bg-white rounded-3xl p-10 sm:p-12 text-center border border-slate-200 shadow-sm">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-pink-50 text-rose-600 flex items-center justify-center border border-pink-100">
+              <Building2 className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mb-1">
+              {reviews.length === 0
+                ? 'Connect Your Google Business Profile'
+                : 'No matching reviews found'}
+            </h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mb-5 leading-relaxed">
+              {reviews.length === 0
+                ? 'All dummy reviews have been removed. Connect your Google My Business account to automatically pull and display only your genuine customer reviews.'
+                : 'No Google Business reviews match your current search or star filter.'}
+            </p>
+            <div className="flex items-center justify-center gap-3 flex-wrap">
+              {reviews.length === 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleConnectGoogleBusiness}
+                    disabled={isConnectingGmb}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <Link2 className="w-4 h-4" />
+                    <span>
+                      {isConnectingGmb
+                        ? 'Connecting...'
+                        : 'Connect Google Business Profile'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPlaceIdSync((prev) => !prev)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 cursor-pointer"
+                  >
+                    <span>Sync via Place ID</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setRatingFilter('all');
+                    setReplyFilter('all');
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredReviews.map((review) => {
-              const hasReply = !!review.reply && !!review.reply.text;
+              const hasReply = Boolean(review.reply?.text);
+              const canReplyViaGmb = Boolean(review.reviewName && review.source === 'google_business_api');
 
               return (
                 <div
@@ -568,7 +730,6 @@ export const AdminTestimonials: React.FC = () => {
                   className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-xs hover:shadow-md transition-all flex flex-col justify-between relative group"
                 >
                   <div>
-                    {/* Header: User details + Rating + Actions */}
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex items-center gap-3">
                         {review.authorPhotoUrl ? (
@@ -589,24 +750,10 @@ export const AdminTestimonials: React.FC = () => {
                             <h4 className="text-sm font-bold text-slate-900 leading-none">
                               {review.authorName}
                             </h4>
-                            {review.isVerifiedCustomer && (
-                              <span
-                                title="Verified Google Customer"
-                                className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-md"
-                              >
-                                <Check className="w-3 h-3" />
-                                Verified
-                              </span>
-                            )}
-                            {review.isLocalGuide && (
-                              <span
-                                title="Google Local Guide"
-                                className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-md"
-                              >
-                                <Award className="w-3 h-3 text-amber-500" />
-                                Local Guide
-                              </span>
-                            )}
+                            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md">
+                              <Check className="w-3 h-3" />
+                              Google Verified
+                            </span>
                           </div>
 
                           <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1">
@@ -628,43 +775,19 @@ export const AdminTestimonials: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Action Menu buttons */}
-                      <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100">
+                      {canReplyViaGmb && (
                         <button
                           onClick={() => handleOpenReplyModal(review)}
-                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                          title="Reply to Review"
+                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                          title="Reply on Google Business Profile"
                         >
                           <Reply className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => handleOpenEditModal(review)}
-                          className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Edit Review"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirmId(review.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete Review"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      )}
                     </div>
 
-                    {/* Product Purchased Tag */}
-                    {review.productPurchased && (
-                      <div className="mb-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-pink-50 text-rose-700 border border-pink-100 text-[11px] font-semibold">
-                        <span>🛍️</span>
-                        <span className="truncate">{review.productPurchased}</span>
-                      </div>
-                    )}
-
-                    {/* Review Commentary Body */}
                     <p className="text-xs text-slate-700 leading-relaxed mb-4 whitespace-pre-line">
-                      "{review.text}"
+                      {review.text ? `"${review.text}"` : <span className="italic text-slate-400">Star rating only (no written comment)</span>}
                     </p>
                   </div>
 
@@ -675,30 +798,44 @@ export const AdminTestimonials: React.FC = () => {
                         <div className="flex items-center justify-between mb-1 text-[11px]">
                           <span className="font-bold text-rose-600 flex items-center gap-1">
                             <Reply className="w-3 h-3" />
-                            Response from Korean Skin Food BD
+                            Response from {profileData.businessName}
                           </span>
-                          <span className="text-slate-400">{review.reply?.replyDate || 'Recently'}</span>
+                          <span className="text-slate-400">
+                            {review.reply?.replyDate || 'Recently'}
+                          </span>
                         </div>
                         <p className="text-slate-600 text-[11px] leading-relaxed">
                           {review.reply?.text}
                         </p>
-                        <button
-                          onClick={() => handleOpenReplyModal(review)}
-                          className="text-[10px] text-indigo-600 hover:underline mt-1 font-semibold block"
-                        >
-                          Edit Reply
-                        </button>
+                        {canReplyViaGmb && (
+                          <div className="flex items-center gap-3 mt-1.5">
+                            <button
+                              onClick={() => handleOpenReplyModal(review)}
+                              className="text-[10px] text-indigo-600 hover:underline font-semibold cursor-pointer"
+                            >
+                              Edit Reply
+                            </button>
+                            <button
+                              onClick={() => setPendingDeleteReplyReview(review)}
+                              className="text-[10px] text-rose-600 hover:underline font-semibold cursor-pointer"
+                            >
+                              Delete Reply
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center justify-between text-xs text-slate-400">
                         <span>No response sent yet</span>
-                        <button
-                          onClick={() => handleOpenReplyModal(review)}
-                          className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-700 font-bold hover:underline"
-                        >
-                          <Reply className="w-3 h-3" />
-                          Reply as Store Owner
-                        </button>
+                        {canReplyViaGmb && (
+                          <button
+                            onClick={() => handleOpenReplyModal(review)}
+                            className="inline-flex items-center gap-1 text-rose-600 hover:text-rose-700 font-bold hover:underline cursor-pointer"
+                          >
+                            <Reply className="w-3 h-3" />
+                            Reply on Google
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -709,207 +846,54 @@ export const AdminTestimonials: React.FC = () => {
         )}
       </div>
 
-      {/* ADD / EDIT TESTIMONIAL MODAL */}
-      {isAddEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 relative animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
-                  <Star className="w-5 h-5 fill-amber-400" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">
-                    {editingReview ? 'Edit Testimonial / Review' : 'Add Customer Testimonial'}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Featured customer rating and testimonial for store trust.
-                  </p>
-                </div>
+      {/* GMB LOCATION PICKER MODAL */}
+      {isLocationPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Select Your Google Business Location
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Choose which Google Business Profile location to sync reviews from.
+                </p>
               </div>
               <button
-                onClick={() => setIsAddEditModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                onClick={() => setIsLocationPickerOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveReview} className="space-y-4 pt-4 text-xs">
-              {/* Reviewer Name & Photo */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Customer Name <span className="text-rose-600">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formAuthorName}
-                    onChange={(e) => setFormAuthorName(e.target.value)}
-                    placeholder="e.g. Nusrat Jahan"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Timeframe Label
-                  </label>
-                  <input
-                    type="text"
-                    value={formRelativeTime}
-                    onChange={(e) => setFormRelativeTime(e.target.value)}
-                    placeholder="e.g. 2 days ago, 1 week ago"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                  />
-                </div>
-              </div>
-
-              {/* Avatar Photo URL */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Customer Photo / Avatar URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={formAuthorPhotoUrl}
-                    onChange={(e) => setFormAuthorPhotoUrl(e.target.value)}
-                    placeholder="https://... or select from media library"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setIsMediaModalOpen(true)}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 flex items-center gap-1.5 shrink-0 font-medium"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    Media
-                  </button>
-                </div>
-              </div>
-
-              {/* Star Rating & Product Purchased */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Star Rating (1 to 5) <span className="text-rose-600">*</span>
-                  </label>
-                  <div className="flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => setFormRating(star)}
-                        className="p-1 text-slate-300 hover:text-amber-400 transition-colors"
-                      >
-                        <Star
-                          className={`w-5 h-5 ${
-                            star <= formRating
-                              ? 'fill-amber-400 text-amber-400'
-                              : 'text-slate-300'
-                          }`}
-                        />
-                      </button>
-                    ))}
-                    <span className="font-bold text-slate-700 font-mono ml-1">{formRating} Stars</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Product Purchased / Referenced
-                  </label>
-                  <input
-                    type="text"
-                    value={formProductPurchased}
-                    onChange={(e) => setFormProductPurchased(e.target.value)}
-                    placeholder="e.g. COSRX Snail Mucin & Sunscreen"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                  />
-                </div>
-              </div>
-
-              {/* Review Text */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Testimonial / Review Content <span className="text-rose-600">*</span>
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  value={formText}
-                  onChange={(e) => setFormText(e.target.value)}
-                  placeholder="Share customer's genuine experience with your K-Beauty products..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                />
-              </div>
-
-              {/* Badges Toggle */}
-              <div className="flex items-center gap-6 pt-1">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formIsVerifiedCustomer}
-                    onChange={(e) => setFormIsVerifiedCustomer(e.target.checked)}
-                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span className="font-semibold text-slate-700">Verified Customer Badge</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formIsLocalGuide}
-                    onChange={(e) => setFormIsLocalGuide(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-400"
-                  />
-                  <span className="font-semibold text-slate-700">Google Local Guide Badge</span>
-                </label>
-              </div>
-
-              {/* Store Reply Field */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Official Store Reply (Optional)
-                </label>
-                <textarea
-                  rows={2}
-                  value={formReplyText}
-                  onChange={(e) => setFormReplyText(e.target.value)}
-                  placeholder="Thank you for trusting Korean Skin Food BD!..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100">
+            <div className="mt-4 space-y-2.5 max-h-80 overflow-y-auto">
+              {availableLocations.map((loc) => (
                 <button
+                  key={loc.locationName}
                   type="button"
-                  onClick={() => setIsAddEditModalOpen(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                  disabled={isSyncing}
+                  onClick={() => handleSelectLocation(loc)}
+                  className="w-full text-left p-3.5 rounded-2xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/40 transition-all flex items-center justify-between gap-3 cursor-pointer"
                 >
-                  Cancel
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900 truncate">{loc.title}</p>
+                    <p className="text-xs text-slate-500 truncate mt-0.5">
+                      {loc.address || loc.accountDisplayName}
+                    </p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="px-5 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
-                >
-                  {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  {editingReview ? 'Save Changes' : 'Create Testimonial'}
-                </button>
-              </div>
-            </form>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* OWNER REPLY MODAL */}
+      {/* OWNER REPLY MODAL + EXPLICIT CONFIRMATION STEP */}
       {isReplyModalOpen && reviewToReply && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 relative animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
@@ -920,12 +904,15 @@ export const AdminTestimonials: React.FC = () => {
                     Reply to {reviewToReply.authorName}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Official response from Korean Skin Food BD
+                    Publishes directly to your Google Business Profile
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setIsReplyModalOpen(false)}
+                onClick={() => {
+                  setIsReplyModalOpen(false);
+                  setIsConfirmReplyOpen(false);
+                }}
                 className="p-1 text-slate-400 hover:text-slate-600"
               >
                 <X className="w-5 h-5" />
@@ -933,87 +920,145 @@ export const AdminTestimonials: React.FC = () => {
             </div>
 
             <div className="my-3 p-3 bg-slate-50 rounded-2xl border border-slate-200/60 text-xs text-slate-700 italic">
-              "{reviewToReply.text}"
+              "{reviewToReply.text || `${reviewToReply.rating}★ rating`}"
             </div>
 
-            <form onSubmit={handleSaveReply} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Your Response Text
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  placeholder="Thank the customer for their review and share skincare guidance..."
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-                />
-              </div>
+            {!isConfirmReplyOpen ? (
+              <form onSubmit={handleRequestReplySubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Your Google Business Reply
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder="Thank the customer for their review..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                  />
+                </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsReplyModalOpen(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="px-5 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs flex items-center gap-1.5"
-                >
-                  {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  Save Reply
-                </button>
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsReplyModalOpen(false)}
+                    className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
+                  >
+                    Review & Publish
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-4 text-xs">
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl space-y-1">
+                  <p className="font-bold text-amber-900">
+                    Confirm Publishing Reply to Google Business Profile?
+                  </p>
+                  <p className="text-amber-800">
+                    This will publicly post your response to <strong>{reviewToReply.authorName}</strong>'s review on Google Maps and Google Search.
+                  </p>
+                </div>
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmReplyOpen(false)}
+                    className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmittingReply}
+                    onClick={handleConfirmPublishReply}
+                    className="px-5 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs flex items-center gap-1.5"
+                  >
+                    {isSubmittingReply && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    Confirm & Publish Reply
+                  </button>
+                </div>
               </div>
-            </form>
+            )}
           </div>
         </div>
       )}
 
-      {/* DELETE CONFIRMATION MODAL */}
-      {deleteConfirmId && (
+      {/* DELETE REPLY CONFIRMATION MODAL */}
+      {pendingDeleteReplyReview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-200 text-center">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center">
             <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
               <Trash2 className="w-6 h-6" />
             </div>
-            <h3 className="text-base font-bold text-slate-900 mb-1">Delete Testimonial?</h3>
+            <h3 className="text-base font-bold text-slate-900 mb-1">
+              Delete Reply on Google?
+            </h3>
             <p className="text-xs text-slate-500 mb-5">
-              This review will be removed from your customer testimonials.
+              This will permanently remove your owner response to{' '}
+              <strong>{pendingDeleteReplyReview.authorName}</strong> from your Google Business Profile.
             </p>
             <div className="flex items-center justify-center gap-2.5">
               <button
-                onClick={() => setDeleteConfirmId(null)}
+                type="button"
+                onClick={() => setPendingDeleteReplyReview(null)}
                 className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl"
               >
                 Cancel
               </button>
               <button
-                onClick={() => handleDeleteReview(deleteConfirmId)}
-                disabled={isSaving}
+                type="button"
+                disabled={isSubmittingReply}
+                onClick={handleConfirmDeleteReply}
                 className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
               >
-                Confirm Delete
+                {isSubmittingReply ? 'Deleting...' : 'Confirm Delete'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* CLOUDINARY MEDIA LIBRARY MODAL */}
-      <MediaLibraryModal
-        isOpen={isMediaModalOpen}
-        onClose={() => setIsMediaModalOpen(false)}
-        onSelectImage={(url) => {
-          setFormAuthorPhotoUrl(url);
-          setIsMediaModalOpen(false);
-        }}
-        title="Select Customer Avatar Photo"
-      />
+      {/* DISCONNECT & CLEAR REVIEWS CONFIRMATION MODAL */}
+      {isDisconnectModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center">
+            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+              <Unlink className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mb-1">
+              Disconnect Google Business Profile?
+            </h3>
+            <p className="text-xs text-slate-500 mb-5">
+              This will disconnect your Google Business Profile and clear all synced reviews from the storefront until you reconnect.
+            </p>
+            <div className="flex items-center justify-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsDisconnectModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSyncing}
+                onClick={handleConfirmDisconnect}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
+              >
+                {isSyncing ? 'Disconnecting...' : 'Confirm Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 export default AdminTestimonials;

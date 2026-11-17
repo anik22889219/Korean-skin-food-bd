@@ -256,8 +256,11 @@ export default function App() {
                   <Route path="combos" element={<AdminComboPackages />} />
                   <Route path="combo-packages" element={<AdminComboPackages />} />
                   <Route path="taxonomies" element={<AdminTaxonomyManagement />} />
+                  <Route path="categories" element={<AdminTaxonomyManagement />} />
                   <Route path="filters" element={<AdminTaxonomyManagement />} />
                   <Route path="testimonials" element={<AdminTestimonials />} />
+                  <Route path="customer-review" element={<AdminTestimonials />} />
+                  <Route path="customer-reviews" element={<AdminTestimonials />} />
                   <Route path="reviews" element={<AdminTestimonials />} />
                   <Route path="seo" element={<AdminSEO />} />
                   <Route path="meta-catalog" element={<AdminMetaCatalog />} />

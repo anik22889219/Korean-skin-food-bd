@@ -951,12 +951,15 @@ export interface WholesalePayment {
 
 export interface GoogleBusinessReview {
   id: string;
+  reviewName?: string;
+  source?: 'google_business_api' | 'google_places_api';
   authorName: string;
   authorPhotoUrl?: string;
   rating: number;
   relativeTimeDescription: string;
   text: string;
   publishTime?: string;
+  updateTime?: string;
   profileUrl?: string;
   isVerifiedCustomer?: boolean;
   productPurchased?: string;
@@ -966,6 +969,18 @@ export interface GoogleBusinessReview {
     text: string;
     replyDate: string;
   };
+}
+
+export interface GoogleBusinessLocationOption {
+  accountName: string;
+  accountDisplayName: string;
+  locationName: string;
+  title: string;
+  address: string;
+  placeId?: string;
+  mapsUri?: string;
+  newReviewUri?: string;
+  phoneNumber?: string;
 }
 
 export interface GoogleBusinessProfileData {
@@ -990,7 +1005,11 @@ export interface GoogleBusinessProfileData {
   };
   reviews: GoogleBusinessReview[];
   lastSyncedAt: string;
-  status: 'active' | 'synced' | 'verified';
+  status: 'active' | 'synced' | 'verified' | 'disconnected';
+  connectionMethod?: 'google_business_oauth' | 'google_places_api' | 'none';
+  connectedAccountName?: string;
+  connectedLocationName?: string;
+  connectedEmail?: string;
   groundingSource?: string;
   groundingChunks?: Array<{
     maps?: {

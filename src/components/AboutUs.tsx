@@ -224,8 +224,8 @@ export const AboutUs: React.FC = () => {
       stock: 50,
       description: `${item.name} - Botanical Heritage formulation sourced directly from Seoul.`,
       descriptionBN: `${item.name} - সিউল থেকে সরাসরি সংগৃহীত প্রিমিয়াম ফর্মুলেশন।`,
-      rating: 5,
-      reviewsCount: 18,
+      rating: 0,
+      reviewsCount: 0,
       barcode: `KSF-${item.id.toUpperCase()}`,
       qrCodeUrl: ''
     };

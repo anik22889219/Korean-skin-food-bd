@@ -153,8 +153,8 @@ export function normalizeFacebookUrl(rawUrl: string): NormalizedFacebookUrlResul
 
     const postId = extractFacebookPostId(urlString);
 
-    // If it's a direct reel URL, canonicalize to https://www.facebook.com/reel/{postId}
-    if (pathname.toLowerCase().includes('/reel/') || pathname.toLowerCase().includes('/reels/') || pathname.toLowerCase().startsWith('/share/r/')) {
+    // If it's a direct reel URL with a numeric ID, canonicalize to https://www.facebook.com/reel/{postId}
+    if (pathname.toLowerCase().includes('/reel/') || pathname.toLowerCase().includes('/reels/') || (pathname.toLowerCase().startsWith('/share/r/') && postId && /^\d+$/.test(postId))) {
       if (postId) {
         const canonicalReel = `https://www.facebook.com/reel/${postId}`;
         return {

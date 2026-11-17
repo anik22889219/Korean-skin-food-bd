@@ -30,14 +30,6 @@ const DIMENSION_CONFIG: Record<TaxonomyDimensionType, {
   icon: string;
   color: string;
 }> = {
-  brand: {
-    label: 'Brands',
-    labelBN: 'ব্র্যান্ডসমূহ',
-    singular: 'Brand',
-    description: 'Manage K-Beauty brands, logos, origin descriptions, and brand spotlights.',
-    icon: '🏷️',
-    color: 'from-pink-500 to-rose-600',
-  },
   category: {
     label: 'Categories',
     labelBN: 'ক্যাটাগরিসমূহ',
@@ -45,6 +37,14 @@ const DIMENSION_CONFIG: Record<TaxonomyDimensionType, {
     description: 'Primary product categories for the shop navigation and catalog filters.',
     icon: '🗂️',
     color: 'from-purple-500 to-indigo-600',
+  },
+  brand: {
+    label: 'Brands',
+    labelBN: 'ব্র্যান্ডসমূহ',
+    singular: 'Brand',
+    description: 'Manage K-Beauty brands, logos, origin descriptions, and brand spotlights.',
+    icon: '🏷️',
+    color: 'from-pink-500 to-rose-600',
   },
   skin_type: {
     label: 'Skin Types',
@@ -92,8 +92,8 @@ export const AdminTaxonomyManagement: React.FC = () => {
   const { profile } = useAuth();
   const isAdminOrSuperAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
 
-  // Active taxonomy tab
-  const [activeTab, setActiveTab] = useState<TaxonomyDimensionType>('brand');
+  // Active category/taxonomy tab
+  const [activeTab, setActiveTab] = useState<TaxonomyDimensionType>('category');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'featured'>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
@@ -484,13 +484,13 @@ export const AdminTaxonomyManagement: React.FC = () => {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                  Taxonomies & Product Filters
+                  Categories
                   <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
                     Live System
                   </span>
                 </h1>
                 <p className="text-sm text-slate-500">
-                  Manage Brands, Categories, Skin Types, Concerns, Benefits, Routine Steps, and Key Ingredients for store-wide filters.
+                  Manage Categories, Brands, Skin Types, Concerns, Benefits, Routine Steps, and Key Ingredients for store-wide filters.
                 </p>
               </div>
             </div>
