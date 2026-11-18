@@ -63,7 +63,7 @@ export const AdminTestimonials: React.FC = () => {
 
   // Optional Place ID sync fallback (when GBP API approval is pending in Google Cloud)
   const [showPlaceIdSync, setShowPlaceIdSync] = useState(false);
-  const [placeIdInput, setPlaceIdInput] = useState('');
+  const [placeIdInput, setPlaceIdInput] = useState('Korean Skin Food BD');
 
   // Notification Toast & clipboard
   const [toast, setToast] = useState<{
@@ -155,12 +155,23 @@ export const AdminTestimonials: React.FC = () => {
       }
     } catch (err: any) {
       if (err?.needsApiAccess) {
+        // Auto-trigger Place ID sync when quota is exceeded — no manual step needed
         setShowPlaceIdSync(true);
+        showToast('Google Business API quota exceeded — auto-syncing via Place ID...', 'info');
+        try {
+          const res = await googleBusinessService.syncByPlaceIdOrSearch('Korean Skin Food BD');
+          setProfileData(res.data);
+          setShowPlaceIdSync(false);
+          showToast(res.message || `Reviews synced successfully!`, 'success');
+        } catch (syncErr: any) {
+          showToast(syncErr?.message || 'Auto-sync failed. Please use the Place ID sync below.', 'error');
+        }
+      } else {
+        showToast(
+          err?.message || 'Could not connect Google Business Profile. Please check permissions.',
+          'error'
+        );
       }
-      showToast(
-        err?.message || 'Could not connect Google Business Profile. Please check permissions.',
-        'error'
-      );
     } finally {
       setIsConnectingGmb(false);
     }

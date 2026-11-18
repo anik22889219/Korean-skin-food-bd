@@ -271,7 +271,7 @@ export const googleBusinessService = {
           apiMsg.toLowerCase().includes('quota');
         const err: any = new Error(
           isApiDisabledOrQuota
-            ? `Google Business Profile API access is pending on your Google Cloud project (${apiMsg}). You can sync verified reviews using your Google Place ID below.`
+            ? `Google Business API quota temporarily exceeded. Auto-syncing via Place ID instead...`
             : apiMsg
         );
         err.needsApiAccess = isApiDisabledOrQuota;
