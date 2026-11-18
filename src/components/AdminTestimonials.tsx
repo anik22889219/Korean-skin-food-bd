@@ -88,8 +88,30 @@ export const AdminTestimonials: React.FC = () => {
       .finally(() => {
         if (isMounted) setIsLoading(false);
       });
+    const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_BUSINESS_OAUTH_SUCCESS') {
+        showToast('Google Business Profile authorized! Syncing reviews...', 'info');
+        googleBusinessService
+          .fetchOAuthLocations()
+          .then(async (result) => {
+            if (result.locations.length > 0) {
+              const syncRes = await googleBusinessService.syncOAuthLocationReviews(result.locations[0]);
+              setProfileData(syncRes.data);
+              showToast(syncRes.message || `Connected & synced ${syncRes.data.reviews.length} genuine reviews!`, 'success');
+            }
+          })
+          .catch((err) => {
+            showToast(err?.message || 'Failed to sync Google Business locations.', 'error');
+          });
+      } else if (event.data?.type === 'GOOGLE_BUSINESS_OAUTH_ERROR') {
+        showToast(event.data.error || 'Google Business authorization failed.', 'error');
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
     return () => {
       isMounted = false;
+      window.removeEventListener('message', handleOAuthMessage);
     };
   }, []);
 

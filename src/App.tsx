@@ -60,6 +60,7 @@ import { BrandsIndexPage } from './components/BrandsIndexPage';
 import { SkincareGuidesIndex } from './components/SkincareGuidesIndex';
 import { SkincareGuideDetail } from './components/SkincareGuideDetail';
 import { NotFoundPage } from './components/NotFoundPage';
+import { GoogleBusinessOAuthCallback } from './components/GoogleBusinessOAuthCallback';
 import PosRegister from './components/PosRegister';
 import PosScan from './components/PosScan';
 import { productService } from './services/productService';
@@ -226,6 +227,9 @@ export default function App() {
                   {/* CATCH-ALL ROUTE WITHIN MAIN LAYOUT */}
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
+
+              {/* OAUTH CALLBACK HANDLERS */}
+              <Route path="api/google-business/oauth/callback" element={<GoogleBusinessOAuthCallback />} />
 
               {/* IN-STORE POS LIVE SCAN (PUBLICLY ACCESSIBLE URL FOR MOBILE CAMERAS) */}
               <Route path="pos/scan" element={<PosScanRouteWrapper />} />
