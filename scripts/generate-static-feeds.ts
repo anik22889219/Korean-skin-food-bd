@@ -28,8 +28,10 @@ function escapeCsv(s: any): string {
 const baseUrl = (process.env.SITE_URL || process.env.APP_URL || 'https://koreanskinfood.com').trim().replace(/\/+$/, '');
 const products = INITIAL_PRODUCTS || [];
 
-// XML
-const xmlItems = products.map((p) => {
+// ==========================================
+// 1. META & GOOGLE MERCHANT XML FEED
+// ==========================================
+const metaXmlItems = products.map((p) => {
   const id = p.id || p.barcode || 'prod';
   const name = p.name || 'Korean Skincare Product';
   const desc = stripHtml(p.description || name);
@@ -55,18 +57,20 @@ const xmlItems = products.map((p) => {
     </item>`;
 }).join('\n');
 
-const fullXml = `<?xml version="1.0" encoding="UTF-8"?>
+const fullMetaXml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
   <channel>
     <title>Korean Skin Food BD Product Catalog</title>
     <link>${baseUrl}</link>
     <description>Authentic Korean Skincare &amp; Cosmeceuticals Feed for Meta &amp; Google Merchant Center</description>
-${xmlItems}
+${metaXmlItems}
   </channel>
 </rss>`;
 
-// CSV
-const headers = [
+// ==========================================
+// 2. META CSV FEED
+// ==========================================
+const metaHeaders = [
   'id',
   'title',
   'description',
@@ -80,7 +84,7 @@ const headers = [
   'fb_product_category'
 ];
 
-const csvRows = [headers.join(',')];
+const metaCsvRows = [metaHeaders.join(',')];
 for (const p of products) {
   const id = p.id || p.barcode || 'prod';
   const name = p.name || 'Korean Skincare Product';
@@ -92,7 +96,7 @@ for (const p of products) {
   const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
   const avail = ((p.stock ?? 1) > 0) ? 'in stock' : 'out of stock';
 
-  csvRows.push([
+  metaCsvRows.push([
     escapeCsv(id),
     escapeCsv(name),
     escapeCsv(desc),
@@ -106,15 +110,172 @@ for (const p of products) {
     escapeCsv(cat)
   ].join(','));
 }
-const fullCsv = csvRows.join('\r\n');
+const fullMetaCsv = metaCsvRows.join('\r\n');
 
-// Ensure directories
-if (!fs.existsSync('public')) fs.mkdirSync('public', { recursive: true });
-if (!fs.existsSync('dist')) fs.mkdirSync('dist', { recursive: true });
+// ==========================================
+// 3. PINTEREST SHOPPING XML FEED
+// ==========================================
+const pinterestXmlItems = products.map((p) => {
+  const id = p.id || p.barcode || 'prod';
+  const name = p.name || 'Korean Skincare Product';
+  const desc = stripHtml(p.description || name);
+  const price = (typeof p.price === 'number' ? p.price : 0).toFixed(2);
+  const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+  const img = p.image || '';
+  const brand = p.brand || 'Korean Skin Food BD';
+  const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
+  const avail = ((p.stock ?? 1) > 0) ? 'in stock' : 'out of stock';
 
-fs.writeFileSync('public/meta-catalog.xml', fullXml);
-fs.writeFileSync('public/meta-catalog.csv', fullCsv);
-fs.writeFileSync('dist/meta-catalog.xml', fullXml);
-fs.writeFileSync('dist/meta-catalog.csv', fullCsv);
+  return `    <item>
+      <g:id>${escapeXml(id)}</g:id>
+      <g:title><![CDATA[${name}]]></g:title>
+      <g:description><![CDATA[${desc}]]></g:description>
+      <g:link>${escapeXml(link)}</g:link>
+      <g:image_link>${escapeXml(img)}</g:image_link>
+      <g:brand><![CDATA[${brand}]]></g:brand>
+      <g:condition>new</g:condition>
+      <g:availability>${avail}</g:availability>
+      <g:price>${price} BDT</g:price>
+      <g:google_product_category><![CDATA[${cat}]]></g:google_product_category>
+      <g:item_group_id>${escapeXml(id)}</g:item_group_id>
+      <g:custom_label_0>${avail === 'in stock' ? 'In Stock' : 'Out of Stock'}</g:custom_label_0>
+      <g:custom_label_1><![CDATA[${brand}]]></g:custom_label_1>
+      <g:custom_label_2>Korean Skin Food BD</g:custom_label_2>
+    </item>`;
+}).join('\n');
 
-console.log(`[Feeds] Generated static feeds for ${products.length} products successfully.`);
+const fullPinterestXml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title>Korean Skin Food BD - Pinterest Product Catalog</title>
+    <link>${baseUrl}</link>
+    <description>Dynamic product feed for Pinterest Shopping and Pinterest Merchant</description>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${pinterestXmlItems}
+  </channel>
+</rss>`;
+
+// ==========================================
+// 4. PINTEREST SHOPPING CSV FEED
+// ==========================================
+const pinterestHeaders = [
+  'id',
+  'title',
+  'description',
+  'link',
+  'image_link',
+  'price',
+  'availability',
+  'condition',
+  'brand',
+  'google_product_category',
+  'sale_price',
+  'additional_image_link',
+  'item_group_id'
+];
+
+const pinterestCsvRows = [pinterestHeaders.join(',')];
+for (const p of products) {
+  const id = p.id || p.barcode || 'prod';
+  const name = p.name || 'Korean Skincare Product';
+  const desc = stripHtml(p.description || name);
+  const price = `${(typeof p.price === 'number' ? p.price : 0).toFixed(2)} BDT`;
+  const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+  const img = p.image || '';
+  const brand = p.brand || 'Korean Skin Food BD';
+  const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
+  const avail = ((p.stock ?? 1) > 0) ? 'in stock' : 'out of stock';
+
+  pinterestCsvRows.push([
+    escapeCsv(id),
+    escapeCsv(name),
+    escapeCsv(desc),
+    escapeCsv(link),
+    escapeCsv(img),
+    escapeCsv(price),
+    escapeCsv(avail),
+    '"new"',
+    escapeCsv(brand),
+    escapeCsv(cat),
+    '""',
+    '""',
+    escapeCsv(id)
+  ].join(','));
+}
+const fullPinterestCsv = pinterestCsvRows.join('\r\n');
+
+// ==========================================
+// 5. PINTEREST PREVIEW JSON
+// ==========================================
+const previewSampleItems = products.slice(0, 50).map((p) => {
+  const id = p.id || p.barcode || 'prod';
+  const name = p.name || 'Korean Skincare Product';
+  const price = typeof p.price === 'number' ? p.price : 0;
+  const avail = ((p.stock ?? 1) > 0) ? 'in stock' : 'out of stock';
+  return {
+    id,
+    title: name,
+    price,
+    salePrice: null,
+    currency: 'BDT',
+    availability: avail,
+    brand: p.brand || 'Korean Skin Food BD',
+    link: `${baseUrl}/product/${encodeURIComponent(id)}`,
+    imageLink: p.image || '',
+    condition: 'new'
+  };
+});
+
+const pinterestPreviewJson = JSON.stringify({
+  success: true,
+  stats: {
+    totalProducts: products.length,
+    inStockCount: products.filter(p => (p.stock ?? 1) > 0).length,
+    outOfStockCount: products.filter(p => (p.stock ?? 1) <= 0).length,
+  },
+  feedUrls: {
+    xml: `${baseUrl}/pinterest-catalog.xml`,
+    csv: `${baseUrl}/pinterest-catalog.csv`,
+    verificationFile: `${baseUrl}/pinterest-7da08.html`
+  },
+  sampleItems: previewSampleItems
+}, null, 2);
+
+// ==========================================
+// WRITE ALL FEEDS TO PUBLIC & DIST
+// ==========================================
+function ensureDir(dirPath: string) {
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+const targets = ['public', 'dist'];
+
+for (const target of targets) {
+  ensureDir(target);
+  ensureDir(path.join(target, 'api'));
+  ensureDir(path.join(target, 'api', 'feeds'));
+  ensureDir(path.join(target, 'api', 'pinterest'));
+
+  // Meta feeds
+  fs.writeFileSync(path.join(target, 'meta-catalog.xml'), fullMetaXml);
+  fs.writeFileSync(path.join(target, 'meta-catalog.csv'), fullMetaCsv);
+  fs.writeFileSync(path.join(target, 'facebook-catalog.xml'), fullMetaXml);
+  fs.writeFileSync(path.join(target, 'facebook-catalog.csv'), fullMetaCsv);
+  fs.writeFileSync(path.join(target, 'google-merchant.xml'), fullMetaXml);
+
+  // Pinterest feeds - root URLs
+  fs.writeFileSync(path.join(target, 'pinterest-catalog.xml'), fullPinterestXml);
+  fs.writeFileSync(path.join(target, 'pinterest-catalog.csv'), fullPinterestCsv);
+
+  // Pinterest feeds - /api/ URLs
+  fs.writeFileSync(path.join(target, 'api', 'pinterest-catalog.xml'), fullPinterestXml);
+  fs.writeFileSync(path.join(target, 'api', 'pinterest-catalog.csv'), fullPinterestCsv);
+  fs.writeFileSync(path.join(target, 'api', 'feeds', 'pinterest-catalog.xml'), fullPinterestXml);
+  fs.writeFileSync(path.join(target, 'api', 'feeds', 'pinterest-catalog.csv'), fullPinterestCsv);
+
+  // Pinterest preview - /api/pinterest/preview and preview.json
+  fs.writeFileSync(path.join(target, 'api', 'pinterest', 'preview'), pinterestPreviewJson);
+  fs.writeFileSync(path.join(target, 'api', 'pinterest', 'preview.json'), pinterestPreviewJson);
+}
+
+console.log(`[Feeds] Generated Meta & Pinterest feeds for ${products.length} products across public/ and dist/.`);

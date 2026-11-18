@@ -1,5 +1,8 @@
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from './firebase';
+import { productService } from './productService';
+import { INITIAL_PRODUCTS } from '../data/allProducts';
+import { getSiteUrl } from '../utils/siteUrl';
 
 export interface PinterestSettings {
   domainVerification: {
@@ -26,6 +29,34 @@ export interface PinterestSettings {
   };
   updatedAt?: string;
   updatedBy?: string;
+}
+
+export interface PinterestCatalogPreviewItem {
+  id: string;
+  title: string;
+  price: number;
+  salePrice: number | null;
+  currency: string;
+  availability: 'in stock' | 'out of stock';
+  brand: string;
+  link: string;
+  imageLink: string;
+  condition: string;
+}
+
+export interface PinterestCatalogPreviewData {
+  success: boolean;
+  stats: {
+    totalProducts: number;
+    inStockCount: number;
+    outOfStockCount: number;
+  };
+  feedUrls: {
+    xml: string;
+    csv: string;
+    verificationFile: string;
+  };
+  sampleItems: PinterestCatalogPreviewItem[];
 }
 
 const SETTINGS_STORAGE_KEY = 'ksf_pinterest_settings_cache_v1';
@@ -56,6 +87,29 @@ export const DEFAULT_PINTEREST_SETTINGS: PinterestSettings = {
   updatedAt: new Date().toISOString(),
   updatedBy: 'system_default',
 };
+
+function escapeXml(s: any): string {
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function stripHtml(s: any): string {
+  if (!s) return '';
+  return String(s)
+    .replace(/<[^>]*>?/gm, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapeCsv(s: any): string {
+  if (s === null || s === undefined) return '""';
+  return `"${String(s).replace(/"/g, '""')}"`;
+}
 
 class PinterestService {
   private currentSettings: PinterestSettings = { ...DEFAULT_PINTEREST_SETTINGS };
@@ -224,7 +278,7 @@ class PinterestService {
       this.notifyListeners();
       this.updateMetaTag(merged.domainVerification.verificationCode);
 
-      // Notify the server runtime proxy to update its credentials / feeds
+      // Notify the server runtime proxy if available
       try {
         await fetch('/api/pinterest/settings', {
           method: 'POST',
@@ -232,7 +286,7 @@ class PinterestService {
           body: JSON.stringify(merged),
         });
       } catch (syncErr) {
-        console.warn('[PinterestService] Server proxy sync warning:', syncErr);
+        // Server proxy optional in static deployments
       }
 
       return merged;
@@ -280,6 +334,202 @@ class PinterestService {
       checkedUrl: `/${fileName}`,
       details: details || 'Domain verification endpoints are operating normally.',
     };
+  }
+
+  /**
+   * Retrieves or computes catalog preview data with fallback for static hosting
+   */
+  public async getPinterestPreview(): Promise<PinterestCatalogPreviewData> {
+    const origin = getSiteUrl();
+
+    // 1. Try static JSON endpoint or server endpoint
+    try {
+      const res = await fetch('/api/pinterest/preview', { cache: 'no-store' });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && !contentType.includes('text/html')) {
+        const data = await res.json();
+        if (data && data.success) {
+          return data;
+        }
+      }
+    } catch {
+      // server/static file fetch failed, proceed to client-side fallback
+    }
+
+    // 2. Client-side fallback from products
+    let rawProducts: any[] = [];
+    try {
+      if (productService) {
+        rawProducts = await productService.fetchProducts();
+      }
+    } catch (e) {
+      console.warn('[PinterestService] productService fetch warning:', e);
+    }
+
+    if (!rawProducts || rawProducts.length === 0) {
+      try {
+        if (db) {
+          const snap = await getDocs(collection(db, 'products'));
+          const prods: any[] = [];
+          snap.forEach((d) => prods.push({ id: d.id, ...d.data() }));
+          rawProducts = prods;
+        }
+      } catch (e) {
+        console.warn('[PinterestService] Firestore collection read warning:', e);
+      }
+    }
+
+    if (!rawProducts || rawProducts.length === 0) {
+      rawProducts = INITIAL_PRODUCTS || [];
+    }
+
+    const sampleItems: PinterestCatalogPreviewItem[] = rawProducts.map((p) => {
+      const id = p.id || p.barcode || 'prod';
+      const name = p.name || 'Korean Skincare Product';
+      const price = typeof p.price === 'number' ? p.price : 0;
+      const avail: 'in stock' | 'out of stock' = (p.stock ?? 1) > 0 ? 'in stock' : 'out of stock';
+      return {
+        id,
+        title: name,
+        price,
+        salePrice: null,
+        currency: 'BDT',
+        availability: avail,
+        brand: p.brand || 'Korean Skin Food BD',
+        link: `${origin}/product/${encodeURIComponent(id)}`,
+        imageLink: p.image || '',
+        condition: 'new',
+      };
+    });
+
+    const inStockCount = rawProducts.filter((p) => (p.stock ?? 1) > 0).length;
+
+    return {
+      success: true,
+      stats: {
+        totalProducts: rawProducts.length,
+        inStockCount,
+        outOfStockCount: rawProducts.length - inStockCount,
+      },
+      feedUrls: {
+        xml: `${origin}/pinterest-catalog.xml`,
+        csv: `${origin}/pinterest-catalog.csv`,
+        verificationFile: `${origin}/pinterest-7da08.html`,
+      },
+      sampleItems,
+    };
+  }
+
+  /**
+   * Generates RSS 2.0 XML for Pinterest
+   */
+  public generatePinterestXml(products: any[], baseUrl: string): string {
+    const items = products.map((p) => {
+      const id = p.id || p.barcode || 'prod';
+      const name = p.name || 'Korean Skincare Product';
+      const desc = stripHtml(p.description || name);
+      const price = (typeof p.price === 'number' ? p.price : 0).toFixed(2);
+      const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+      const img = p.image || '';
+      const brand = p.brand || 'Korean Skin Food BD';
+      const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
+      const avail = ((p.stock ?? 1) > 0) ? 'in stock' : 'out of stock';
+
+      return `    <item>
+      <g:id>${escapeXml(id)}</g:id>
+      <g:title><![CDATA[${name}]]></g:title>
+      <g:description><![CDATA[${desc}]]></g:description>
+      <g:link>${escapeXml(link)}</g:link>
+      <g:image_link>${escapeXml(img)}</g:image_link>
+      <g:brand><![CDATA[${brand}]]></g:brand>
+      <g:condition>new</g:condition>
+      <g:availability>${avail}</g:availability>
+      <g:price>${price} BDT</g:price>
+      <g:google_product_category><![CDATA[${cat}]]></g:google_product_category>
+      <g:item_group_id>${escapeXml(id)}</g:item_group_id>
+      <g:custom_label_0>${avail === 'in stock' ? 'In Stock' : 'Out of Stock'}</g:custom_label_0>
+      <g:custom_label_1><![CDATA[${brand}]]></g:custom_label_1>
+      <g:custom_label_2>Korean Skin Food BD</g:custom_label_2>
+    </item>`;
+    }).join('\n');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title>Korean Skin Food BD - Pinterest Product Catalog</title>
+    <link>${baseUrl}</link>
+    <description>Dynamic product feed for Pinterest Shopping and Pinterest Merchant</description>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${items}
+  </channel>
+</rss>`;
+  }
+
+  /**
+   * Generates CSV for Pinterest Commerce
+   */
+  public generatePinterestCsv(products: any[], baseUrl: string): string {
+    const headers = [
+      'id',
+      'title',
+      'description',
+      'link',
+      'image_link',
+      'price',
+      'availability',
+      'condition',
+      'brand',
+      'google_product_category',
+      'sale_price',
+      'additional_image_link',
+      'item_group_id'
+    ];
+
+    const rows = [headers.join(',')];
+    for (const p of products) {
+      const id = p.id || p.barcode || 'prod';
+      const name = p.name || 'Korean Skincare Product';
+      const desc = stripHtml(p.description || name);
+      const price = `${(typeof p.price === 'number' ? p.price : 0).toFixed(2)} BDT`;
+      const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+      const img = p.image || '';
+      const brand = p.brand || 'Korean Skin Food BD';
+      const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
+      const avail = ((p.stock ?? 1) > 0) ? 'in stock' : 'out of stock';
+
+      rows.push([
+        escapeCsv(id),
+        escapeCsv(name),
+        escapeCsv(desc),
+        escapeCsv(link),
+        escapeCsv(img),
+        escapeCsv(price),
+        escapeCsv(avail),
+        '"new"',
+        escapeCsv(brand),
+        escapeCsv(cat),
+        '""',
+        '""',
+        escapeCsv(id)
+      ].join(','));
+    }
+    return rows.join('\r\n');
+  }
+
+  /**
+   * Downloads a generated feed file directly in the browser
+   */
+  public downloadBlob(content: string, filename: string, mimeType: string) {
+    if (typeof window === 'undefined') return;
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 }
 

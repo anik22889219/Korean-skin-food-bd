@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   CheckCircle2, AlertCircle, Copy, ExternalLink, RefreshCw, 
   Save, Globe, Code, ShoppingBag, Eye, ShieldCheck, 
-  Share2, Sparkles, Check, ChevronRight, Layers, Tag
+  Share2, Sparkles, Check, ChevronRight, Layers, Tag, Download
 } from 'lucide-react';
 import { pinterestService, PinterestSettings, DEFAULT_PINTEREST_SETTINGS } from '../services/pinterestService';
 import { trackPinterestEvent } from '../services/pinterestTag';
@@ -77,12 +77,9 @@ export const AdminPinterest: React.FC = () => {
   const loadCatalogPreview = async () => {
     setPreviewLoading(true);
     try {
-      const res = await fetch('/api/pinterest/preview');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setCatalogPreview(data);
-        }
+      const data = await pinterestService.getPinterestPreview();
+      if (data && data.success) {
+        setCatalogPreview(data);
       }
     } catch (err) {
       console.warn('Failed to load catalog preview:', err);
@@ -153,9 +150,23 @@ export const AdminPinterest: React.FC = () => {
 
   const originUrl = getSiteUrl();
   const siteHostname = getSiteHostname();
-  const xmlFeedFullUrl = `${originUrl}/api/pinterest-catalog.xml`;
-  const csvFeedFullUrl = `${originUrl}/api/pinterest-catalog.csv`;
+  const xmlFeedFullUrl = `${originUrl}/pinterest-catalog.xml`;
+  const xmlFeedApiUrl = `${originUrl}/api/pinterest-catalog.xml`;
+  const csvFeedFullUrl = `${originUrl}/pinterest-catalog.csv`;
+  const csvFeedApiUrl = `${originUrl}/api/pinterest-catalog.csv`;
   const verificationFileFullUrl = `${originUrl}/${settings.domainVerification.fileName || 'pinterest-7da08.html'}`;
+
+  const handleDownloadXml = () => {
+    if (!catalogPreview?.sampleItems) return;
+    const xml = pinterestService.generatePinterestXml(catalogPreview.sampleItems, originUrl);
+    pinterestService.downloadBlob(xml, 'pinterest-catalog.xml', 'application/xml;charset=utf-8;');
+  };
+
+  const handleDownloadCsv = () => {
+    if (!catalogPreview?.sampleItems) return;
+    const csv = pinterestService.generatePinterestCsv(catalogPreview.sampleItems, originUrl);
+    pinterestService.downloadBlob(csv, 'pinterest-catalog.csv', 'text/csv;charset=utf-8;');
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -648,15 +659,25 @@ export const AdminPinterest: React.FC = () => {
                       Recommended
                     </span>
                   </div>
-                  <a
-                    href={xmlFeedFullUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1"
-                  >
-                    <span>Inspect Feed</span>
-                    <ExternalLink size={12} />
-                  </a>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleDownloadXml}
+                      className="text-xs text-slate-700 hover:text-red-600 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download size={13} />
+                      <span>Download XML</span>
+                    </button>
+                    <a
+                      href={xmlFeedFullUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1"
+                    >
+                      <span>Inspect Feed</span>
+                      <ExternalLink size={12} />
+                    </a>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -674,7 +695,7 @@ export const AdminPinterest: React.FC = () => {
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  Formatted to Pinterest Merchant standard with Google Base namespaces (`g:price`, `g:availability`, `g:image_link`).
+                  Formatted to Pinterest Merchant standard with Google Base namespaces (`g:price`, `g:availability`, `g:image_link`). Also available at <code>{xmlFeedApiUrl}</code>.
                 </p>
               </div>
 
@@ -682,15 +703,25 @@ export const AdminPinterest: React.FC = () => {
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800">Alternative CSV Feed</span>
-                  <a
-                    href={csvFeedFullUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-slate-600 hover:text-slate-800 font-semibold flex items-center gap-1"
-                  >
-                    <span>Download CSV</span>
-                    <ExternalLink size={12} />
-                  </a>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleDownloadCsv}
+                      className="text-xs text-slate-700 hover:text-red-600 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Download size={13} />
+                      <span>Download CSV</span>
+                    </button>
+                    <a
+                      href={csvFeedFullUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-slate-600 hover:text-slate-800 font-semibold flex items-center gap-1"
+                    >
+                      <span>Inspect CSV</span>
+                      <ExternalLink size={12} />
+                    </a>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -707,6 +738,9 @@ export const AdminPinterest: React.FC = () => {
                     <span>{copiedKey === 'csv' ? 'Copied' : 'Copy URL'}</span>
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-500">
+                  Tabular CSV feed compatible with Pinterest Commerce Catalogs. Also available at <code>{csvFeedApiUrl}</code>.
+                </p>
               </div>
             </div>
 

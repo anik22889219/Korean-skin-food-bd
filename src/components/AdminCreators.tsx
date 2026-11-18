@@ -30,13 +30,15 @@ import {
   Copy,
   KeyRound,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Settings2
 } from 'lucide-react';
 import {
   getYouTubeAdminStatus,
   getYouTubeAuthUrl,
   disconnectYouTubeChannel,
   saveManualYouTubeRefreshToken,
+  saveYouTubeConfig,
   refreshYouTubeMetricsAndSync,
   YouTubeAdminStatus
 } from '../services/youtubeService';
@@ -102,6 +104,9 @@ export const AdminCreators: React.FC = () => {
   const [connectingYt, setConnectingYt] = useState<boolean>(false);
   const [showManualYtToken, setShowManualYtToken] = useState<boolean>(false);
   const [manualYtToken, setManualYtToken] = useState<string>('');
+  const [showChannelConfig, setShowChannelConfig] = useState<boolean>(false);
+  const [channelInput, setChannelInput] = useState<string>('');
+  const [apiKeyInput, setApiKeyInput] = useState<string>('');
   const [lastOAuthRefreshToken, setLastOAuthRefreshToken] = useState<string | null>(null);
 
   // Toast
@@ -208,6 +213,7 @@ export const AdminCreators: React.FC = () => {
       }, 600);
     } catch (err: any) {
       setConnectingYt(false);
+      setShowChannelConfig(true);
       showToast('error', err.message || 'Could not start YouTube connection.');
     }
   };
@@ -223,6 +229,27 @@ export const AdminCreators: React.FC = () => {
       showToast('success', `Connected YouTube Channel: ${res.channelTitle}`);
     } catch (err: any) {
       showToast('error', err.message || 'Failed to verify YouTube refresh token.');
+    } finally {
+      setConnectingYt(false);
+    }
+  };
+
+  const handleSaveChannelConfig = async () => {
+    if (!channelInput.trim()) {
+      showToast('error', 'Please enter a YouTube Channel Handle (@channel) or Channel ID (UC...).');
+      return;
+    }
+    setConnectingYt(true);
+    try {
+      const res = await saveYouTubeConfig({
+        channelHandle: channelInput.trim(),
+        apiKey: apiKeyInput.trim() || undefined,
+      });
+      setShowChannelConfig(false);
+      loadYouTubeStatus(true);
+      showToast('success', `YouTube Channel Saved: ${res.channelTitle}`);
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to save YouTube Channel.');
     } finally {
       setConnectingYt(false);
     }
@@ -588,6 +615,15 @@ export const AdminCreators: React.FC = () => {
               <span>Test Connection</span>
             </button>
 
+            <button
+              onClick={() => setShowChannelConfig(!showChannelConfig)}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5"
+              title="Configure YouTube Channel ID or API Key"
+            >
+              <Settings2 size={13} />
+              <span>Configure Channel</span>
+            </button>
+
             {ytStatus?.hasOAuthCredentials && (
               <button
                 onClick={handleConnectYouTube}
@@ -709,6 +745,60 @@ export const AdminCreators: React.FC = () => {
             >
               Verify & Save
             </button>
+          </div>
+        )}
+
+        {/* Direct YouTube Channel & API Key Configuration */}
+        {showChannelConfig && (
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-slate-900">Direct YouTube Channel Setup</span>
+              <span className="text-[10px] text-slate-500">Works on all deployments (Firebase static & custom domains)</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  YouTube Channel Handle or Channel ID *
+                </label>
+                <input
+                  type="text"
+                  value={channelInput}
+                  onChange={(e) => setChannelInput(e.target.value)}
+                  placeholder="e.g. @koreanskinfoodbd or UC..."
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Google Cloud / YouTube API Key (Optional)
+                </label>
+                <input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="AIzaSy... (for live subscriber stats & video sync)"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowChannelConfig(false)}
+                className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-900 font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveChannelConfig}
+                disabled={connectingYt || !channelInput.trim()}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {connectingYt ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                <span>Verify & Save Channel</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
