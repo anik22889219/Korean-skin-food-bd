@@ -6,9 +6,9 @@
     "outOfStockCount": 0
   },
   "feedUrls": {
-    "xml": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/pinterest-catalog.xml",
-    "csv": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/pinterest-catalog.csv",
-    "verificationFile": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/pinterest-7da08.html"
+    "xml": "https://koreanskinfood.com/pinterest-catalog.xml",
+    "csv": "https://koreanskinfood.com/pinterest-catalog.csv",
+    "verificationFile": "https://koreanskinfood.com/pinterest-7da08.html"
   },
   "sampleItems": [
     {
@@ -19,7 +19,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "COSRX",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/cosrx-snail-96",
+      "link": "https://koreanskinfood.com/product/cosrx-snail-96",
       "imageLink": "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=500",
       "condition": "new"
     },
@@ -31,7 +31,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "Beauty of Joseon",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/boj-sunscreen-rice",
+      "link": "https://koreanskinfood.com/product/boj-sunscreen-rice",
       "imageLink": "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=500",
       "condition": "new"
     },
@@ -43,7 +43,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "Anua",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/anua-toner-77",
+      "link": "https://koreanskinfood.com/product/anua-toner-77",
       "imageLink": "https://images.unsplash.com/photo-1608248597359-994b63004467?w=500",
       "condition": "new"
     },
@@ -55,7 +55,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "Skin1004",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/skin1004-centella-ampoule",
+      "link": "https://koreanskinfood.com/product/skin1004-centella-ampoule",
       "imageLink": "https://images.unsplash.com/photo-1617897903246-719242758050?w=500",
       "condition": "new"
     },
@@ -67,7 +67,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "Laneige",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/laneige-lip-mask",
+      "link": "https://koreanskinfood.com/product/laneige-lip-mask",
       "imageLink": "https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=500",
       "condition": "new"
     },
@@ -79,7 +79,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "COSRX",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/cosrx-cleanser-goodmorning",
+      "link": "https://koreanskinfood.com/product/cosrx-cleanser-goodmorning",
       "imageLink": "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=500",
       "condition": "new"
     },
@@ -91,7 +91,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "iUNIK",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/iunik-centella-gel-cream",
+      "link": "https://koreanskinfood.com/product/iunik-centella-gel-cream",
       "imageLink": "https://images.unsplash.com/photo-1608248597359-994b63004467?w=500",
       "condition": "new"
     },
@@ -103,7 +103,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "Mediheal",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/mediheal-tea-tree-mask",
+      "link": "https://koreanskinfood.com/product/mediheal-tea-tree-mask",
       "imageLink": "https://images.unsplash.com/photo-1567608889700-60b86a3479b6?w=500",
       "condition": "new"
     },
@@ -115,7 +115,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "Beauty of Joseon",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/beauty-of-joseon-ginseng-water",
+      "link": "https://koreanskinfood.com/product/beauty-of-joseon-ginseng-water",
       "imageLink": "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=500",
       "condition": "new"
     },
@@ -127,7 +127,7 @@
       "currency": "BDT",
       "availability": "in stock",
       "brand": "COSRX",
-      "link": "https://ais-dev-ybkvv22zxawb4qbqghbn6n-450325481419.asia-southeast1.run.app/product/cosrx-aloe-sunscreen",
+      "link": "https://koreanskinfood.com/product/cosrx-aloe-sunscreen",
       "imageLink": "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=500",
       "condition": "new"
     }
