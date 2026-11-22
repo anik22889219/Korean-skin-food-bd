@@ -18,7 +18,7 @@ export interface SeoMetadata {
 
 export const SITE_NAME = 'Korean Skin Food BD';
 export const SITE_URL = getSiteUrl() || DEFAULT_SITE_URL;
-export const DEFAULT_OG_IMAGE = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80';
+export const DEFAULT_OG_IMAGE = `${SITE_URL}/og-banner.jpg`;
 export const DEFAULT_HOMEPAGE_TITLE = 'Korean Skin Food BD | Authentic Korean Skincare in Bangladesh';
 export const DEFAULT_HOMEPAGE_DESCRIPTION = 'Shop authentic Korean skincare products in Bangladesh at Korean Skin Food BD. Explore trusted Korean beauty brands, skincare essentials, product information and convenient nationwide delivery.';
 
@@ -199,17 +199,6 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
       }
     }
   };
-
-  // Only include aggregateRating if real rating and review counts exist in Firestore
-  if (product.rating && product.rating > 0 && product.reviewsCount && product.reviewsCount > 0) {
-    productSchema.aggregateRating = {
-      '@type': 'AggregateRating',
-      ratingValue: Number(product.rating.toFixed(1)),
-      reviewCount: product.reviewsCount,
-      bestRating: '5',
-      worstRating: '1'
-    };
-  }
 
   // Breadcrumb Hierarchy Schema (Home -> Category -> Brand -> Product)
   const siteUrl = getSiteUrl();
@@ -423,8 +412,8 @@ export const buildStaticPageSeo = (
 export const buildBrandSeo = (brandProfile: BrandSeoProfile): SeoMetadata => {
   const siteUrl = getSiteUrl();
   const canonicalUrl = buildCanonicalUrl(`/brand/${brandProfile.slug}`);
-  const title = `${brandProfile.name} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
-  const description = `Shop 100% authentic ${brandProfile.name} skincare in Bangladesh. Direct Seoul imports, genuine ingredients, verified batch standards, and fast nationwide delivery.`;
+  const title = `${brandProfile.name} in Bangladesh | Korean Skin Food BD`;
+  const description = `Explore ${brandProfile.name} skincare products in Bangladesh at Korean Skin Food BD. View product details, key ingredients, skin type suitability, and Cash on Delivery options.`;
 
   const breadcrumbSchema = {
     '@context': 'https://schema.org',
@@ -584,6 +573,73 @@ export const buildGuideSeo = (guide: SkincareGuide): SeoMetadata => {
     jsonLd: schemas
   };
 };
+
+export const buildIngredientSeo = (ingredient?: {
+  slug: string;
+  name: string;
+  shortRole: string;
+  summary: string;
+}): SeoMetadata => {
+  if (!ingredient) {
+    return buildStaticPageSeo(
+      'Korean Skincare Ingredients Library',
+      'Explore common K-Beauty active and soothing ingredients such as Centella Asiatica, Niacinamide, Snail Mucin, Hyaluronic Acid, and Rice Extract with clear cosmetic education.',
+      '/ingredients',
+      ['Korean skincare ingredients', 'Niacinamide skincare BD', 'Centella Asiatica Bangladesh']
+    );
+  }
+  return buildStaticPageSeo(
+    `${ingredient.name} in Korean Skincare`,
+    `${ingredient.shortRole}. ${sanitizeMetaText(ingredient.summary).slice(0, 140)}`,
+    `/ingredient/${ingredient.slug}`,
+    [ingredient.name, `${ingredient.name} skincare Bangladesh`, 'Korean skincare ingredients']
+  );
+};
+
+export const buildConcernSeo = (concern?: {
+  slug: string;
+  title: string;
+  summary: string;
+}): SeoMetadata => {
+  if (!concern) {
+    return buildStaticPageSeo(
+      'Skin Concerns & Routine Solutions',
+      'Browse skincare education and catalog matches for acne & blemishes, dark spots, dehydrated skin, barrier support, sun protection, and redness.',
+      '/concerns',
+      ['Skincare concerns Bangladesh', 'Acne routine BD', 'Barrier repair K-Beauty']
+    );
+  }
+  return buildStaticPageSeo(
+    `Korean Skincare for ${concern.title}`,
+    sanitizeMetaText(concern.summary).slice(0, 155),
+    `/concern/${concern.slug}`,
+    [concern.title, `${concern.title} skincare BD`, 'Korean skincare guide']
+  );
+};
+
+export const buildAuthenticitySeo = (): SeoMetadata =>
+  buildStaticPageSeo(
+    'Authenticity & Inspection Guide',
+    'How to check batch codes, packaging seals, expiration dates, and our 48-hour damaged or wrong-item inspection support at Korean Skin Food BD.',
+    '/authenticity',
+    ['Korean skincare authenticity check', 'Batch code guide BD', 'Korean Skin Food BD return policy']
+  );
+
+export const buildSkinQuizSeo = (): SeoMetadata =>
+  buildStaticPageSeo(
+    'Skin Profile Quiz',
+    'Answer a few quick questions about your skin type, Bangladesh climate concerns, and active tolerance to get a tailored Korean skincare catalog shortlist.',
+    '/skin-quiz',
+    ['Skin profile quiz Bangladesh', 'Korean skincare routine finder', 'K-Beauty skin type test']
+  );
+
+export const buildRoutineBuilderSeo = (): SeoMetadata =>
+  buildStaticPageSeo(
+    'AM & PM Routine Builder',
+    'Build a balanced morning and evening Korean skincare routine from live catalog products with active-ingredient layering cautions.',
+    '/routine-builder',
+    ['Korean skincare routine builder', 'AM PM skincare routine Bangladesh', 'Actives layering guide']
+  );
 
 /**
  * Apply SEO metadata directly to the HTML document head in client-side React

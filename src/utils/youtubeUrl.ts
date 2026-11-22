@@ -51,7 +51,7 @@ export function isYouTubeUrl(url?: string | null): boolean {
 
 export function getYouTubeEmbedUrl(
   urlOrId: string,
-  options: { autoplay?: boolean; mute?: boolean; controls?: boolean; loop?: boolean } = {}
+  options: { autoplay?: boolean; mute?: boolean; controls?: boolean; loop?: boolean; playsinline?: boolean } = {}
 ): string {
   const videoId = extractYouTubeVideoId(urlOrId) || urlOrId;
   const params = new URLSearchParams();
@@ -61,6 +61,9 @@ export function getYouTubeEmbedUrl(
   if (options.loop) {
     params.set('loop', '1');
     params.set('playlist', videoId);
+  }
+  if (options.playsinline !== false) {
+    params.set('playsinline', '1');
   }
   params.set('rel', '0');
   params.set('modestbranding', '1');

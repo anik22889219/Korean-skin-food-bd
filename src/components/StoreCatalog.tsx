@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { themeService } from '../services/themeService';
-import { HomeThemeSettings, SectionKey, ReelItem, CommunityPhotoItem } from '../types/theme';
+import { HomeThemeSettings, SectionKey, CommunityPhotoItem } from '../types/theme';
 import { productService } from '../services/productService';
 import { useProducts } from '../hooks/queries/products';
 import { useCategories } from '../hooks/queries/categories';
@@ -16,10 +16,10 @@ import {
   Globe, Store, Zap, ShieldCheck, FileText, ChevronRight, ChevronLeft,
   ArrowRight, Play, Pause, Star, Sparkles, MapPin, Package, Truck,
   Award, Heart, RefreshCw, Send, Volume2, VolumeX, ExternalLink,
-  Eye, Share2, Clock, Calendar, Filter, Tag, Camera, Maximize2, ZoomIn
+  Eye, Share2, Clock, Calendar, Filter, Tag, Camera, Maximize2, ZoomIn, Youtube
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getShelfLifeInfo, formatCompactNumber } from './AdminSocial';
+import { formatCompactNumber } from './AdminSocial';
 import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
 import { TopCreatorsSection } from './TopCreatorsSection';
@@ -30,7 +30,14 @@ import { analytics } from '../services/analyticsService';
 import { getRetailPrice } from '../utils/pricing';
 import { SeoHead } from './SeoHead';
 import { buildHomepageSeo } from '../services/seoService';
-import { getYouTubeEmbedUrl as buildYouTubeEmbedUrl, isYouTubeUrl } from '../utils/youtubeUrl';
+import { getYouTubeEmbedUrl as buildYouTubeEmbedUrl } from '../utils/youtubeUrl';
+import { YouTubeShortItem, YouTubeShortsDisplaySettings } from '../types';
+import {
+  DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS,
+  subscribeVisibleYouTubeShorts,
+  subscribeYouTubeShortsDisplaySettings,
+  triggerAutoSyncIfDue,
+} from '../services/youtubeShortsService';
 
 const CATEGORIES = [
   'All', 
@@ -225,10 +232,16 @@ export const StoreCatalog: React.FC = () => {
     }
   };
 
-  // Auto Slide state for Community Live (Reels)
+  // Auto Slide & Live Synced YouTube Shorts state for Community Live
   const [clActiveIndex, setClActiveIndex] = useState(0);
   const [clAutoPlay, setClAutoPlay] = useState(true);
   const [clIsHovered, setClIsHovered] = useState(false);
+  const [youtubeShorts, setYoutubeShorts] = useState<YouTubeShortItem[]>([]);
+  const [youtubeShortsLoaded, setYoutubeShortsLoaded] = useState(false);
+  const [youtubeShortsSettings, setYoutubeShortsSettings] = useState<YouTubeShortsDisplaySettings>(
+    DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS
+  );
+  const hasTriggeredAutoSyncRef = useRef(false);
 
   // Auto Slide & Carousel state for Shared Journey (Community Photos)
   const sjScrollRef = useRef<HTMLDivElement>(null);
@@ -314,17 +327,80 @@ export const StoreCatalog: React.FC = () => {
     }
   }, [products]);
 
-  // Community Live Auto Slide Timer
+  // Subscribe to synced YouTube Channel Shorts & display settings
   useEffect(() => {
-    const reelsCount = theme.communityLive?.reels?.length || 0;
-    if (!clAutoPlay || clIsHovered || reelsCount <= 1) return;
+    const unsubShorts = subscribeVisibleYouTubeShorts(
+      (list) => {
+        setYoutubeShorts(list);
+        setYoutubeShortsLoaded(true);
+      },
+      () => {
+        setYoutubeShortsLoaded(true);
+      }
+    );
+    const unsubSettings = subscribeYouTubeShortsDisplaySettings((settings) => {
+      setYoutubeShortsSettings(settings);
+      setClAutoPlay(settings.autoPlayCarousel !== false);
+    });
+
+    return () => {
+      unsubShorts();
+      unsubSettings();
+    };
+  }, []);
+
+  // Trigger throttled background auto-sync if enabled & interval elapsed
+  useEffect(() => {
+    if (hasTriggeredAutoSyncRef.current) return;
+    if (!youtubeShortsSettings.autoSyncEnabled) return;
+    hasTriggeredAutoSyncRef.current = true;
+    triggerAutoSyncIfDue()
+      .then((res) => {
+        if (res.synced && Array.isArray(res.shorts) && res.shorts.length > 0) {
+          setYoutubeShorts((prev) => {
+            if (prev.length === 0) return res.shorts!.filter((s) => s.isVisible !== false && s.privacyStatus !== 'private');
+            const existingIds = new Set(prev.map((p) => p.videoId));
+            const merged = [...prev];
+            for (const s of res.shorts!) {
+              if (!existingIds.has(s.videoId) && s.isVisible !== false && s.privacyStatus !== 'private') {
+                merged.push(s);
+              }
+            }
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
+  }, [youtubeShortsSettings.autoSyncEnabled]);
+
+  const displayedYouTubeShorts = useMemo(() => {
+    const maxCount = Math.max(1, Number(youtubeShortsSettings.maxDisplayCount || 12));
+    return youtubeShorts.slice(0, maxCount);
+  }, [youtubeShorts, youtubeShortsSettings.maxDisplayCount]);
+
+  useEffect(() => {
+    if (displayedYouTubeShorts.length > 0 && clActiveIndex >= displayedYouTubeShorts.length) {
+      setClActiveIndex(0);
+    }
+  }, [displayedYouTubeShorts.length, clActiveIndex]);
+
+  // Community Live Auto Slide Timer
+  const clSlideIntervalSeconds = Math.max(
+    2,
+    Math.min(120, Math.round(Number(youtubeShortsSettings.carouselSlideIntervalSeconds || 6)))
+  );
+
+  useEffect(() => {
+    const shortsCount = displayedYouTubeShorts.length;
+    const minSlideThreshold = isMobile ? 1 : 3;
+    if (!clAutoPlay || clIsHovered || shortsCount <= minSlideThreshold) return;
 
     const timer = setInterval(() => {
-      setClActiveIndex((prev) => (prev + 1) % reelsCount);
-    }, 3500);
+      setClActiveIndex((prev) => (prev + 1) % shortsCount);
+    }, clSlideIntervalSeconds * 1000);
 
     return () => clearInterval(timer);
-  }, [clAutoPlay, clIsHovered, theme.communityLive?.reels?.length]);
+  }, [clAutoPlay, clIsHovered, displayedYouTubeShorts.length, isMobile, clSlideIntervalSeconds]);
 
   // Shared Journey Carousel Scroll Listener
   useEffect(() => {
@@ -455,6 +531,33 @@ export const StoreCatalog: React.FC = () => {
     const h = theme.hero;
     if (!h || !h.enabled) return null;
 
+    const badgeText =
+      !h.badgeText || h.badgeText === 'List in Your Store'
+        ? 'Korean Skincare Catalog'
+        : h.badgeText;
+
+    const hasLegacyDropshipTitle =
+      h.titleLine1 === 'Import Products' ||
+      h.titleHighlight === 'List in Your Store' ||
+      h.titleLine2 === 'Ship Globally';
+
+    const titleLine1 = hasLegacyDropshipTitle ? 'Shop Korean' : h.titleLine1;
+    const titleHighlight = hasLegacyDropshipTitle ? 'Skincare' : h.titleHighlight;
+    const titleLine2 = hasLegacyDropshipTitle ? 'in Bangladesh' : h.titleLine2;
+
+    const hasLegacyDropshipSubtitle =
+      !h.subtitle ||
+      /dropshipping|global markets|your store/i.test(h.subtitle);
+
+    const subtitle = hasLegacyDropshipSubtitle
+      ? 'Explore Korean cleansers, toners, serums, moisturizers, and sunscreens with product details, skin type filters, and Cash on Delivery across Bangladesh.'
+      : h.subtitle;
+
+    const primaryButtonText =
+      !h.primaryButtonText || h.primaryButtonText === 'Get Started Free'
+        ? 'Shop Skincare'
+        : h.primaryButtonText;
+
     return (
       <div 
         key="hero" 
@@ -472,28 +575,28 @@ export const StoreCatalog: React.FC = () => {
 
         <div className="relative z-10 w-full max-w-[1720px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 py-10 md:py-16 lg:py-20">
           <div className="max-w-4xl space-y-3 sm:space-y-4 text-center lg:text-left">
-            {h.badgeText && (
+            {badgeText && (
               <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#E91E8C]/15 via-pink-500/10 to-purple-500/10 text-[#E91E8C] text-xs sm:text-sm font-black uppercase tracking-wider px-4 py-1.5 rounded-full border border-[#E91E8C]/30 shadow-xs backdrop-blur-md">
                 <Sparkles size={14} className="text-[#E91E8C] animate-pulse" />
-                <span>{h.badgeText}</span>
+                <span>{badgeText}</span>
               </div>
             )}
 
-            {(h.titleLine1 || h.titleHighlight || h.titleLine2) && (
+            {(titleLine1 || titleHighlight || titleLine2) && (
               <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-serif font-black text-slate-900 leading-[1.1] tracking-tight">
-                {h.titleLine1}{' '}
-                {h.titleHighlight && (
+                {titleLine1}{' '}
+                {titleHighlight && (
                   <span className="bg-gradient-to-r from-[#E91E8C] via-[#FF4B91] to-purple-600 bg-clip-text text-transparent underline decoration-pink-300 decoration-wavy decoration-2">
-                    {h.titleHighlight}
+                    {titleHighlight}
                   </span>
                 )}{' '}
-                {h.titleLine2}
+                {titleLine2}
               </h1>
             )}
 
-            {h.subtitle && (
+            {subtitle && (
               <p className="text-slate-700 text-sm sm:text-base md:text-lg font-semibold leading-relaxed max-w-3xl mx-auto lg:mx-0 !mt-2 sm:!mt-2.5">
-                {h.subtitle}
+                {subtitle}
               </p>
             )}
 
@@ -502,7 +605,7 @@ export const StoreCatalog: React.FC = () => {
                 to={h.primaryButtonLink || '/shop'}
                 className="px-8 py-4 bg-gradient-to-r from-[#E91E8C] to-[#C2185B] hover:from-[#FF4B91] hover:to-[#E91E8C] text-white rounded-2xl text-xs sm:text-sm font-black transition-all shadow-xl shadow-[#E91E8C]/25 hover:shadow-pink-400/40 hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2.5 cursor-pointer"
               >
-                <span>{h.primaryButtonText}</span>
+                <span>{primaryButtonText}</span>
                 <ArrowRight size={18} />
               </Link>
 
@@ -514,30 +617,30 @@ export const StoreCatalog: React.FC = () => {
               </Link>
             </div>
 
-            {/* Premium Trust Cards Grid */}
+            {/* Storefront Highlights Grid */}
             <div className="pt-6 grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 text-left border-t border-pink-200/60 mt-6 sm:mt-7">
               <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
                 <ShieldCheck size={20} className="text-[#E91E8C] mb-1.5" />
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">100% Genuine</h4>
-                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Direct Seoul Air Freight</p>
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Korean Skincare Catalog</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Cleansers, Serums & Sunscreens</p>
               </div>
 
               <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
                 <Truck size={20} className="text-[#E91E8C] mb-1.5" />
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">Fast Delivery</h4>
-                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Nationwide BD Express</p>
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Cash on Delivery</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Delivery Across Bangladesh</p>
               </div>
 
               <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
                 <Sparkles size={20} className="text-[#E91E8C] mb-1.5" />
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">Top Brands</h4>
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Korean Brands</h4>
                 <p className="text-[10px] sm:text-xs text-slate-600 font-medium">COSRX, Anua, BOJ & More</p>
               </div>
 
               <div className="p-3.5 sm:p-4 bg-white/80 backdrop-blur-md rounded-2xl border border-pink-100 shadow-xs hover:border-pink-300 transition">
                 <CheckCircle size={20} className="text-[#E91E8C] mb-1.5" />
-                <h4 className="text-xs sm:text-sm font-black text-slate-900">Verified Quality</h4>
-                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">50,000+ BD Customers</p>
+                <h4 className="text-xs sm:text-sm font-black text-slate-900">Product Information</h4>
+                <p className="text-[10px] sm:text-xs text-slate-600 font-medium">Ingredients & Skin Type Guide</p>
               </div>
             </div>
           </div>
@@ -1561,388 +1664,284 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
     );
   };
 
-  // Helper ReelCard with auto-play muted video capability
-  const ReelCard: React.FC<{ reel: ReelItem }> = ({ reel }) => {
-    const [isMuted, setIsMuted] = useState(true);
-    const [isPlaying, setIsPlaying] = useState(true);
-    const videoRef = React.useRef<HTMLVideoElement>(null);
+  // Shoppable YouTube Short Card (9:16 muted autoplay iframe on visible cards + tagged Store Products)
+  const YouTubeShortCard: React.FC<{ short: YouTubeShortItem }> = ({ short }) => {
+    const displayTitle = short.customTitle || short.title || 'YouTube Short';
+    const taggedProducts = useMemo(() => {
+      return (short.taggedProductIds || [])
+        .map((pid) => products.find((p) => p.id === pid))
+        .filter((p): p is Product => Boolean(p));
+    }, [short.taggedProductIds, products]);
 
-    useEffect(() => {
-      if (videoRef.current) {
-        videoRef.current.muted = true;
-        videoRef.current.play().catch(() => {
-          // Silent fallback if browser restricts auto-play
-        });
-      }
-    }, [reel.videoUrl]);
-
-    const isDirectVideo = Boolean(
-      reel.videoUrl && (
-        reel.videoUrl.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i) ||
-        reel.videoUrl.includes('cloudinary.com') ||
-        reel.videoUrl.includes('res.cloudinary') ||
-        reel.videoUrl.startsWith('data:video') ||
-        reel.videoUrl.startsWith('blob:')
-      )
-    );
-
-    const isFacebookReel = Boolean(
-      reel.videoUrl && (
-        reel.videoUrl.includes('facebook.com') || reel.videoUrl.includes('fb.watch')
-      )
-    );
-
-    const isInstagramReel = Boolean(
-      reel.videoUrl && (
-        reel.videoUrl.includes('instagram.com') || reel.videoUrl.includes('instagr.am')
-      )
-    );
-
-    const getFacebookEmbedUrl = (url: string) => {
-      let cleanUrl = url.trim();
-      // Transform share/r/ ID to reel/ ID for iframe compatibility
-      if (cleanUrl.includes('facebook.com/share/r/')) {
-        const reelId = cleanUrl.split('share/r/')[1]?.split('/')[0]?.split('?')[0];
-        if (reelId) {
-          cleanUrl = `https://www.facebook.com/reel/${reelId}/`;
-        }
-      } else if (cleanUrl.includes('facebook.com/share/v/')) {
-        const videoId = cleanUrl.split('share/v/')[1]?.split('/')[0]?.split('?')[0];
-        if (videoId) {
-          cleanUrl = `https://www.facebook.com/watch/?v=${videoId}`;
-        }
-      }
-
-      if (cleanUrl.includes('facebook.com/plugins/video.php')) {
-        return cleanUrl.includes('autoplay') ? cleanUrl : `${cleanUrl}&autoplay=true&muted=true`;
-      }
-      return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(cleanUrl)}&show_text=false&autoplay=true&muted=true&container_width=500`;
-    };
-
-    const getInstagramEmbedUrl = (url: string) => {
-      let cleanUrl = url.trim();
-      if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
-      if (!cleanUrl.endsWith('/embed')) {
-        cleanUrl = `${cleanUrl}/embed`;
-      }
-      return cleanUrl;
-    };
-
-    const isYouTube = isYouTubeUrl(reel.videoUrl);
-
-    const getYouTubeEmbedUrl = (url: string) =>
-      buildYouTubeEmbedUrl(url, { autoplay: true, mute: true, loop: true, controls: false });
-
-    const toggleMute = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (videoRef.current) {
-        videoRef.current.muted = !isMuted;
-        setIsMuted(!isMuted);
-      }
-    };
-
-    const togglePlay = () => {
-      if (videoRef.current) {
-        if (isPlaying) {
-          videoRef.current.pause();
-          setIsPlaying(false);
-        } else {
-          videoRef.current.play();
-          setIsPlaying(true);
-        }
-      }
-    };
-
-    const shelfLife = getShelfLifeInfo(reel.createdAt);
+    const embedSrc = buildYouTubeEmbedUrl(short.videoId, {
+      autoplay: true,
+      mute: true,
+      loop: true,
+      controls: true,
+      playsinline: true,
+    });
 
     return (
-      <div className="bg-white rounded-2xl border border-pink-100 overflow-hidden shadow-xs hover:shadow-md transition space-y-3 p-3 group">
-        <div 
-          className="relative aspect-[9/13] rounded-xl overflow-hidden bg-slate-900 cursor-pointer"
-          onClick={isDirectVideo ? togglePlay : undefined}
-        >
-          {isDirectVideo || (reel.videoUrl && (reel.videoUrl.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i) || reel.videoUrl.includes('cloudinary') || reel.videoUrl.endsWith('.mp4'))) ? (
-            <>
-              <video
-                ref={videoRef}
-                src={reel.videoUrl}
-                poster={reel.coverUrl}
-                autoPlay
-                muted={isMuted}
-                loop
-                playsInline
-                className="w-full h-full object-cover"
-              />
-              <button
-                onClick={toggleMute}
-                type="button"
-                className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center backdrop-blur-md hover:bg-[#E91E8C] transition"
-                title={isMuted ? "Unmute Sound" : "Mute Sound"}
-              >
-                {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-              </button>
-              {!isPlaying && (
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white">
-                  <div className="w-12 h-12 rounded-full bg-[#E91E8C] text-white flex items-center justify-center shadow-lg">
-                    <Play size={22} className="ml-0.5" />
-                  </div>
-                </div>
-              )}
-            </>
-          ) : isYouTube ? (
+      <div className="bg-white rounded-2xl border border-pink-100 overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between p-3 space-y-3">
+        {/* 9:16 Portrait YouTube Short Auto-Playing Muted Embed */}
+        <div className="space-y-2.5">
+          <div className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-950">
+            <img
+              src={short.thumbnailUrl || `https://i.ytimg.com/vi/${short.videoId}/hqdefault.jpg`}
+              alt={displayTitle}
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
             <iframe
-              src={getYouTubeEmbedUrl(reel.videoUrl)}
-              className="w-full h-full border-0"
+              src={embedSrc}
+              title={displayTitle}
+              className="relative z-10 w-full h-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
             />
-          ) : (
-            /* Facebook / Instagram or External Reel Card with Poster & Direct Link */
-            <div className="relative w-full h-full group/reel">
-              <img 
-                src={reel.coverUrl || 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&auto=format&fit=crop'} 
-                alt={reel.title} 
-                className="w-full h-full object-cover group-hover/reel:scale-105 transition duration-500" 
-                referrerPolicy="no-referrer" 
-              />
-              
-              {/* Gradient Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+          </div>
 
-              {/* Platform & Shelf-Life Badges */}
-              <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between gap-1">
-                <span className="px-2.5 py-1 bg-black/60 backdrop-blur-md text-white text-[10px] font-extrabold rounded-full border border-white/20 flex items-center gap-1">
-                  {isFacebookReel ? (
-                    <>
-                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                      <span>Facebook Reel</span>
-                    </>
-                  ) : isInstagramReel ? (
-                    <>
-                      <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-                      <span>Instagram Reel</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play size={10} className="fill-current text-[#E91E8C]" />
-                      <span>Video Highlight</span>
-                    </>
-                  )}
-                </span>
-
-                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black backdrop-blur-md shadow-xs flex items-center gap-1 ${shelfLife.badgeColor}`}>
-                  <Clock size={10} />
-                  <span>{shelfLife.label}</span>
-                </span>
-              </div>
-
-              {/* Engagement Metrics Bottom Overlay */}
-              <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center justify-between text-white/90 text-[10px] font-bold bg-black/50 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-white/10">
-                <div className="flex items-center gap-1">
-                  <Eye size={12} className="text-pink-400" />
-                  <span>{formatCompactNumber(reel.viewsCount)}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Heart size={12} className="text-rose-400 fill-rose-400/30" />
-                  <span>{formatCompactNumber(reel.likesCount)}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Share2 size={12} className="text-blue-400" />
-                  <span>{formatCompactNumber(reel.sharesCount)}</span>
-                </div>
-              </div>
-
-              {/* Centered Play / View Post Button & Direct Link */}
-              {(reel.postUrl || reel.videoUrl) && (
-                <a
-                  href={reel.postUrl || reel.videoUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="absolute inset-0 flex flex-col items-center justify-center text-white z-10 group/btn"
-                >
-                  <div className="w-14 h-14 rounded-full bg-[#E91E8C] text-white flex items-center justify-center shadow-xl group-hover/btn:scale-110 group-hover/btn:bg-[#FF4B91] transition duration-300">
-                    <Play size={24} className="ml-1 fill-current" />
-                  </div>
-                  <span className="mt-2 text-[10px] font-extrabold bg-black/60 px-3 py-1 rounded-full border border-white/20 backdrop-blur-sm group-hover/btn:bg-[#E91E8C] transition flex items-center gap-1">
-                    <span>{reel.postUrl ? 'View Facebook Post' : 'Watch Reel'}</span>
-                    <ExternalLink size={10} />
-                  </span>
-                </a>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <div className="flex items-center justify-between px-1">
+          <div className="px-0.5 space-y-1">
             <a
-              href={reel.postUrl || reel.videoUrl}
+              href={short.videoUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-xs font-extrabold text-slate-900 hover:text-[#E91E8C] transition line-clamp-1"
+              className="text-xs font-extrabold text-slate-900 hover:text-[#E91E8C] transition line-clamp-2 leading-snug block"
             >
-              {reel.title || 'Social Reel'}
+              {displayTitle}
             </a>
-            {(reel.postUrl || reel.videoUrl) && (
+
+            <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 font-semibold tabular-nums">
+              <span>
+                {formatCompactNumber(short.viewsCount)} views · {formatCompactNumber(short.likesCount)} likes
+              </span>
               <a
-                href={reel.postUrl || reel.videoUrl}
+                href={short.videoUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[10px] text-[#E91E8C] font-extrabold hover:underline flex items-center gap-0.5 shrink-0 ml-1"
+                className="text-[#E91E8C] font-bold hover:underline flex items-center gap-1 whitespace-nowrap shrink-0"
               >
-                <span>{reel.postUrl ? 'View Post' : 'Watch'}</span>
-                <ExternalLink size={10} />
+                <span>YouTube</span>
+                <ExternalLink size={11} />
               </a>
-            )}
-          </div>
-          {reel.createdAt && (
-            <div className="text-[10px] text-slate-500 px-1 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <Calendar size={10} className="text-slate-400" />
-                <span>Added {reel.createdAt}</span>
-              </span>
-              <span className="font-extrabold text-slate-600">{shelfLife.status}</span>
             </div>
-          )}
+          </div>
         </div>
+
+        {/* Shop the Video — Tagged Store Products */}
+        {taggedProducts.length > 0 && (
+          <div className="pt-2 border-t border-pink-100/80 space-y-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1 px-0.5">
+              <ShoppingBag size={11} className="text-[#E91E8C]" />
+              <span>Shop the Video</span>
+            </span>
+            <div className="space-y-1.5">
+              {taggedProducts.slice(0, 2).map((prod) => (
+                <button
+                  key={prod.id}
+                  type="button"
+                  onClick={() => setQuickViewProduct(prod)}
+                  className="w-full flex items-center gap-2.5 p-1.5 rounded-xl bg-[#fff8f5] hover:bg-pink-50 transition text-left cursor-pointer group"
+                >
+                  <img
+                    src={prod.image}
+                    alt={prod.name}
+                    referrerPolicy="no-referrer"
+                    className="w-10 h-10 rounded-lg object-cover bg-white shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-bold text-slate-900 truncate group-hover:text-[#E91E8C] transition">
+                      {prod.name}
+                    </p>
+                    <p className="text-[11px] font-black text-[#E91E8C] tabular-nums">
+                      ৳{getRetailPrice(prod)}
+                    </p>
+                  </div>
+                  <span className="px-2 py-1 rounded-lg bg-white text-[10px] font-black text-slate-800 group-hover:bg-[#E91E8C] group-hover:text-white transition whitespace-nowrap shrink-0">
+                    Shop
+                  </span>
+                </button>
+              ))}
+              {taggedProducts.length > 2 && (
+                <button
+                  type="button"
+                  onClick={() => setQuickViewProduct(taggedProducts[2])}
+                  className="w-full text-left px-1 text-[10px] font-bold text-[#E91E8C] hover:underline cursor-pointer"
+                >
+                  +{taggedProducts.length - 2} more product(s) featured
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
-  // SECTION 9: COMMUNITY LIVE (FACEBOOK REELS)
+  // SECTION 9: COMMUNITY LIVE (SYNCED YOUTUBE CHANNEL SHORTS)
   const renderCommunityLiveSection = () => {
-    const cl = theme.communityLive;
-    if (!cl || !cl.enabled) return null;
+    if (!youtubeShortsSettings.enabled) return null;
 
-    const reels = cl.reels || [];
-    if (reels.length === 0) return null;
+    if (!youtubeShortsLoaded) {
+      return (
+        <div
+          key="communityLive"
+          className="bg-[#fbf2ed] p-5 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6"
+        >
+          <div className="space-y-2 border-b border-pink-100/80 pb-4">
+            <div className="h-3 w-40 bg-pink-100 rounded animate-pulse" />
+            <div className="h-7 w-72 bg-pink-100/80 rounded animate-pulse" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {[0, 1, 2].map((idx) => (
+              <div key={idx} className="bg-white rounded-2xl border border-pink-100 p-3 space-y-3">
+                <div className="aspect-[9/16] rounded-xl bg-slate-100 animate-pulse" />
+                <div className="h-4 w-3/4 bg-slate-100 rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
 
-    const handleNextReel = () => {
-      setClActiveIndex((prev) => (prev + 1) % reels.length);
+    const shorts = displayedYouTubeShorts;
+    if (shorts.length === 0) return null;
+
+    const handleNextShort = () => {
+      setClActiveIndex((prev) => (prev + 1) % shorts.length);
     };
 
-    const handlePrevReel = () => {
-      setClActiveIndex((prev) => (prev - 1 + reels.length) % reels.length);
+    const handlePrevShort = () => {
+      setClActiveIndex((prev) => (prev - 1 + shorts.length) % shorts.length);
     };
 
-    // Calculate visible reels slice for carousel (displays 1 item on mobile, 3 items on desktop)
-    const getVisibleReels = () => {
+    // Visible slice: 1 card on mobile, 3 cards on desktop — keeps live iframe count bounded cleanly
+    const getVisibleShorts = () => {
       const maxVisible = isMobile ? 1 : 3;
-      if (reels.length <= maxVisible) return reels;
-      const visible = [];
-      for (let i = 0; i < Math.min(maxVisible, reels.length); i++) {
-        visible.push(reels[(clActiveIndex + i) % reels.length]);
+      if (shorts.length <= maxVisible) return shorts;
+      const visible: YouTubeShortItem[] = [];
+      for (let i = 0; i < Math.min(maxVisible, shorts.length); i++) {
+        visible.push(shorts[(clActiveIndex + i) % shorts.length]);
       }
       return visible;
     };
 
-    const visibleReels = getVisibleReels();
+    const visibleShorts = getVisibleShorts();
+    const canSlide = shorts.length > (isMobile ? 1 : 3);
+    const channelLinkUrl =
+      youtubeShortsSettings.viewAllLinkUrl ||
+      (youtubeShortsSettings.lastSyncedChannelId
+        ? `https://www.youtube.com/channel/${youtubeShortsSettings.lastSyncedChannelId}/shorts`
+        : '');
 
     return (
-      <div 
-        key="communityLive" 
+      <div
+        key="communityLive"
         className="bg-[#fbf2ed] p-5 md:p-10 rounded-[32px] border border-pink-100 shadow-sm space-y-6 relative overflow-hidden select-none"
         onMouseEnter={() => setClIsHovered(true)}
         onMouseLeave={() => setClIsHovered(false)}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
-        onTouchEnd={() => handleTouchEnd(handleNextReel, handlePrevReel)}
+        onTouchEnd={() => handleTouchEnd(handleNextShort, handlePrevShort)}
       >
-        {/* Header with Title and Auto-Slide Controls */}
+        {/* Header with Title & Carousel Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-pink-100/80 pb-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest block">
-                {cl.subtitle}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Youtube size={14} className="text-red-600 shrink-0" />
+              <span className="text-[10px] font-black text-[#E91E8C] uppercase tracking-widest">
+                {youtubeShortsSettings.subtitle || 'SHORTS & SKINCARE IN ACTION'}
               </span>
-              {/* Auto-Slide Badge */}
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-pink-100/80 border border-pink-200 text-[10px] font-extrabold text-[#E91E8C]">
-                <span className={`w-2 h-2 rounded-full ${clAutoPlay && !clIsHovered ? 'bg-[#E91E8C] animate-pulse' : 'bg-slate-400'}`} />
-                <span>{clAutoPlay ? (clIsHovered ? 'Paused (Hover)' : 'Auto Sliding') : 'Slide Paused'}</span>
-              </span>
+              {canSlide && (
+                <span className="text-[11px] font-semibold text-slate-500">
+                  · {clAutoPlay ? (clIsHovered ? 'Paused' : `Auto-sliding (${clSlideIntervalSeconds}s)`) : 'Paused'}
+                </span>
+              )}
             </div>
             <h2 className="text-2xl md:text-3xl font-serif font-black text-slate-900">
-              {cl.title}
+              {youtubeShortsSettings.title || 'Community Live — YouTube Shorts'}
             </h2>
           </div>
 
-          <div className="flex items-center gap-3 self-end sm:self-center">
-            {/* Play/Pause Auto-Slide Toggle */}
-            <button
-              type="button"
-              onClick={() => setClAutoPlay(!clAutoPlay)}
-              className="p-2.5 rounded-xl bg-white border border-pink-200 text-[#E91E8C] hover:bg-pink-50 transition shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold"
-              title={clAutoPlay ? "Pause Auto Slide" : "Start Auto Slide"}
-            >
-              {clAutoPlay ? <Pause size={14} /> : <Play size={14} />}
-              <span className="hidden md:inline">{clAutoPlay ? "Pause" : "Auto Play"}</span>
-            </button>
+          <div className="flex items-center gap-2.5 self-end sm:self-center">
+            {canSlide && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setClAutoPlay(!clAutoPlay)}
+                  className="px-3 py-2 rounded-xl bg-white border border-pink-200 text-[#E91E8C] hover:bg-pink-50 transition shadow-xs cursor-pointer flex items-center gap-1.5 text-xs font-bold whitespace-nowrap shrink-0"
+                  title={clAutoPlay ? 'Pause Auto Slide' : 'Start Auto Slide'}
+                >
+                  {clAutoPlay ? <Pause size={14} /> : <Play size={14} />}
+                  <span className="hidden md:inline">{clAutoPlay ? 'Pause' : 'Auto Play'}</span>
+                </button>
 
-            {/* Navigation Arrows */}
-            <div className="flex items-center gap-1.5 bg-white p-1 rounded-2xl border border-pink-200 shadow-xs">
-              <button
-                type="button"
-                onClick={handlePrevReel}
-                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
-                aria-label="Previous Reel"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={handleNextReel}
-                className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
-                aria-label="Next Reel"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
+                <div className="flex items-center gap-1 bg-white p-1 rounded-2xl border border-pink-200 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={handlePrevShort}
+                    className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                    aria-label="Previous Short"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextShort}
+                    className="p-2 rounded-xl text-slate-700 hover:text-[#E91E8C] hover:bg-pink-50 transition cursor-pointer"
+                    aria-label="Next Short"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              </>
+            )}
 
-            {cl.viewAllLinkUrl && (
+            {channelLinkUrl && (
               <a
-                href={cl.viewAllLinkUrl}
+                href={channelLinkUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-extrabold text-[#E91E8C] hover:underline flex items-center gap-1 ml-1"
+                className="text-xs font-extrabold text-[#E91E8C] hover:underline flex items-center gap-1 ml-1 whitespace-nowrap shrink-0"
               >
-                <span>{cl.viewAllLinkText || 'View All'}</span>
+                <span>{youtubeShortsSettings.viewAllLinkText || 'View Channel'}</span>
                 <ChevronRight size={14} />
               </a>
             )}
           </div>
         </div>
 
-        {/* Sliding Reels Grid / Carousel */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 transition-all duration-500">
-          {visibleReels.map((reel) => (
-            <motion.div
-              key={`${reel.id}-${clActiveIndex}`}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.4 }}
-            >
-              <ReelCard reel={reel} />
-            </motion.div>
+        {/* Visible Carousel Cards Grid (3 Desktop / 1 Mobile) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {visibleShorts.map((short) => (
+            <div key={short.videoId}>
+              <YouTubeShortCard short={short} />
+            </div>
           ))}
         </div>
 
-        {/* Pagination Dots */}
-        {reels.length > 1 && (
-          <div className="flex items-center justify-center gap-2 pt-2">
-            {reels.map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setClActiveIndex(idx)}
-                className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${
-                  clActiveIndex === idx
-                    ? 'w-8 bg-[#E91E8C] shadow-xs'
-                    : 'w-2 bg-pink-200 hover:bg-pink-300'
-                }`}
-                aria-label={`Go to slide ${idx + 1}`}
-              />
-            ))}
+        {/* Clean Carousel Progress / Dots */}
+        {canSlide && (
+          <div className="flex items-center justify-center gap-2 pt-1">
+            {shorts.length <= 10 ? (
+              shorts.map((s, idx) => (
+                <button
+                  key={s.videoId}
+                  type="button"
+                  onClick={() => setClActiveIndex(idx)}
+                  className={`h-2 rounded-full transition-all duration-200 cursor-pointer ${
+                    clActiveIndex === idx
+                      ? 'w-8 bg-[#E91E8C]'
+                      : 'w-2 bg-pink-200 hover:bg-pink-300'
+                  }`}
+                  aria-label={`Go to Short ${idx + 1}`}
+                />
+              ))
+            ) : (
+              <span className="text-xs font-bold text-slate-600 tabular-nums">
+                {clActiveIndex + 1} / {shorts.length} Shorts
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { INITIAL_PRODUCTS } from '../src/data/allProducts';
+import { BRAND_SEO_PROFILES } from '../src/data/brandProfiles';
+import { INITIAL_SKINCARE_GUIDES } from '../src/data/skincareGuides';
+import { INGREDIENT_LIBRARY } from '../src/data/ingredientLibrary';
+import { SKIN_CONCERN_LIBRARY } from '../src/data/skinConcerns';
 
 function escapeXml(s: any): string {
   if (!s) return '';
@@ -25,7 +29,8 @@ function escapeCsv(s: any): string {
   return `"${String(s).replace(/"/g, '""')}"`;
 }
 
-const baseUrl = (process.env.SITE_URL || process.env.APP_URL || 'https://koreanskinfood.com').trim().replace(/\/+$/, '');
+const rawBaseUrl = (process.env.SITE_URL || process.env.APP_URL || 'https://koreanskinfood.com').trim().replace(/\/+$/, '');
+const baseUrl = /^https?:\/\//i.test(rawBaseUrl) ? rawBaseUrl : `https://${rawBaseUrl}`;
 const products = INITIAL_PRODUCTS || [];
 
 // ==========================================
@@ -242,6 +247,84 @@ const pinterestPreviewJson = JSON.stringify({
 }, null, 2);
 
 // ==========================================
+// 6. SITEMAP.XML (SYNCED WITH SPA ROUTES)
+// ==========================================
+const todayIso = new Date().toISOString().split('T')[0];
+const sitemapEntries: Array<{ url: string; lastmod: string; changefreq: string; priority: string }> = [
+  { url: `${baseUrl}/`, lastmod: todayIso, changefreq: 'daily', priority: '1.0' },
+  { url: `${baseUrl}/shop`, lastmod: todayIso, changefreq: 'daily', priority: '0.9' },
+  { url: `${baseUrl}/brands`, lastmod: todayIso, changefreq: 'weekly', priority: '0.9' },
+  { url: `${baseUrl}/guides`, lastmod: todayIso, changefreq: 'weekly', priority: '0.85' },
+  { url: `${baseUrl}/ingredients`, lastmod: todayIso, changefreq: 'weekly', priority: '0.85' },
+  { url: `${baseUrl}/concerns`, lastmod: todayIso, changefreq: 'weekly', priority: '0.85' },
+  { url: `${baseUrl}/authenticity`, lastmod: todayIso, changefreq: 'monthly', priority: '0.8' },
+  { url: `${baseUrl}/skin-quiz`, lastmod: todayIso, changefreq: 'monthly', priority: '0.75' },
+  { url: `${baseUrl}/routine-builder`, lastmod: todayIso, changefreq: 'monthly', priority: '0.75' },
+  { url: `${baseUrl}/about-us`, lastmod: todayIso, changefreq: 'monthly', priority: '0.6' },
+  { url: `${baseUrl}/contact-us`, lastmod: todayIso, changefreq: 'monthly', priority: '0.6' },
+  { url: `${baseUrl}/become-a-creator`, lastmod: todayIso, changefreq: 'monthly', priority: '0.7' },
+  { url: `${baseUrl}/privacy-policy`, lastmod: todayIso, changefreq: 'yearly', priority: '0.3' },
+  { url: `${baseUrl}/terms-of-service`, lastmod: todayIso, changefreq: 'yearly', priority: '0.3' },
+];
+
+for (const brandSlug of Object.keys(BRAND_SEO_PROFILES)) {
+  sitemapEntries.push({
+    url: `${baseUrl}/brand/${brandSlug}`,
+    lastmod: todayIso,
+    changefreq: 'weekly',
+    priority: '0.85',
+  });
+}
+
+for (const guide of INITIAL_SKINCARE_GUIDES) {
+  sitemapEntries.push({
+    url: `${baseUrl}/guide/${guide.slug}`,
+    lastmod: (guide.lastUpdatedDate || todayIso).split('T')[0],
+    changefreq: 'weekly',
+    priority: '0.8',
+  });
+}
+
+for (const ing of INGREDIENT_LIBRARY) {
+  sitemapEntries.push({
+    url: `${baseUrl}/ingredient/${ing.slug}`,
+    lastmod: todayIso,
+    changefreq: 'monthly',
+    priority: '0.75',
+  });
+}
+
+for (const concern of SKIN_CONCERN_LIBRARY) {
+  sitemapEntries.push({
+    url: `${baseUrl}/concern/${concern.slug}`,
+    lastmod: todayIso,
+    changefreq: 'monthly',
+    priority: '0.75',
+  });
+}
+
+for (const p of products) {
+  if (!p.id || p.noindex) continue;
+  sitemapEntries.push({
+    url: `${baseUrl}/product/${encodeURIComponent(p.id)}`,
+    lastmod: todayIso,
+    changefreq: 'weekly',
+    priority: '0.8',
+  });
+}
+
+const fullSitemapXml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapEntries
+  .map(
+    (entry) => `  <url>
+    <loc>${escapeXml(entry.url)}</loc>
+    <lastmod>${entry.lastmod}</lastmod>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`
+  )
+  .join('\n')}\n</urlset>\n`;
+
+// ==========================================
 // WRITE ALL FEEDS TO PUBLIC & DIST
 // ==========================================
 function ensureDir(dirPath: string) {
@@ -276,6 +359,9 @@ for (const target of targets) {
   // Pinterest preview - /api/pinterest/preview and preview.json
   fs.writeFileSync(path.join(target, 'api', 'pinterest', 'preview'), pinterestPreviewJson);
   fs.writeFileSync(path.join(target, 'api', 'pinterest', 'preview.json'), pinterestPreviewJson);
+
+  // Sitemap XML
+  fs.writeFileSync(path.join(target, 'sitemap.xml'), fullSitemapXml);
 }
 
-console.log(`[Feeds] Generated Meta & Pinterest feeds for ${products.length} products across public/ and dist/.`);
+console.log(`[Feeds] Generated Meta, Pinterest & Sitemap (${sitemapEntries.length} URLs) for ${products.length} products across public/ and dist/.`);

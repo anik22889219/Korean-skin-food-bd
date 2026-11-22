@@ -1,5 +1,6 @@
 import { Order, Product, CourierData, ProductImportPayload, AuditLog, CustomerSupportTicket, SupportThreadReply, SlackChannel, SlashCommandPayload } from '../types';
 import { slackService } from './slackService';
+import { authFetch } from './apiClient';
 import { db, sanitizeForFirestore } from './firebase';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { createSteadfastConsignment } from './steadfastService';
@@ -2004,7 +2005,7 @@ export const slackNotificationService = {
   async retryFailedQueue(): Promise<{ retriedCount: number; message: string }> {
     if (typeof window !== 'undefined') {
       try {
-        const res = await fetch('/api/slack/retry-queue', { method: 'POST' });
+        const res = await authFetch('/api/slack/retry-queue', { method: 'POST' });
         if (res.ok) return await res.json();
       } catch (e) {
         console.warn('Failed to call /api/slack/retry-queue API:', e);
@@ -2031,7 +2032,7 @@ export const slackNotificationService = {
   async sendTestNotification(channelName = '#system-alerts'): Promise<QueuedNotificationItem> {
     if (typeof window !== 'undefined') {
       try {
-        const res = await fetch('/api/slack/test-notification', {
+        const res = await authFetch('/api/slack/test-notification', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ channel: channelName })
@@ -2071,7 +2072,7 @@ export const slackNotificationService = {
   async getOpsSummary() {
     if (typeof window !== 'undefined') {
       try {
-        const res = await fetch('/api/slack/summary');
+        const res = await authFetch('/api/slack/summary');
         if (res.ok) {
           return await res.json();
         }

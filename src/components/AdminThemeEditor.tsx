@@ -1,8 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME, DEFAULT_PAGES_THEME } from '../services/themeService';
-import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, PagesThemeSettings, PageThemeKey, SectionKey, ReelItem, CommunityPhotoItem } from '../types/theme';
+import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, PagesThemeSettings, PageThemeKey, SectionKey, CommunityPhotoItem } from '../types/theme';
 import { productService } from '../services/productService';
-import { Product } from '../types';
+import { Product, YouTubeShortItem, YouTubeShortsDisplaySettings } from '../types';
+import {
+  DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS,
+  subscribeAllYouTubeShortsForAdmin,
+  subscribeYouTubeShortsDisplaySettings,
+  saveYouTubeShortsDisplaySettings,
+  updateYouTubeShortAdminFields,
+  syncYouTubeChannelShortsApi,
+} from '../services/youtubeShortsService';
+import { formatCompactNumber } from './AdminSocial';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { FooterLinkManager } from './themeEditor/FooterLinkManager';
 import { PagesThemeEditors } from './themeEditor/PagesThemeEditors';
@@ -12,7 +22,7 @@ import {
   Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
   Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
   Upload, RefreshCw, Star, Package, Search, CheckCircle, X, FileText, Award, BookOpen,
-  FileCheck, LogIn, AlertTriangle
+  FileCheck, LogIn, AlertTriangle, Youtube, Clock, Pin, PinOff, Play, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
@@ -74,7 +84,7 @@ const SECTION_LABELS: Record<SectionKey, { name: string; desc: string }> = {
   validatedFormulations: { name: 'Validated Formulations Grid', desc: 'Precision science product collection grid' },
   sharedJourney: { name: 'Shared Journey of Radiance (Community)', desc: '4-column community photo gallery' },
   reachReliability: { name: 'Reach & Reliability (Bridging Continents)', desc: 'Transit statistics and South Korea operations photos' },
-  communityLive: { name: 'Community Live (Facebook Reels)', desc: 'Social rhythm and video reels showcase' }
+  communityLive: { name: 'Community Live (YouTube Channel Shorts)', desc: 'Auto-synced YouTube Shorts carousel speed, visibility, and live video list' }
 };
 
 const COLOR_PRESETS = [
@@ -149,6 +159,16 @@ export const AdminThemeEditor: React.FC = () => {
   const [beProductSearch, setBeProductSearch] = useState('');
   const [beCategoryFilter, setBeCategoryFilter] = useState('All');
 
+  // Dynamic YouTube Shorts & Carousel state for Community Live section
+  const [ytShortsSettings, setYtShortsSettings] = useState<YouTubeShortsDisplaySettings>(
+    DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS
+  );
+  const [syncedYouTubeShorts, setSyncedYouTubeShorts] = useState<YouTubeShortItem[]>([]);
+  const [ytShortsFilter, setYtShortsFilter] = useState<'showing' | 'all' | 'hidden'>('showing');
+  const [ytSyncingNow, setYtSyncingNow] = useState(false);
+  const [ytUpdatingVideoId, setYtUpdatingVideoId] = useState<string | null>(null);
+  const [ytActionFeedback, setYtActionFeedback] = useState<string | null>(null);
+
   useEffect(() => {
     // Subscribe to theme service
     const unsubscribeHome = themeService.subscribe((data) => {
@@ -166,6 +186,12 @@ export const AdminThemeEditor: React.FC = () => {
     const unsubscribeProducts = productService.subscribe((prods) => {
       setAllProducts(prods);
     });
+    const unsubscribeYtSettings = subscribeYouTubeShortsDisplaySettings((settings) => {
+      setYtShortsSettings(settings);
+    });
+    const unsubscribeYtShorts = subscribeAllYouTubeShortsForAdmin((shortsList) => {
+      setSyncedYouTubeShorts(shortsList);
+    });
     setAllProducts(productService.getProducts());
     return () => {
       unsubscribeHome();
@@ -173,21 +199,91 @@ export const AdminThemeEditor: React.FC = () => {
       unsubscribeShop();
       unsubscribePages();
       unsubscribeProducts();
+      unsubscribeYtSettings();
+      unsubscribeYtShorts();
     };
   }, []);
 
-  // Home Save handler
+  const visibleYouTubeShortsAll = useMemo(
+    () => syncedYouTubeShorts.filter((s) => s.isVisible !== false && s.privacyStatus !== 'private'),
+    [syncedYouTubeShorts]
+  );
+
+  const showingOnHomepageShorts = useMemo(() => {
+    const maxCount = Math.max(1, Number(ytShortsSettings.maxDisplayCount || 12));
+    return visibleYouTubeShortsAll.slice(0, maxCount);
+  }, [visibleYouTubeShortsAll, ytShortsSettings.maxDisplayCount]);
+
+  const hiddenYouTubeShorts = useMemo(
+    () => syncedYouTubeShorts.filter((s) => s.isVisible === false || s.privacyStatus === 'private'),
+    [syncedYouTubeShorts]
+  );
+
+  const showingVideoIdSet = useMemo(
+    () => new Set(showingOnHomepageShorts.map((s) => s.videoId)),
+    [showingOnHomepageShorts]
+  );
+
+  const filteredThemeYtShorts = useMemo(() => {
+    if (ytShortsFilter === 'showing') return showingOnHomepageShorts;
+    if (ytShortsFilter === 'hidden') return hiddenYouTubeShorts;
+    return syncedYouTubeShorts;
+  }, [ytShortsFilter, showingOnHomepageShorts, hiddenYouTubeShorts, syncedYouTubeShorts]);
+
+  // Home Save handler (saves Home Theme + synced YouTube Community Live settings together)
   const handleSave = async () => {
     setIsSaving(true);
     setSaveSuccess(false);
     try {
-      await themeService.saveHomeTheme(theme);
+      const mirroredHomeTheme: HomeThemeSettings = {
+        ...theme,
+        communityLive: {
+          ...theme.communityLive,
+          enabled: ytShortsSettings.enabled,
+          subtitle: ytShortsSettings.subtitle,
+          title: ytShortsSettings.title,
+          viewAllLinkText: ytShortsSettings.viewAllLinkText,
+          viewAllLinkUrl: ytShortsSettings.viewAllLinkUrl,
+        },
+      };
+      await Promise.all([
+        themeService.saveHomeTheme(mirroredHomeTheme),
+        saveYouTubeShortsDisplaySettings(ytShortsSettings),
+      ]);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
       console.error('Failed to save home theme:', err);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleQuickSyncYouTubeShorts = async () => {
+    setYtSyncingNow(true);
+    setYtActionFeedback(null);
+    try {
+      const res = await syncYouTubeChannelShortsApi();
+      setYtActionFeedback(`Synced ${res.fetchedCount} Shorts from ${res.channelTitle || 'YouTube Channel'}.`);
+      setTimeout(() => setYtActionFeedback(null), 4000);
+    } catch (err: any) {
+      setYtActionFeedback(err?.message || 'Failed to sync YouTube Shorts.');
+    } finally {
+      setYtSyncingNow(false);
+    }
+  };
+
+  const handleToggleThemeShortField = async (
+    short: YouTubeShortItem,
+    patch: Partial<Pick<YouTubeShortItem, 'isVisible' | 'isPinned'>>
+  ) => {
+    setYtUpdatingVideoId(short.videoId);
+    try {
+      await updateYouTubeShortAdminFields(short.videoId, patch);
+    } catch (err: any) {
+      setYtActionFeedback(err?.message || 'Failed to update YouTube Short.');
+    } finally {
+      setYtUpdatingVideoId(null);
     }
   };
 
@@ -2791,7 +2887,7 @@ export const AdminThemeEditor: React.FC = () => {
               )}
             </div>
 
-            {/* 9. COMMUNITY LIVE (REELS) EDITOR */}
+            {/* 9. COMMUNITY LIVE (YOUTUBE CHANNEL SHORTS) EDITOR */}
             <div className="bg-white rounded-[24px] border border-pink-100 overflow-hidden shadow-sm">
               <div
                 onClick={() => setExpandedSection(expandedSection === 'communityLive' ? null : 'communityLive')}
@@ -2799,193 +2895,447 @@ export const AdminThemeEditor: React.FC = () => {
               >
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-xl bg-[#E91E8C] text-white flex items-center justify-center font-bold text-xs shadow-sm">
-                    9
+                    <Youtube size={16} />
                   </div>
                   <div>
-                    <h3 className="text-sm font-black text-gray-900">Community Live (Social Rhythm)</h3>
-                    <p className="text-[10px] text-gray-500 font-semibold">Facebook reels & social media video highlights</p>
+                    <h3 className="text-sm font-black text-gray-900">Community Live (YouTube Channel Shorts)</h3>
+                    <p className="text-[10px] text-gray-500 font-semibold">
+                      Carousel slide timing, live storefront Shorts inspector & section controls
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${theme.communityLive.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {theme.communityLive.enabled ? 'Visible' : 'Hidden'}
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-pink-50 text-[#E91E8C] tabular-nums">
+                    {showingOnHomepageShorts.length} Live · {Math.max(2, Math.round(Number(ytShortsSettings.carouselSlideIntervalSeconds || 6)))}s Slide
+                  </span>
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${ytShortsSettings.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {ytShortsSettings.enabled ? 'Visible' : 'Hidden'}
                   </span>
                   {expandedSection === 'communityLive' ? <ChevronUp size={18} className="text-[#E91E8C]" /> : <ChevronDown size={18} className="text-gray-400" />}
                 </div>
               </div>
 
               {expandedSection === 'communityLive' && (
-                <div className="p-6 space-y-4 bg-white text-xs">
-                  <div className="flex items-center gap-2 pb-3 border-b border-pink-50">
-                    <input
-                      type="checkbox"
-                      id="cl-enabled"
-                      checked={theme.communityLive.enabled}
-                      onChange={(e) => setTheme({ ...theme, communityLive: { ...theme.communityLive, enabled: e.target.checked } })}
-                      className="w-4 h-4 text-[#E91E8C] rounded border-gray-300 focus:ring-[#E91E8C]"
-                    />
-                    <label htmlFor="cl-enabled" className="font-extrabold text-gray-800 cursor-pointer">
-                      Enable Community Live Section
-                    </label>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-bold text-gray-700 mb-1">Subtitle</label>
+                <div className="p-6 space-y-5 bg-white text-xs">
+                  {/* Top Bar: Enable Toggle + Quick Save */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-pink-50">
+                    <div className="flex items-center gap-2">
                       <input
-                        type="text"
-                        value={theme.communityLive.subtitle}
-                        onChange={(e) => setTheme({ ...theme, communityLive: { ...theme.communityLive, subtitle: e.target.value } })}
-                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
+                        type="checkbox"
+                        id="cl-enabled"
+                        checked={ytShortsSettings.enabled}
+                        onChange={(e) => {
+                          const enabled = e.target.checked;
+                          setYtShortsSettings((prev) => ({ ...prev, enabled }));
+                          setTheme((prev) => ({ ...prev, communityLive: { ...prev.communityLive, enabled } }));
+                        }}
+                        className="w-4 h-4 text-[#E91E8C] rounded border-gray-300 focus:ring-[#E91E8C] cursor-pointer"
                       />
+                      <label htmlFor="cl-enabled" className="font-extrabold text-gray-800 cursor-pointer">
+                        Enable Community Live Section on Homepage
+                      </label>
                     </div>
 
-                    <div>
-                      <label className="block font-bold text-gray-700 mb-1">Headline</label>
-                      <input
-                        type="text"
-                        value={theme.communityLive.title}
-                        onChange={(e) => setTheme({ ...theme, communityLive: { ...theme.communityLive, title: e.target.value } })}
-                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-gray-700 mb-1">View All Link Text</label>
-                      <input
-                        type="text"
-                        value={theme.communityLive.viewAllLinkText || ''}
-                        onChange={(e) => setTheme({ ...theme, communityLive: { ...theme.communityLive, viewAllLinkText: e.target.value } })}
-                        placeholder="View All Moments"
-                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-gray-700 mb-1">View All Link URL (Facebook/Instagram Page)</label>
-                      <input
-                        type="text"
-                        value={theme.communityLive.viewAllLinkUrl || ''}
-                        onChange={(e) => setTheme({ ...theme, communityLive: { ...theme.communityLive, viewAllLinkUrl: e.target.value } })}
-                        placeholder="https://facebook.com/koreanskinfoodbd"
-                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Dynamic Reels Cards Header */}
-                  <div className="flex items-center justify-between pt-2 border-t border-pink-50">
-                    <div>
-                      <span className="font-extrabold text-gray-900 text-xs">Reels & Video Highlights ({theme.communityLive.reels.length})</span>
-                      <p className="text-[10px] text-gray-500">Upload video links (.mp4, Facebook Reel links, or Media assets). Frontend auto-plays muted!</p>
-                    </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        const newReel: ReelItem = {
-                          id: `reel-${Date.now()}`,
-                          title: `New Reel Highlight #${theme.communityLive.reels.length + 1}`,
-                          videoUrl: '',
-                          coverUrl: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&auto=format&fit=crop'
-                        };
-                        setTheme({
-                          ...theme,
-                          communityLive: {
-                            ...theme.communityLive,
-                            reels: [...theme.communityLive.reels, newReel]
-                          }
-                        });
-                      }}
-                      className="px-3 py-1.5 bg-[#E91E8C] text-white rounded-xl text-[10px] font-extrabold hover:bg-[#FF4B91] transition flex items-center gap-1 cursor-pointer"
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer disabled:opacity-50"
                     >
-                      <Plus size={13} />
-                      <span>Add Reel Video</span>
+                      {isSaving ? <Loader2 size={13} className="animate-spin" /> : saveSuccess ? <Check size={13} /> : <Save size={13} />}
+                      <span>{isSaving ? 'Saving...' : saveSuccess ? 'Saved!' : 'Save Section Settings'}</span>
                     </button>
                   </div>
 
-                  {/* Reels Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {theme.communityLive.reels.map((reel, idx) => (
-                      <div key={reel.id} className="p-3.5 bg-pink-50/15 rounded-2xl border border-pink-100 space-y-2.5 relative">
-                        <div className="flex items-center justify-between border-b border-pink-50 pb-1.5">
-                          <span className="font-extrabold text-slate-800 text-xs">Reel #{idx + 1}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newReels = theme.communityLive.reels.filter((_, i) => i !== idx);
-                              setTheme({ ...theme, communityLive: { ...theme.communityLive, reels: newReels } });
-                            }}
-                            className="text-gray-400 hover:text-red-500 transition p-1"
-                            title="Delete Reel"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                  {/* Section Titles & Channel Link */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Eyebrow Subtitle</label>
+                      <input
+                        type="text"
+                        value={ytShortsSettings.subtitle}
+                        onChange={(e) => {
+                          const subtitle = e.target.value;
+                          setYtShortsSettings((prev) => ({ ...prev, subtitle }));
+                          setTheme((prev) => ({ ...prev, communityLive: { ...prev.communityLive, subtitle } }));
+                        }}
+                        placeholder="SHORTS & SKINCARE IN ACTION"
+                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
+                      />
+                    </div>
 
-                        <div>
-                          <label className="block text-[10px] text-gray-700 font-extrabold mb-1">Social Link (সোশ্যাল লিঙ্ক - Facebook / Instagram / TikTok Post URL)</label>
-                          <input
-                            type="text"
-                            value={reel.postUrl || ''}
-                            onChange={(e) => {
-                              const newReels = [...theme.communityLive.reels];
-                              newReels[idx].postUrl = e.target.value;
-                              setTheme({ ...theme, communityLive: { ...theme.communityLive, reels: newReels } });
-                            }}
-                            placeholder="https://www.facebook.com/... or Instagram/TikTok post URL"
-                            className="w-full bg-white border border-pink-200 rounded-lg p-1.5 outline-none focus:border-[#E91E8C]"
-                          />
-                        </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Section Headline</label>
+                      <input
+                        type="text"
+                        value={ytShortsSettings.title}
+                        onChange={(e) => {
+                          const title = e.target.value;
+                          setYtShortsSettings((prev) => ({ ...prev, title }));
+                          setTheme((prev) => ({ ...prev, communityLive: { ...prev.communityLive, title } }));
+                        }}
+                        placeholder="Community Live — YouTube Shorts"
+                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
+                      />
+                    </div>
 
-                        <div>
-                          <label className="block text-[10px] text-gray-500 font-semibold mb-1">Video Link (.mp4, Cloudinary, or Facebook/YouTube Reel URL)</label>
-                          <div className="flex gap-1.5">
-                            <input
-                              type="text"
-                              value={reel.videoUrl}
-                              onChange={(e) => {
-                                const newReels = [...theme.communityLive.reels];
-                                newReels[idx].videoUrl = e.target.value;
-                                setTheme({ ...theme, communityLive: { ...theme.communityLive, reels: newReels } });
-                              }}
-                              placeholder="https://...mp4 or FB Reel URL"
-                              className="flex-1 bg-white border border-pink-100 rounded-lg p-1.5 outline-none focus:border-[#E91E8C]"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => openMediaPicker(`communityLive.reels.${idx}.videoUrl`)}
-                              className="px-2.5 py-1 bg-[#E91E8C] text-white rounded-lg text-[10px] font-bold hover:bg-[#FF4B91] transition cursor-pointer"
-                            >
-                              Media
-                            </button>
-                          </div>
-                        </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Channel Button Label</label>
+                      <input
+                        type="text"
+                        value={ytShortsSettings.viewAllLinkText || ''}
+                        onChange={(e) => {
+                          const viewAllLinkText = e.target.value;
+                          setYtShortsSettings((prev) => ({ ...prev, viewAllLinkText }));
+                          setTheme((prev) => ({ ...prev, communityLive: { ...prev.communityLive, viewAllLinkText } }));
+                        }}
+                        placeholder="View Channel"
+                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C]"
+                      />
+                    </div>
 
-                        <div>
-                          <label className="block text-[10px] text-gray-500 font-semibold mb-1">Cover Image / Poster URL</label>
-                          <div className="flex gap-1.5">
-                            <input
-                              type="text"
-                              value={reel.coverUrl}
-                              onChange={(e) => {
-                                const newReels = [...theme.communityLive.reels];
-                                newReels[idx].coverUrl = e.target.value;
-                                setTheme({ ...theme, communityLive: { ...theme.communityLive, reels: newReels } });
-                              }}
-                              placeholder="Poster thumbnail image URL"
-                              className="flex-1 bg-white border border-pink-100 rounded-lg p-1.5 outline-none focus:border-[#E91E8C]"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => openMediaPicker(`communityLive.reels.${idx}.coverUrl`)}
-                              className="px-2.5 py-1 bg-[#E91E8C] text-white rounded-lg text-[10px] font-bold hover:bg-[#FF4B91] transition cursor-pointer"
-                            >
-                              Media
-                            </button>
-                          </div>
-                        </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">YouTube Channel / Shorts URL</label>
+                      <input
+                        type="text"
+                        value={ytShortsSettings.viewAllLinkUrl || ''}
+                        onChange={(e) => {
+                          const viewAllLinkUrl = e.target.value;
+                          setYtShortsSettings((prev) => ({ ...prev, viewAllLinkUrl }));
+                          setTheme((prev) => ({ ...prev, communityLive: { ...prev.communityLive, viewAllLinkUrl } }));
+                        }}
+                        placeholder="https://www.youtube.com/@yourchannel/shorts"
+                        className="w-full bg-pink-50/10 border border-pink-100 rounded-xl p-2.5 outline-none focus:border-[#E91E8C] font-mono text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Dynamic Carousel Slide Timing & Count Controls */}
+                  <div className="p-4 rounded-2xl bg-pink-50/25 border border-pink-100 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Clock size={15} className="text-[#E91E8C]" />
+                        <span className="font-extrabold text-gray-900 text-xs">
+                          Carousel Slide Speed & Display Controls
+                        </span>
                       </div>
-                    ))}
+                      <label className="flex items-center gap-2 font-bold text-slate-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={ytShortsSettings.autoPlayCarousel !== false}
+                          onChange={(e) =>
+                            setYtShortsSettings((prev) => ({ ...prev, autoPlayCarousel: e.target.checked }))
+                          }
+                          className="w-4 h-4 accent-[#E91E8C] cursor-pointer"
+                        />
+                        <span>Auto-Slide Carousel</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                      <div className="space-y-2">
+                        <label className="block font-bold text-gray-700">
+                          Slide Interval (Seconds) — কতো সেকেন্ড পর স্লাইড হবে
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={2}
+                            max={120}
+                            step={1}
+                            value={ytShortsSettings.carouselSlideIntervalSeconds ?? 6}
+                            onChange={(e) => {
+                              const raw = Number(e.target.value);
+                              const clamped = Number.isFinite(raw) ? Math.max(2, Math.min(120, Math.round(raw))) : 6;
+                              setYtShortsSettings((prev) => ({
+                                ...prev,
+                                carouselSlideIntervalSeconds: clamped,
+                              }));
+                            }}
+                            className="w-28 bg-white border border-pink-200 rounded-xl px-3 py-2 font-extrabold text-slate-900 outline-none focus:border-[#E91E8C] tabular-nums"
+                          />
+                          <span className="font-bold text-slate-600">seconds</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {[3, 5, 6, 8, 10, 15, 20].map((sec) => {
+                            const active = Math.round(Number(ytShortsSettings.carouselSlideIntervalSeconds || 6)) === sec;
+                            return (
+                              <button
+                                key={sec}
+                                type="button"
+                                onClick={() =>
+                                  setYtShortsSettings((prev) => ({
+                                    ...prev,
+                                    carouselSlideIntervalSeconds: sec,
+                                  }))
+                                }
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer tabular-nums ${
+                                  active
+                                    ? 'bg-[#E91E8C] text-white shadow-xs'
+                                    : 'bg-white border border-pink-100 text-slate-700 hover:bg-pink-50'
+                                }`}
+                              >
+                                {sec}s
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          {ytShortsSettings.autoPlayCarousel !== false
+                            ? `Carousel advances automatically every ${Math.max(2, Math.round(Number(ytShortsSettings.carouselSlideIntervalSeconds || 6)))} seconds (pauses when visitor hovers).`
+                            : 'Auto-slide is paused; visitors use arrow buttons or swipe to advance.'}
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block font-bold text-gray-700">
+                          Max Shorts Shown in Carousel
+                        </label>
+                        <select
+                          value={ytShortsSettings.maxDisplayCount}
+                          onChange={(e) =>
+                            setYtShortsSettings((prev) => ({
+                              ...prev,
+                              maxDisplayCount: Number(e.target.value),
+                            }))
+                          }
+                          className="w-full bg-white border border-pink-200 rounded-xl p-2.5 font-bold text-slate-900 outline-none focus:border-[#E91E8C]"
+                        >
+                          <option value={3}>3 Shorts (Single Desktop Set)</option>
+                          <option value={6}>6 Shorts</option>
+                          <option value={9}>9 Shorts</option>
+                          <option value={12}>12 Shorts</option>
+                          <option value={24}>24 Shorts</option>
+                          <option value={50}>Up to 50 Shorts</option>
+                          <option value={200}>All Visible Shorts</option>
+                        </select>
+                        <p className="text-[11px] text-slate-500">
+                          Desktop shows 3 Shorts per slide; mobile shows 1 Short per slide.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Live Synced YouTube Videos Currently Shown on Storefront */}
+                  <div className="space-y-3 pt-2 border-t border-pink-100">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-gray-900 text-xs">
+                            Live YouTube Shorts Shown on Homepage ({showingOnHomepageShorts.length} active of {syncedYouTubeShorts.length} synced)
+                          </span>
+                          {ytShortsSettings.lastSyncedChannelTitle && (
+                            <span className="text-[11px] font-bold text-slate-500">
+                              · {ytShortsSettings.lastSyncedChannelTitle}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Videos below come directly from your synced YouTube Channel Shorts. Toggle visibility or pin priority live, or open Creators for product tagging.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleQuickSyncYouTubeShorts}
+                          disabled={ytSyncingNow}
+                          className="px-3 py-1.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] rounded-xl text-[11px] font-extrabold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw size={12} className={ytSyncingNow ? 'animate-spin' : ''} />
+                          <span>{ytSyncingNow ? 'Syncing...' : 'Sync YouTube Now'}</span>
+                        </button>
+                        <Link
+                          to="/admin/creators"
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-extrabold transition flex items-center gap-1.5"
+                        >
+                          <SlidersHorizontal size={12} />
+                          <span>Manage & Tag Products</span>
+                        </Link>
+                      </div>
+                    </div>
+
+                    {ytActionFeedback && (
+                      <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+                        {ytActionFeedback}
+                      </div>
+                    )}
+
+                    {/* Live / All / Hidden Filter Tabs */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setYtShortsFilter('showing')}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition cursor-pointer ${
+                          ytShortsFilter === 'showing'
+                            ? 'bg-[#E91E8C] text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Showing on Homepage ({showingOnHomepageShorts.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setYtShortsFilter('all')}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition cursor-pointer ${
+                          ytShortsFilter === 'all'
+                            ? 'bg-[#E91E8C] text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        All Synced ({syncedYouTubeShorts.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setYtShortsFilter('hidden')}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition cursor-pointer ${
+                          ytShortsFilter === 'hidden'
+                            ? 'bg-[#E91E8C] text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Hidden ({hiddenYouTubeShorts.length})
+                      </button>
+                    </div>
+
+                    {filteredThemeYtShorts.length === 0 ? (
+                      <div className="p-6 rounded-2xl border border-dashed border-pink-200 bg-pink-50/10 text-center space-y-2">
+                        <Youtube size={24} className="mx-auto text-slate-400" />
+                        <p className="text-xs font-bold text-slate-700">
+                          {syncedYouTubeShorts.length === 0
+                            ? 'No YouTube Channel Shorts synced yet.'
+                            : ytShortsFilter === 'hidden'
+                            ? 'No hidden Shorts right now.'
+                            : 'All synced Shorts are currently hidden.'}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Click &ldquo;Sync YouTube Now&rdquo; above or configure your channel inside Admin Creators → YouTube Shorts.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {filteredThemeYtShorts.map((short, idx) => {
+                          const isLiveOnHome = showingVideoIdSet.has(short.videoId);
+                          const isUpdating = ytUpdatingVideoId === short.videoId;
+                          const displayTitle = short.customTitle || short.title || 'YouTube Short';
+                          const taggedCount = short.taggedProductIds?.length || 0;
+
+                          return (
+                            <div
+                              key={short.videoId}
+                              className={`p-3 rounded-2xl border transition flex gap-3 items-start ${
+                                isLiveOnHome
+                                  ? 'bg-pink-50/15 border-pink-200'
+                                  : 'bg-slate-50/70 border-slate-200 opacity-85'
+                              }`}
+                            >
+                              {/* 9:16 Thumbnail Preview */}
+                              <a
+                                href={short.videoUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="relative w-16 aspect-[9/16] rounded-xl overflow-hidden bg-slate-900 shrink-0 group block"
+                                title="Open Short on YouTube"
+                              >
+                                <img
+                                  src={short.thumbnailUrl || `https://i.ytimg.com/vi/${short.videoId}/hqdefault.jpg`}
+                                  alt={displayTitle}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                />
+                                <span className="absolute inset-0 bg-black/25 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                                  <Play size={16} className="text-white fill-white" />
+                                </span>
+                                <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/75 text-white text-[9px] font-black tabular-nums">
+                                  #{idx + 1}
+                                </span>
+                              </a>
+
+                              {/* Details & Inline Actions */}
+                              <div className="flex-1 min-w-0 space-y-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span
+                                    className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                      isLiveOnHome
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : short.isVisible === false
+                                        ? 'bg-slate-200 text-slate-700'
+                                        : 'bg-amber-100 text-amber-800'
+                                    }`}
+                                  >
+                                    {isLiveOnHome
+                                      ? idx < 3
+                                        ? 'Live · Slide #1'
+                                        : 'Live in Carousel'
+                                      : short.isVisible === false
+                                      ? 'Hidden'
+                                      : 'Over Max Limit'}
+                                  </span>
+                                  {short.isPinned && (
+                                    <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-pink-100 text-[#E91E8C]">
+                                      Pinned
+                                    </span>
+                                  )}
+                                </div>
+
+                                <p className="text-[11px] font-extrabold text-slate-900 line-clamp-2 leading-snug">
+                                  {displayTitle}
+                                </p>
+
+                                <p className="text-[10px] font-semibold text-slate-500 tabular-nums">
+                                  {formatCompactNumber(short.viewsCount)} views · {formatCompactNumber(short.likesCount)} likes
+                                  {taggedCount > 0 ? ` · ${taggedCount} tagged` : ''}
+                                </p>
+
+                                <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                                  <button
+                                    type="button"
+                                    disabled={isUpdating}
+                                    onClick={() =>
+                                      handleToggleThemeShortField(short, { isVisible: !short.isVisible })
+                                    }
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                                      short.isVisible !== false
+                                        ? 'bg-white border border-pink-200 text-slate-700 hover:bg-pink-50'
+                                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                    }`}
+                                  >
+                                    {short.isVisible !== false ? <EyeOff size={11} /> : <Eye size={11} />}
+                                    <span>{short.isVisible !== false ? 'Hide' : 'Show'}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={isUpdating}
+                                    onClick={() =>
+                                      handleToggleThemeShortField(short, { isPinned: !short.isPinned })
+                                    }
+                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                                      short.isPinned
+                                        ? 'bg-[#E91E8C] text-white'
+                                        : 'bg-white border border-pink-200 text-slate-700 hover:bg-pink-50'
+                                    }`}
+                                  >
+                                    {short.isPinned ? <PinOff size={11} /> : <Pin size={11} />}
+                                    <span>{short.isPinned ? 'Unpin' : 'Pin'}</span>
+                                  </button>
+
+                                  <a
+                                    href={short.videoUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-[#E91E8C] text-[10px] font-bold flex items-center gap-1"
+                                  >
+                                    <ExternalLink size={10} />
+                                    <span>Watch</span>
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -10,6 +10,55 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, getDocs, runTransaction, query, where, deleteDoc, orderBy } from "firebase/firestore";
 import { initializeSlackSDK, slackService } from "./src/services/slackService";
 import { normalizeFacebookUrl, areFacebookUrlsEqual, extractFacebookPostId } from "./src/utils/facebookUrl";
+import {
+  DEFAULT_SITE_URL,
+  resolveRequestOrigin,
+  resolveSiteBaseUrl,
+  normalizeConfiguredDomainUrl,
+  isLocalHostHeader,
+  isAllowedCorsOrigin,
+} from "./server/config/env";
+import {
+  getIdTokenFromRequest,
+  getFirestoreRestConfig,
+  parseFirestoreValue,
+  parseFirestoreDoc,
+  encodeFirestoreValue,
+  encodeFirestoreFields,
+  getFirestoreDocWithToken,
+  getFirestoreCollectionWithToken,
+  setFirestoreDocWithToken,
+  deleteFirestoreDocWithToken,
+  queryFirestoreCollectionWithToken,
+} from "./server/config/firebase";
+import {
+  verifyFirebaseIdToken,
+  verifyAdminAuth,
+  verifyFinanceAuth,
+  verifyUserOrStaffAuth,
+  verifyStaffOrWholesaleAuth,
+} from "./server/middleware/auth";
+import {
+  aiRateLimiter,
+  checkoutRateLimiter,
+  generalApiRateLimiter,
+  publicFormRateLimiter,
+} from "./server/middleware/rateLimiter";
+import { securityHeadersMiddleware } from "./server/middleware/securityHeaders";
+import { writeAuditLog } from "./server/utils/auditLog";
+import { logger } from "./server/utils/logger";
+import { stripUndefinedFields } from "./server/utils/validators";
+import authRoutes from "./server/modules/auth/routes";
+import ordersCheckoutRoutes from "./server/modules/orders-checkout/routes";
+import customersRoutes from "./server/modules/customers/routes";
+import mediaRoutes, { uploadsDir } from "./server/modules/media/routes";
+import steadfastCourierRoutes from "./server/modules/steadfast-courier/routes";
+import catalogSeoRoutes, {
+  buildBotSsrMetadata,
+  injectMetaIntoHtml,
+  isSearchEngineBot,
+} from "./server/modules/catalog-seo/routes";
+import { createYouTubeShortsRouter } from "./server/modules/youtube/routes";
 
 dotenv.config();
 
@@ -17,223 +66,28 @@ const app = express();
 const PORT = 3000;
 app.set("trust proxy", true);
 
-const rawSiteUrl = (process.env.SITE_URL || process.env.APP_URL || "https://koreanskinfood.com").trim().replace(/\/+$/, "");
-const DEFAULT_SITE_URL = /^https?:\/\//i.test(rawSiteUrl) ? rawSiteUrl : `https://${rawSiteUrl}`;
-const LEGACY_SITE_HOSTS = new Set(["koreanskinfood.web.app", "koreanskinfood.firebaseapp.com"]);
-
-function isLocalHostHeader(host: string): boolean {
-  const cleanHost = host.split(":")[0].toLowerCase();
-  return cleanHost === "localhost" || cleanHost === "127.0.0.1" || cleanHost === "0.0.0.0" || cleanHost === "::1" || cleanHost === "[::1]";
-}
-
-function resolveRequestOrigin(req?: express.Request): string | null {
-  if (!req) return null;
-  const rawForwardedHost = req.headers["x-forwarded-host"];
-  const hostHeader = (Array.isArray(rawForwardedHost) ? rawForwardedHost[0] : rawForwardedHost) || req.headers.host || "";
-  const host = String(hostHeader).split(",")[0].trim();
-  if (!host) return null;
-
-  const rawProto = req.headers["x-forwarded-proto"];
-  const protoHeader = (Array.isArray(rawProto) ? rawProto[0] : rawProto) || req.protocol || "";
-  let proto = String(protoHeader).split(",")[0].trim().toLowerCase();
-  if (!proto) {
-    proto = isLocalHostHeader(host) ? "http" : "https";
-  } else if (!isLocalHostHeader(host) && proto === "http" && !req.headers["x-forwarded-proto"]) {
-    proto = "https";
-  }
-  return `${proto}://${host}`.replace(/\/+$/, "");
-}
-
-function resolveSiteBaseUrl(req?: express.Request): string {
-  const envConfigured = (process.env.SITE_URL || process.env.APP_URL || "").trim().replace(/\/+$/, "");
-  const reqOrigin = resolveRequestOrigin(req);
-  if (reqOrigin) {
-    try {
-      const hostname = new URL(reqOrigin).hostname;
-      if (!isLocalHostHeader(hostname)) {
-        return reqOrigin;
-      }
-    } catch {}
-  }
-  return envConfigured || DEFAULT_SITE_URL;
-}
-
-function normalizeConfiguredDomainUrl(configuredUrl: any, req?: express.Request): string {
-  const trimmed = typeof configuredUrl === "string" ? configuredUrl.trim() : "";
-  if (!trimmed) return resolveSiteBaseUrl(req);
-  try {
-    const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
-    if (LEGACY_SITE_HOSTS.has(parsed.hostname.toLowerCase())) {
-      return resolveSiteBaseUrl(req);
-    }
-    return parsed.origin.replace(/\/+$/, "");
-  } catch {
-    return resolveSiteBaseUrl(req);
-  }
-}
-
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-
-// ==========================================
-// SECURITY HEADERS & DEFENSIVE MIDDLEWARE
-// ==========================================
-app.use((req, res, next) => {
-  // Prevent MIME type sniffing
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  // Modern standard: disable browser XSS auditor
-  res.setHeader("X-XSS-Protection", "0");
-  // Strict Referrer Policy
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  // Prevent automatic file download executions
-  res.setHeader("X-Download-Options", "noopen");
-  // Enforce HTTPS
-  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-
-  // Prevent browser caching on sensitive API endpoints
-  if (req.path.startsWith("/api/")) {
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-  }
-  next();
-});
-
-// ==========================================
-// UPLOADS & MEDIA ASSETS SERVING & ENDPOINTS
-// ==========================================
-const uploadsDir = path.join(process.cwd(), "public", "uploads");
-const invoicesDir = path.join(uploadsDir, "invoices");
-try {
-  if (!fs.existsSync(invoicesDir)) {
-    fs.mkdirSync(invoicesDir, { recursive: true });
-  }
-} catch (e) {
-  console.warn("Could not create invoices upload directory:", e);
-}
+app.use(securityHeadersMiddleware);
 app.use("/uploads", express.static(uploadsDir));
-
-app.post("/api/upload/invoice", async (req, res) => {
-  try {
-    const { dataUrl, fileName } = req.body;
-    if (!dataUrl || typeof dataUrl !== 'string') {
-      return res.status(400).json({ success: false, error: "Missing dataUrl string" });
-    }
-
-    // Match data URI format: data:image/[png/jpeg/webp...];base64,...
-    const matches = dataUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
-    if (!matches) {
-      return res.status(400).json({ success: false, error: "Invalid base64 image data URL format" });
-    }
-
-    let ext = matches[1].toLowerCase();
-    if (ext === 'jpeg') ext = 'jpg';
-    if (!['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
-      ext = 'jpg';
-    }
-    const base64Data = matches[2];
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    if (buffer.length > 15 * 1024 * 1024) {
-      return res.status(413).json({ success: false, error: "Image file exceeds 15MB limit" });
-    }
-
-    if (!fs.existsSync(invoicesDir)) {
-      fs.mkdirSync(invoicesDir, { recursive: true });
-    }
-
-    const safeName = `invoice-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-    const filePath = path.join(invoicesDir, safeName);
-    await fs.promises.writeFile(filePath, buffer);
-
-    const publicUrl = `/uploads/invoices/${safeName}`;
-    return res.json({
-      success: true,
-      url: publicUrl,
-      sizeBytes: buffer.length
-    });
-  } catch (err: any) {
-    console.error("Error saving invoice upload:", err);
-    return res.status(500).json({ success: false, error: err.message || "Failed to save invoice image" });
-  }
-});
-
-// ==========================================
-// RATE LIMITING PROTECTION (ANTI-DOS & ANTI-DENIAL-OF-WALLET)
-// ==========================================
-interface RateLimitRecord {
-  count: number;
-  resetAt: number;
-}
-const rateLimitStore = new Map<string, RateLimitRecord>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, record] of rateLimitStore.entries()) {
-    if (now > record.resetAt) {
-      rateLimitStore.delete(key);
-    }
-  }
-}, 5 * 60 * 1000);
-
-function createRateLimiter(options: {
-  windowMs: number;
-  max: number;
-  message: string;
-  prefix?: string;
-}) {
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-                  req.socket.remoteAddress ||
-                  "unknown-client";
-    const key = `${options.prefix || "rl"}:${rawIp}`;
-    const now = Date.now();
-
-    const record = rateLimitStore.get(key);
-    if (!record || now > record.resetAt) {
-      rateLimitStore.set(key, { count: 1, resetAt: now + options.windowMs });
-      return next();
-    }
-
-    if (record.count >= options.max) {
-      const retryAfterSec = Math.ceil((record.resetAt - now) / 1000);
-      res.setHeader("Retry-After", String(retryAfterSec));
-      return res.status(429).json({
-        success: false,
-        error: options.message,
-        retryAfter: retryAfterSec
-      });
-    }
-
-    record.count++;
-    return next();
-  };
-}
-
-const aiRateLimiter = createRateLimiter({
-  windowMs: 60 * 1000,
-  max: 30, // max 30 AI requests per minute per IP
-  message: "Too many AI requests. Please slow down.",
-  prefix: "ai"
-});
-
-const checkoutRateLimiter = createRateLimiter({
-  windowMs: 60 * 1000,
-  max: 15, // max 15 checkout submissions per minute per IP
-  message: "Checkout rate limit exceeded. Please wait a moment.",
-  prefix: "checkout"
-});
-
-const generalApiRateLimiter = createRateLimiter({
-  windowMs: 60 * 1000,
-  max: 150, // max 150 API requests per minute per IP
-  message: "Too many API requests. Please try again shortly.",
-  prefix: "general"
-});
 
 app.use("/api", generalApiRateLimiter);
 app.use("/api/gemini", aiRateLimiter);
 app.use("/api/chatbot", aiRateLimiter);
+
+// Modular Domain Routers
+app.use(authRoutes);
+app.use(ordersCheckoutRoutes);
+app.use(customersRoutes);
+app.use(mediaRoutes);
+app.use(steadfastCourierRoutes);
+app.use(catalogSeoRoutes);
+app.use(
+  createYouTubeShortsRouter({
+    invalidateYouTubeHealthCache: () => invalidateYouTubeHealthCache(),
+    getUnifiedGoogleApiKey: () => getUnifiedGoogleApiKey(),
+  })
+);
 
 // Initialize Slack Bolt SDK Foundation
 initializeSlackSDK();
@@ -544,9 +398,13 @@ function sanitizeGoogleBusinessProfileDoc(raw: any) {
   const realReviews = rawReviews.filter(isRealSyncedGmbReview);
   const hadLegacyDummy = rawReviews.length !== realReviews.length;
 
+  const hasValidPlacesSync =
+    raw.connectionMethod === 'google_places_api' &&
+    (realReviews.length > 0 || (typeof raw.placeId === 'string' && raw.placeId.startsWith('ChIJ')));
+
   const isConnected =
     raw.connectionMethod === 'google_business_oauth' ||
-    raw.connectionMethod === 'google_places_api' ||
+    hasValidPlacesSync ||
     realReviews.length > 0;
 
   if (!isConnected) {
@@ -654,12 +512,467 @@ app.get("/api/google-business/reviews", async (req, res) => {
   }
 });
 
+// ==========================================
+// GOOGLE BUSINESS OAUTH SESSION CACHE & OPTIONAL REFRESH STORE
+// ==========================================
+interface GmbSessionTokenEntry {
+  accessToken: string;
+  email?: string;
+  expiresAt: number;
+}
+const gmbSessionTokens = new Map<string, GmbSessionTokenEntry>();
+const gmbOAuthStates = new Map<string, { redirectUri: string; adminUid: string; expiresAt: number }>();
+const GMB_CONFIG_FILE = path.resolve(process.cwd(), ".gmb-integration.json");
+
+function getGmbOAuthClientConfig() {
+  const clientId = (
+    process.env.GOOGLE_BUSINESS_CLIENT_ID ||
+    process.env.GOOGLE_OAUTH_CLIENT_ID ||
+    ""
+  ).trim();
+  const clientSecret = (
+    process.env.GOOGLE_BUSINESS_CLIENT_SECRET ||
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    ""
+  ).trim();
+  return { clientId, clientSecret, isConfigured: Boolean(clientId && clientSecret) };
+}
+
+function readGmbServerConfig(): { refreshToken?: string; email?: string } {
+  const envToken = (process.env.GOOGLE_BUSINESS_REFRESH_TOKEN || "").trim();
+  try {
+    if (fs.existsSync(GMB_CONFIG_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(GMB_CONFIG_FILE, "utf-8"));
+      if (parsed && !parsed.disconnected) {
+        return {
+          refreshToken: (parsed.refreshToken || envToken || "").trim() || undefined,
+          email: parsed.email || undefined,
+        };
+      }
+      if (parsed?.disconnected) return {};
+    }
+  } catch {
+    // ignore
+  }
+  return envToken ? { refreshToken: envToken } : {};
+}
+
+function writeGmbServerConfig(cfg: { refreshToken?: string; email?: string; disconnected?: boolean } | null) {
+  try {
+    if (!cfg) {
+      if (fs.existsSync(GMB_CONFIG_FILE)) fs.unlinkSync(GMB_CONFIG_FILE);
+      return;
+    }
+    fs.writeFileSync(GMB_CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("[GoogleBusiness] Could not persist .gmb-integration.json:", err);
+  }
+}
+
+function cacheGmbAccessToken(uid: string, accessToken: string, email?: string) {
+  if (!uid || !accessToken) return;
+  gmbSessionTokens.set(uid, {
+    accessToken,
+    email: email || gmbSessionTokens.get(uid)?.email,
+    expiresAt: Date.now() + 50 * 60 * 1000, // 50 minutes
+  });
+}
+
+function clearGmbAccessToken(uid?: string) {
+  if (uid) {
+    gmbSessionTokens.delete(uid);
+  } else {
+    gmbSessionTokens.clear();
+  }
+}
+
+async function refreshGmbServerAccessToken(): Promise<string | null> {
+  const { clientId, clientSecret, isConfigured } = getGmbOAuthClientConfig();
+  if (!isConfigured) return null;
+  const cfg = readGmbServerConfig();
+  if (!cfg.refreshToken) return null;
+
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: cfg.refreshToken,
+        grant_type: "refresh_token",
+      }).toString(),
+    });
+    const tokenData: any = await tokenRes.json().catch(() => ({}));
+    if (tokenRes.ok && tokenData.access_token) {
+      return String(tokenData.access_token).trim();
+    }
+  } catch (err) {
+    console.warn("[GoogleBusiness OAuth] Server refresh token failed:", err);
+  }
+  return null;
+}
+
+async function resolveGmbAccessToken(req: express.Request): Promise<string | null> {
+  const headerRaw = req.headers["x-google-access-token"];
+  const headerToken = (Array.isArray(headerRaw) ? headerRaw[0] : headerRaw || "").trim();
+  const bodyToken = (
+    typeof req.body?.googleAccessToken === "string"
+      ? req.body.googleAccessToken
+      : typeof req.body?.accessToken === "string"
+        ? req.body.accessToken
+        : ""
+  ).trim();
+  const queryToken = (
+    typeof req.query?.googleAccessToken === "string" ? req.query.googleAccessToken : ""
+  ).trim();
+
+  const uid = (req as any).user?.uid || "admin";
+  const directToken = headerToken || bodyToken || queryToken;
+  if (directToken) {
+    cacheGmbAccessToken(
+      uid,
+      directToken,
+      typeof req.body?.email === "string"
+        ? req.body.email
+        : typeof req.body?.connectedEmail === "string"
+          ? req.body.connectedEmail
+          : undefined
+    );
+    return directToken;
+  }
+
+  const cached = gmbSessionTokens.get(uid);
+  if (cached && cached.expiresAt > Date.now() && cached.accessToken) {
+    return cached.accessToken;
+  }
+
+  const refreshed = await refreshGmbServerAccessToken();
+  if (refreshed) {
+    cacheGmbAccessToken(uid, refreshed, readGmbServerConfig().email);
+    return refreshed;
+  }
+
+  return null;
+}
+
+async function fetchAndPersistGmbReviewsForLocation(params: {
+  googleToken: string;
+  location: any;
+  connectedEmail?: string;
+  idToken?: string;
+  userEmail?: string;
+}) {
+  const { googleToken, location, connectedEmail, idToken, userEmail } = params;
+  const cleanAccount = String(location.accountName).replace(/^\/+/, "");
+  const cleanLocation = String(location.locationName).replace(/^\/+/, "");
+  const parentPath = cleanLocation.startsWith("accounts/")
+    ? cleanLocation
+    : `${cleanAccount}/${cleanLocation}`;
+
+  const allReviews: any[] = [];
+  let pageToken: string | undefined;
+  let averageRating = 0;
+  let totalReviewCount = 0;
+
+  for (let page = 0; page < 10; page++) {
+    const qs = new URLSearchParams({ pageSize: "50" });
+    if (pageToken) qs.set("pageToken", pageToken);
+    const reviewsUrl = `https://mybusiness.googleapis.com/v4/${parentPath}/reviews?${qs.toString()}`;
+    const revRes = await fetch(reviewsUrl, {
+      headers: { Authorization: `Bearer ${googleToken}` }
+    });
+    const revJson: any = await revRes.json().catch(() => ({}));
+
+    if (!revRes.ok) {
+      const apiMsg = revJson?.error?.message || `Google Reviews API returned HTTP ${revRes.status}`;
+      const error: any = new Error(apiMsg);
+      error.statusCode = revRes.status;
+      throw error;
+    }
+
+    if (typeof revJson.averageRating === "number") {
+      averageRating = revJson.averageRating;
+    }
+    if (typeof revJson.totalReviewCount === "number") {
+      totalReviewCount = revJson.totalReviewCount;
+    }
+
+    const items = Array.isArray(revJson.reviews) ? revJson.reviews : [];
+    for (const item of items) {
+      const rating = mapGmbStarRating(item.starRating);
+      const publishTime = item.createTime || item.updateTime || new Date().toISOString();
+      allReviews.push({
+        id: item.reviewId || item.name || `gmb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        reviewName: item.name || "",
+        source: "google_business_api",
+        authorName: item.reviewer?.displayName || "Google Customer",
+        authorPhotoUrl: item.reviewer?.profilePhotoUrl || "",
+        rating,
+        relativeTimeDescription: formatRelativeTime(publishTime),
+        publishTime,
+        updateTime: item.updateTime || publishTime,
+        isVerifiedCustomer: true,
+        isLocalGuide: false,
+        text: item.comment || "",
+        reply: item.reviewReply?.comment
+          ? {
+              text: item.reviewReply.comment,
+              replyDate: formatRelativeTime(item.reviewReply.updateTime)
+            }
+          : undefined
+      });
+    }
+
+    if (!revJson.nextPageToken) break;
+    pageToken = revJson.nextPageToken;
+  }
+
+  const breakdown = computeRatingBreakdown(allReviews);
+  const computedAvg =
+    averageRating > 0
+      ? Number(averageRating.toFixed(1))
+      : allReviews.length > 0
+        ? Number((allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length).toFixed(1))
+        : 0;
+
+  const profileDoc = {
+    businessName: location.title || "Korean Skin Food BD",
+    googleMapsUrl: location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
+    writeReviewUrl: location.newReviewUri || location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.writeReviewUrl,
+    shareUrl: location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
+    placeId: location.placeId || "",
+    address: location.address || EMPTY_GOOGLE_BUSINESS_DATA.address,
+    phoneNumber: location.phoneNumber || EMPTY_GOOGLE_BUSINESS_DATA.phoneNumber,
+    overallRating: computedAvg,
+    totalReviewsCount: totalReviewCount || allReviews.length,
+    ratingBreakdown: breakdown,
+    reviews: allReviews,
+    lastSyncedAt: new Date().toISOString(),
+    status: "verified",
+    connectionMethod: "google_business_oauth",
+    connectedAccountName: cleanAccount,
+    connectedLocationName: cleanLocation,
+    connectedEmail: connectedEmail || userEmail || "",
+    groundingSource: "Google Business Profile API (Live OAuth Sync)"
+  };
+
+  await setFirestoreDocWithToken("settings", "google_business_profile", profileDoc, idToken, false);
+  return profileDoc;
+}
+
+function resolveGmbOAuthBaseOrigin(req: express.Request): string {
+  const reqOrigin = typeof req.query.origin === "string" ? req.query.origin.trim() : "";
+  if (reqOrigin) {
+    try {
+      const parsed = new URL(reqOrigin);
+      const isHttps = parsed.protocol === "https:";
+      const isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      if ((isHttps || isLocal) && isAllowedCorsOrigin(parsed.origin)) {
+        return parsed.origin.replace(/\/+$/, "");
+      }
+    } catch {
+      // ignore invalid origin param
+    }
+  }
+  const headerOrigin = resolveRequestOrigin(req);
+  if (headerOrigin && !isLocalHostHeader(new URL(headerOrigin).hostname)) {
+    return headerOrigin.replace(/\/+$/, "");
+  }
+  return DEFAULT_SITE_URL;
+}
+
+// Check current Google Business OAuth session status
+app.get("/api/google-business/oauth/status", verifyAdminAuth, async (req, res) => {
+  const uid = (req as any).user?.uid || "admin";
+  const cached = gmbSessionTokens.get(uid);
+  let hasActiveSession = Boolean(cached && cached.expiresAt > Date.now() && cached.accessToken);
+  let connectedEmail = cached?.email || readGmbServerConfig().email || null;
+
+  if (!hasActiveSession) {
+    const refreshed = await refreshGmbServerAccessToken();
+    if (refreshed) {
+      cacheGmbAccessToken(uid, refreshed, connectedEmail || undefined);
+      hasActiveSession = true;
+    }
+  }
+
+  const { isConfigured } = getGmbOAuthClientConfig();
+  const baseOrigin = resolveGmbOAuthBaseOrigin(req);
+  return res.json({
+    success: true,
+    hasActiveSession,
+    connectedEmail,
+    hasServerOAuthCredentials: isConfigured,
+    redirectUri: `${baseOrigin}/api/google-business/oauth/callback`,
+  });
+});
+
+// Store a freshly obtained Google Business OAuth token in server-side admin session cache
+app.post("/api/google-business/oauth/session", verifyAdminAuth, async (req, res) => {
+  const googleToken = await resolveGmbAccessToken(req);
+  if (!googleToken) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing Google Business OAuth access token."
+    });
+  }
+  const uid = (req as any).user?.uid || "admin";
+  const email = typeof req.body?.email === "string" ? req.body.email.trim() : undefined;
+  cacheGmbAccessToken(uid, googleToken, email);
+  return res.json({
+    success: true,
+    hasActiveSession: true,
+    email: email || gmbSessionTokens.get(uid)?.email || null
+  });
+});
+
+// Optional server-side Google Business OAuth2 authorization URL (when GOOGLE_BUSINESS_CLIENT_ID & SECRET are configured)
+app.get("/api/google-business/oauth/auth-url", verifyAdminAuth, (req, res) => {
+  const { clientId, isConfigured } = getGmbOAuthClientConfig();
+  if (!isConfigured) {
+    return res.status(400).json({
+      success: false,
+      error: "Server-side Google Business OAuth client credentials are not configured."
+    });
+  }
+
+  const baseOrigin = resolveGmbOAuthBaseOrigin(req);
+  const redirectUri = `${baseOrigin}/api/google-business/oauth/callback`;
+  const state = crypto.randomBytes(24).toString("hex");
+  gmbOAuthStates.set(state, {
+    redirectUri,
+    adminUid: (req as any).user?.uid || "admin",
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  });
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "https://www.googleapis.com/auth/business.manage email profile",
+    access_type: "offline",
+    prompt: "consent select_account",
+    include_granted_scopes: "true",
+    state,
+  });
+
+  return res.json({
+    success: true,
+    url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
+    redirectUri,
+  });
+});
+
+// OAuth callback handler for server-side Google Business OAuth2 flow
+app.get(["/api/google-business/oauth/callback", "/api/google-business/oauth/callback/"], async (req, res) => {
+  const { code, state, error: oauthError } = req.query as Record<string, string>;
+  if (oauthError) {
+    return res.status(400).send(`
+      <html><body style="font-family:sans-serif;padding:24px;">
+        <h3>Google Business Authorization Failed</h3>
+        <p>${String(oauthError).replace(/[<>&]/g, "")}</p>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'GMB_OAUTH_ERROR', error: ${JSON.stringify(oauthError)} }, '*');
+            setTimeout(() => window.close(), 1200);
+          }
+        </script>
+      </body></html>
+    `);
+  }
+
+  const stateEntry = state ? gmbOAuthStates.get(state) : null;
+  if (!code || !stateEntry || Date.now() > stateEntry.expiresAt) {
+    return res.status(400).send(`
+      <html><body style="font-family:sans-serif;padding:24px;">
+        <h3>Invalid or expired OAuth state</h3>
+        <p>Please close this window and try connecting again.</p>
+      </body></html>
+    `);
+  }
+  gmbOAuthStates.delete(state);
+
+  const { clientId, clientSecret } = getGmbOAuthClientConfig();
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: stateEntry.redirectUri,
+        grant_type: "authorization_code",
+      }).toString(),
+    });
+    const tokenData: any = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || tokenData.error || "Failed to exchange Google OAuth code");
+    }
+
+    let email = "";
+    try {
+      const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const userJson: any = await userRes.json().catch(() => ({}));
+      email = userJson?.email || "";
+    } catch {
+      // ignore
+    }
+
+    cacheGmbAccessToken(stateEntry.adminUid, tokenData.access_token, email || undefined);
+    if (tokenData.refresh_token) {
+      writeGmbServerConfig({ refreshToken: tokenData.refresh_token, email: email || undefined, disconnected: false });
+    }
+
+    return res.send(`
+      <html>
+        <body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;color:#fff;">
+          <div style="text-align:center;max-width:420px;padding:24px;">
+            <h2 style="margin-bottom:8px;">Google Business Connected!</h2>
+            <p style="color:#cbd5e1;font-size:14px;">${email ? `Connected as <strong>${email.replace(/[<>&]/g, "")}</strong>` : "Authorization complete"}</p>
+            <p style="color:#94a3b8;font-size:12px;">Closing this window automatically...</p>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'GMB_OAUTH_SUCCESS',
+                accessToken: ${JSON.stringify(tokenData.access_token)},
+                email: ${JSON.stringify(email)}
+              }, '*');
+              setTimeout(() => window.close(), 500);
+            } else {
+              window.location.href = '/admin/testimonials';
+            }
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (err: any) {
+    return res.status(500).send(`
+      <html><body style="font-family:sans-serif;padding:24px;">
+        <h3>Google Business Connection Error</h3>
+        <p>${String(err?.message || "Unknown error").replace(/[<>&]/g, "")}</p>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'GMB_OAUTH_ERROR', error: ${JSON.stringify(err?.message || "Connection failed")} }, '*');
+          }
+        </script>
+      </body></html>
+    `);
+  }
+});
+
 // List connected user's Google Business Profile accounts & locations via OAuth access token
 app.post("/api/google-business/oauth/locations", verifyAdminAuth, async (req, res) => {
-  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  const uid = (req as any).user?.uid || "admin";
+  const googleToken = await resolveGmbAccessToken(req);
   if (!googleToken) {
     return res.status(401).json({
       success: false,
+      code: "GMB_TOKEN_MISSING",
       error: "Missing Google Business OAuth access token. Please connect your Google Business account."
     });
   }
@@ -671,6 +984,9 @@ app.post("/api/google-business/oauth/locations", verifyAdminAuth, async (req, re
     const accountsJson: any = await accountsRes.json().catch(() => ({}));
 
     if (!accountsRes.ok) {
+      if (accountsRes.status === 401) {
+        clearGmbAccessToken(uid);
+      }
       const apiMsg = accountsJson?.error?.message || `Google API returned HTTP ${accountsRes.status}`;
       const isApiDisabledOrQuota =
         accountsRes.status === 403 ||
@@ -724,6 +1040,7 @@ app.post("/api/google-business/oauth/locations", verifyAdminAuth, async (req, re
 
     return res.json({
       success: true,
+      email: gmbSessionTokens.get(uid)?.email || undefined,
       locations,
       message: locations.length > 0
         ? `Found ${locations.length} Google Business Profile location(s).`
@@ -740,12 +1057,14 @@ app.post("/api/google-business/oauth/locations", verifyAdminAuth, async (req, re
 
 // Fetch ALL genuine reviews for a selected GMB location and save to Firestore
 app.post("/api/google-business/oauth/sync-reviews", verifyAdminAuth, async (req, res) => {
-  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  const uid = (req as any).user?.uid || "admin";
+  const googleToken = await resolveGmbAccessToken(req);
   const { location, connectedEmail } = req.body || {};
 
   if (!googleToken) {
     return res.status(401).json({
       success: false,
+      code: "GMB_TOKEN_MISSING",
       error: "Google Business OAuth session expired. Please reconnect your Google Business account."
     });
   }
@@ -757,111 +1076,30 @@ app.post("/api/google-business/oauth/sync-reviews", verifyAdminAuth, async (req,
   }
 
   try {
-    const cleanAccount = String(location.accountName).replace(/^\/+/, "");
-    const cleanLocation = String(location.locationName).replace(/^\/+/, "");
-    const parentPath = cleanLocation.startsWith("accounts/")
-      ? cleanLocation
-      : `${cleanAccount}/${cleanLocation}`;
-
-    const allReviews: any[] = [];
-    let pageToken: string | undefined;
-    let averageRating = 0;
-    let totalReviewCount = 0;
-
-    for (let page = 0; page < 10; page++) {
-      const qs = new URLSearchParams({ pageSize: "50" });
-      if (pageToken) qs.set("pageToken", pageToken);
-      const reviewsUrl = `https://mybusiness.googleapis.com/v4/${parentPath}/reviews?${qs.toString()}`;
-      const revRes = await fetch(reviewsUrl, {
-        headers: { Authorization: `Bearer ${googleToken}` }
-      });
-      const revJson: any = await revRes.json().catch(() => ({}));
-
-      if (!revRes.ok) {
-        const apiMsg = revJson?.error?.message || `Google Reviews API returned HTTP ${revRes.status}`;
-        return res.status(revRes.status === 401 ? 401 : 400).json({
-          success: false,
-          error: apiMsg
-        });
-      }
-
-      if (typeof revJson.averageRating === "number") {
-        averageRating = revJson.averageRating;
-      }
-      if (typeof revJson.totalReviewCount === "number") {
-        totalReviewCount = revJson.totalReviewCount;
-      }
-
-      const items = Array.isArray(revJson.reviews) ? revJson.reviews : [];
-      for (const item of items) {
-        const rating = mapGmbStarRating(item.starRating);
-        const publishTime = item.createTime || item.updateTime || new Date().toISOString();
-        allReviews.push({
-          id: item.reviewId || item.name || `gmb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          reviewName: item.name || "",
-          source: "google_business_api",
-          authorName: item.reviewer?.displayName || "Google Customer",
-          authorPhotoUrl: item.reviewer?.profilePhotoUrl || "",
-          rating,
-          relativeTimeDescription: formatRelativeTime(publishTime),
-          publishTime,
-          updateTime: item.updateTime || publishTime,
-          isVerifiedCustomer: true,
-          isLocalGuide: false,
-          text: item.comment || "",
-          reply: item.reviewReply?.comment
-            ? {
-                text: item.reviewReply.comment,
-                replyDate: formatRelativeTime(item.reviewReply.updateTime)
-              }
-            : undefined
-        });
-      }
-
-      if (!revJson.nextPageToken) break;
-      pageToken = revJson.nextPageToken;
-    }
-
-    const breakdown = computeRatingBreakdown(allReviews);
-    const computedAvg =
-      averageRating > 0
-        ? Number(averageRating.toFixed(1))
-        : allReviews.length > 0
-          ? Number((allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length).toFixed(1))
-          : 0;
-
-    const profileDoc = {
-      businessName: location.title || "Korean Skin Food BD",
-      googleMapsUrl: location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
-      writeReviewUrl: location.newReviewUri || location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.writeReviewUrl,
-      shareUrl: location.mapsUri || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
-      placeId: location.placeId || "",
-      address: location.address || EMPTY_GOOGLE_BUSINESS_DATA.address,
-      phoneNumber: location.phoneNumber || EMPTY_GOOGLE_BUSINESS_DATA.phoneNumber,
-      overallRating: computedAvg,
-      totalReviewsCount: totalReviewCount || allReviews.length,
-      ratingBreakdown: breakdown,
-      reviews: allReviews,
-      lastSyncedAt: new Date().toISOString(),
-      status: "verified",
-      connectionMethod: "google_business_oauth",
-      connectedAccountName: cleanAccount,
-      connectedLocationName: cleanLocation,
-      connectedEmail: connectedEmail || (req as any).user?.email || "",
-      groundingSource: "Google Business Profile API (Live OAuth Sync)"
-    };
-
-    const idToken = (req as any).idToken;
-    await setFirestoreDocWithToken("settings", "google_business_profile", profileDoc, idToken, false);
+    const profileDoc = await fetchAndPersistGmbReviewsForLocation({
+      googleToken,
+      location,
+      connectedEmail,
+      idToken: (req as any).idToken,
+      userEmail: (req as any).user?.email || gmbSessionTokens.get(uid)?.email || "",
+    });
 
     return res.json({
       success: true,
-      message: `Synced ${allReviews.length} genuine review(s) from your Google Business Profile (${profileDoc.businessName}).`,
+      message: `Synced ${profileDoc.reviews.length} genuine review(s) from your Google Business Profile (${profileDoc.businessName}).`,
       data: profileDoc
     });
   } catch (err: any) {
     console.error("[GoogleBusiness OAuth] Sync reviews error:", err);
-    return res.status(500).json({
+    if (err?.statusCode === 401) {
+      clearGmbAccessToken(uid);
+      return res.status(401).json({
+        success: false,
+        code: "GMB_TOKEN_EXPIRED",
+        error: "Google Business OAuth token expired. Please reconnect your Google Business account."
+      });
+    }
+    return res.status(err?.statusCode ? 400 : 500).json({
       success: false,
       error: err?.message || "Failed to sync Google Business Profile reviews."
     });
@@ -870,11 +1108,16 @@ app.post("/api/google-business/oauth/sync-reviews", verifyAdminAuth, async (req,
 
 // Reply to a genuine Google Business Profile review via GMB API
 app.post("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res) => {
-  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
+  const uid = (req as any).user?.uid || "admin";
+  const googleToken = await resolveGmbAccessToken(req);
   const { reviewName, comment } = req.body || {};
 
   if (!googleToken) {
-    return res.status(401).json({ success: false, error: "Google Business OAuth session expired. Please reconnect." });
+    return res.status(401).json({
+      success: false,
+      code: "GMB_TOKEN_MISSING",
+      error: "Google Business OAuth session expired. Please reconnect."
+    });
   }
   if (!reviewName || !comment || !String(comment).trim()) {
     return res.status(400).json({ success: false, error: "reviewName and reply comment are required." });
@@ -893,6 +1136,9 @@ app.post("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res) =
     });
     const gmbJson: any = await gmbRes.json().catch(() => ({}));
     if (!gmbRes.ok) {
+      if (gmbRes.status === 401) {
+        clearGmbAccessToken(uid);
+      }
       return res.status(gmbRes.status === 401 ? 401 : 400).json({
         success: false,
         error: gmbJson?.error?.message || `Google Business API reply failed (HTTP ${gmbRes.status})`
@@ -928,11 +1174,16 @@ app.post("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res) =
 
 // Delete owner reply from a Google Business Profile review
 app.delete("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res) => {
-  const googleToken = (req.headers["x-google-access-token"] as string)?.trim();
-  const { reviewName } = req.body || {};
+  const uid = (req as any).user?.uid || "admin";
+  const googleToken = await resolveGmbAccessToken(req);
+  const reviewName = (req.body?.reviewName || req.query?.reviewName || "") as string;
 
   if (!googleToken) {
-    return res.status(401).json({ success: false, error: "Google Business OAuth session expired. Please reconnect." });
+    return res.status(401).json({
+      success: false,
+      code: "GMB_TOKEN_MISSING",
+      error: "Google Business OAuth session expired. Please reconnect."
+    });
   }
   if (!reviewName) {
     return res.status(400).json({ success: false, error: "reviewName is required." });
@@ -946,6 +1197,9 @@ app.delete("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res)
       headers: { Authorization: `Bearer ${googleToken}` }
     });
     if (!gmbRes.ok) {
+      if (gmbRes.status === 401) {
+        clearGmbAccessToken(uid);
+      }
       const gmbJson: any = await gmbRes.json().catch(() => ({}));
       return res.status(gmbRes.status === 401 ? 401 : 400).json({
         success: false,
@@ -983,8 +1237,7 @@ app.delete("/api/google-business/oauth/reply", verifyAdminAuth, async (req, res)
   }
 });
 
-// Sync via Google Places API (New) using Places/Maps or unified Google API key
-app.post("/api/google-business/places/sync", verifyAdminAuth, async (req, res) => {
+async function syncPlacesReviewsByQuery(queryOrPlaceId: string, idToken?: string) {
   const placesApiKey =
     process.env.GOOGLE_PLACES_API_KEY?.trim() ||
     process.env.GOOGLE_MAPS_API_KEY?.trim() ||
@@ -992,115 +1245,132 @@ app.post("/api/google-business/places/sync", verifyAdminAuth, async (req, res) =
     getUnifiedGoogleApiKey();
 
   if (!placesApiKey) {
-    return res.status(400).json({
-      success: false,
-      error: "Google Places / unified Google API key is not configured on the server. Use 'Connect Google Business Profile' above to sync directly with your Google My Business account."
-    });
+    const err: any = new Error(
+      "Google Places API key is not configured on the server. Enable 'Places API (New)' and configure GOOGLE_PLACES_API_KEY, or connect via Google Business Profile OAuth."
+    );
+    err.statusCode = 400;
+    throw err;
   }
 
-  const queryOrPlaceId = String(req.body?.queryOrPlaceId || "").trim();
-  if (!queryOrPlaceId) {
-    return res.status(400).json({ success: false, error: "Please enter your Google Place ID or Business Name." });
+  const trimmed = String(queryOrPlaceId || "").trim();
+  if (!trimmed) {
+    const err: any = new Error("Please enter your Google Place ID or Business Name.");
+    err.statusCode = 400;
+    throw err;
   }
 
-  try {
-    let placeId = queryOrPlaceId;
-    if (!queryOrPlaceId.startsWith("ChIJ") || queryOrPlaceId.includes(" ")) {
-      const searchRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": placesApiKey,
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress"
-        },
-        body: JSON.stringify({ textQuery: queryOrPlaceId })
-      });
-      const searchJson: any = await searchRes.json().catch(() => ({}));
-      if (!searchRes.ok) {
-        const msg = searchJson?.error?.message || "Failed to search Google Places.";
-        return res.status(searchRes.status === 403 ? 403 : 400).json({
-          success: false,
-          error: searchRes.status === 403
-            ? `${msg} (Enable 'Places API (New)' and remove HTTP Referrer restriction on your server API key in Google Cloud Console.)`
-            : msg
-        });
-      }
-      if (!searchJson.places?.[0]?.id) {
-        return res.status(404).json({
-          success: false,
-          error: `No Google Place found matching "${queryOrPlaceId}".`
-        });
-      }
-      placeId = searchJson.places[0].id;
-    }
-
-    const detailsRes = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+  let placeId = trimmed;
+  if (!trimmed.startsWith("ChIJ") || trimmed.includes(" ")) {
+    const searchRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         "X-Goog-Api-Key": placesApiKey,
-        "X-Goog-FieldMask": "id,displayName,formattedAddress,rating,userRatingCount,googleMapsUri,nationalPhoneNumber,reviews"
-      }
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress"
+      },
+      body: JSON.stringify({ textQuery: trimmed })
     });
-    const detailsJson: any = await detailsRes.json().catch(() => ({}));
-    if (!detailsRes.ok) {
-      const msg = detailsJson?.error?.message || "Failed to fetch Place details from Google Places API.";
-      return res.status(detailsRes.status === 403 ? 403 : 400).json({
-        success: false,
-        error: detailsRes.status === 403
-          ? `${msg} (Enable 'Places API (New)' and remove HTTP Referrer restriction on your server API key in Google Cloud Console.)`
+    const searchJson: any = await searchRes.json().catch(() => ({}));
+    if (!searchRes.ok) {
+      const msg = searchJson?.error?.message || "Failed to search Google Places.";
+      const err: any = new Error(
+        searchRes.status === 403
+          ? `${msg} (Enable 'Places API (New)' on your Google Cloud project and ensure GOOGLE_PLACES_API_KEY has permission.)`
           : msg
-      });
+      );
+      err.statusCode = searchRes.status === 403 ? 403 : 400;
+      throw err;
     }
+    if (!searchJson.places?.[0]?.id) {
+      const err: any = new Error(`No Google Place found matching "${trimmed}".`);
+      err.statusCode = 404;
+      throw err;
+    }
+    placeId = searchJson.places[0].id;
+  }
 
-    const placesReviews = Array.isArray(detailsJson.reviews) ? detailsJson.reviews : [];
-    const mappedReviews = placesReviews.map((rev: any, idx: number) => ({
-      id: rev.name || `places-rev-${idx}-${Date.now()}`,
-      reviewName: rev.name || "",
-      source: "google_places_api",
-      authorName: rev.authorAttribution?.displayName || "Google Customer",
-      authorPhotoUrl: rev.authorAttribution?.photoUri || "",
-      profileUrl: rev.authorAttribution?.uri || "",
-      rating: Number(rev.rating) || 5,
-      relativeTimeDescription: rev.relativePublishTimeDescription || formatRelativeTime(rev.publishTime),
-      publishTime: rev.publishTime || new Date().toISOString(),
-      isVerifiedCustomer: true,
-      text: rev.text?.text || rev.originalText?.text || ""
-    }));
+  const detailsRes = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+    headers: {
+      "X-Goog-Api-Key": placesApiKey,
+      "X-Goog-FieldMask": "id,displayName,formattedAddress,rating,userRatingCount,googleMapsUri,nationalPhoneNumber,reviews"
+    }
+  });
+  const detailsJson: any = await detailsRes.json().catch(() => ({}));
+  if (!detailsRes.ok) {
+    const msg = detailsJson?.error?.message || "Failed to fetch Place details from Google Places API.";
+    const err: any = new Error(
+      detailsRes.status === 403
+        ? `${msg} (Enable 'Places API (New)' on your Google Cloud project and ensure GOOGLE_PLACES_API_KEY has permission.)`
+        : msg
+    );
+    err.statusCode = detailsRes.status === 403 ? 403 : 400;
+    throw err;
+  }
 
-    const profileDoc = {
-      businessName: detailsJson.displayName?.text || "Korean Skin Food BD",
-      googleMapsUrl: detailsJson.googleMapsUri || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
-      writeReviewUrl: `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`,
-      shareUrl: detailsJson.googleMapsUri || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
-      placeId,
-      address: detailsJson.formattedAddress || EMPTY_GOOGLE_BUSINESS_DATA.address,
-      phoneNumber: detailsJson.nationalPhoneNumber || EMPTY_GOOGLE_BUSINESS_DATA.phoneNumber,
-      overallRating: Number(detailsJson.rating) || 0,
-      totalReviewsCount: Number(detailsJson.userRatingCount) || mappedReviews.length,
-      ratingBreakdown: computeRatingBreakdown(mappedReviews),
-      reviews: mappedReviews,
-      lastSyncedAt: new Date().toISOString(),
-      status: "verified",
-      connectionMethod: "google_places_api",
-      groundingSource: "Google Places API (Live)"
-    };
+  const placesReviews = Array.isArray(detailsJson.reviews) ? detailsJson.reviews : [];
+  const mappedReviews = placesReviews.map((rev: any, idx: number) => ({
+    id: rev.name || `places-rev-${idx}-${Date.now()}`,
+    reviewName: rev.name || "",
+    source: "google_places_api",
+    authorName: rev.authorAttribution?.displayName || "Google Customer",
+    authorPhotoUrl: rev.authorAttribution?.photoUri || "",
+    profileUrl: rev.authorAttribution?.uri || "",
+    rating: Number(rev.rating) || 5,
+    relativeTimeDescription: rev.relativePublishTimeDescription || formatRelativeTime(rev.publishTime),
+    publishTime: rev.publishTime || new Date().toISOString(),
+    isVerifiedCustomer: true,
+    text: rev.text?.text || rev.originalText?.text || ""
+  }));
 
+  const profileDoc = {
+    businessName: detailsJson.displayName?.text || "Korean Skin Food BD",
+    googleMapsUrl: detailsJson.googleMapsUri || EMPTY_GOOGLE_BUSINESS_DATA.googleMapsUrl,
+    writeReviewUrl: `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`,
+    shareUrl: detailsJson.googleMapsUri || EMPTY_GOOGLE_BUSINESS_DATA.shareUrl,
+    placeId,
+    address: detailsJson.formattedAddress || EMPTY_GOOGLE_BUSINESS_DATA.address,
+    phoneNumber: detailsJson.nationalPhoneNumber || EMPTY_GOOGLE_BUSINESS_DATA.phoneNumber,
+    overallRating: Number(detailsJson.rating) || 0,
+    totalReviewsCount: Number(detailsJson.userRatingCount) || mappedReviews.length,
+    ratingBreakdown: computeRatingBreakdown(mappedReviews),
+    reviews: mappedReviews,
+    lastSyncedAt: new Date().toISOString(),
+    status: "verified",
+    connectionMethod: "google_places_api",
+    groundingSource: "Google Places API (Live)"
+  };
+
+  await setFirestoreDocWithToken("settings", "google_business_profile", profileDoc, idToken, false);
+  return profileDoc;
+}
+
+// Sync via Google Places API (New) using Places/Maps or unified Google API key
+app.post("/api/google-business/places/sync", verifyAdminAuth, async (req, res) => {
+  try {
+    const queryOrPlaceId = String(req.body?.queryOrPlaceId || "").trim();
     const idToken = (req as any).idToken;
-    await setFirestoreDocWithToken("settings", "google_business_profile", profileDoc, idToken, false);
-
+    const profileDoc = await syncPlacesReviewsByQuery(queryOrPlaceId, idToken);
     return res.json({
       success: true,
-      message: `Synced ${mappedReviews.length} review(s) from Google Places for ${profileDoc.businessName}.`,
+      message: `Synced ${profileDoc.reviews.length} review(s) from Google Places for ${profileDoc.businessName}.`,
       data: profileDoc
     });
   } catch (err: any) {
     console.error("[GooglePlaces Sync] Error:", err);
-    return res.status(500).json({ success: false, error: err?.message || "Places sync failed." });
+    return res.status(err?.statusCode || 500).json({
+      success: false,
+      error: err?.message || "Places sync failed."
+    });
   }
 });
 
 // Disconnect GMB and purge all reviews (removes any legacy dummy reviews too)
 app.post("/api/google-business/disconnect", verifyAdminAuth, async (req, res) => {
   try {
+    const uid = (req as any).user?.uid || "admin";
+    clearGmbAccessToken(uid);
+    writeGmbServerConfig({ disconnected: true });
+
     const idToken = (req as any).idToken;
     const cleanEmpty = {
       ...EMPTY_GOOGLE_BUSINESS_DATA,
@@ -1123,9 +1393,10 @@ app.post("/api/google-business/disconnect", verifyAdminAuth, async (req, res) =>
   }
 });
 
-// Safe refresh endpoint (never writes dummy data)
+// Live refresh endpoint using active GMB OAuth session (or Places fallback)
 app.post("/api/google-business/sync", verifyAdminAuth, async (req, res) => {
   try {
+    const uid = (req as any).user?.uid || "admin";
     const idToken = (req as any).idToken;
     const existing = await getFirestoreDocWithToken("settings", "google_business_profile", idToken);
     const sanitized = sanitizeGoogleBusinessProfileDoc(existing);
@@ -1136,12 +1407,79 @@ app.post("/api/google-business/sync", verifyAdminAuth, async (req, res) => {
       await setFirestoreDocWithToken("settings", "google_business_profile", sanitized, idToken, false);
     }
 
-    return res.json({
-      success: sanitized.connectionMethod !== "none",
+    // If connected via GMB OAuth and we have an active token, fetch live reviews from Google
+    const googleToken = await resolveGmbAccessToken(req);
+    if (googleToken && sanitized.connectedAccountName && sanitized.connectedLocationName) {
+      try {
+        const refreshedDoc = await fetchAndPersistGmbReviewsForLocation({
+          googleToken,
+          location: {
+            accountName: sanitized.connectedAccountName,
+            locationName: sanitized.connectedLocationName,
+            title: sanitized.businessName,
+            address: sanitized.address,
+            placeId: sanitized.placeId,
+            mapsUri: sanitized.googleMapsUrl,
+            newReviewUri: sanitized.writeReviewUrl,
+            phoneNumber: sanitized.phoneNumber,
+          },
+          connectedEmail: sanitized.connectedEmail,
+          idToken,
+          userEmail: (req as any).user?.email || gmbSessionTokens.get(uid)?.email || "",
+        });
+        return res.json({
+          success: true,
+          data: refreshedDoc,
+          message: `Synced ${refreshedDoc.reviews.length} genuine review(s) from your Google Business Profile.`
+        });
+      } catch (gmbErr: any) {
+        if (gmbErr?.statusCode === 401) {
+          clearGmbAccessToken(uid);
+          return res.status(401).json({
+            success: false,
+            needsReconnect: true,
+            data: sanitized,
+            error: "Google Business OAuth session expired. Please reconnect your Google Business account."
+          });
+        }
+        throw gmbErr;
+      }
+    }
+
+    if (sanitized.connectionMethod === "google_places_api") {
+      try {
+        const refreshedDoc = await syncPlacesReviewsByQuery(
+          sanitized.placeId || sanitized.businessName || "Korean Skin Food BD",
+          idToken
+        );
+        return res.json({
+          success: true,
+          data: refreshedDoc,
+          message: `Synced ${refreshedDoc.reviews.length} genuine review(s) from Google Places (${refreshedDoc.businessName}).`
+        });
+      } catch (placesErr: any) {
+        return res.status(placesErr?.statusCode || 400).json({
+          success: false,
+          data: sanitized,
+          error: placesErr?.message || "Google Places sync failed."
+        });
+      }
+    }
+
+    if (sanitized.connectionMethod === "google_business_oauth" && !googleToken) {
+      return res.json({
+        success: false,
+        needsReconnect: true,
+        data: sanitized,
+        message: "Google Business OAuth session expired. Click 'Connect Google Business Profile' to re-authorize and sync live reviews."
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      needsReconnect: true,
       data: sanitized,
-      message: sanitized.connectionMethod === "none"
-        ? "Please click 'Connect Google Business Profile' to sync your real GMB reviews."
-        : "Loaded your connected Google Business Profile reviews."
+      error: "Please click 'Connect Google Business Profile' to sync your real GMB reviews."
     });
   } catch (err: any) {
     return res.status(500).json({
@@ -1159,7 +1497,7 @@ app.get("/api/slack/status", (req, res) => {
   });
 });
 
-app.get("/api/slack/users", async (req, res) => {
+app.get("/api/slack/users", verifyAdminAuth, async (req, res) => {
   try {
     const users = await slackService.getAllSlackUsers();
     res.json({ success: true, count: users.length, users });
@@ -1216,7 +1554,7 @@ app.post("/api/slack/unlink-user", verifyAdminAuth, async (req, res) => {
   }
 });
 
-app.post("/api/slack/verify-permission", async (req, res) => {
+app.post("/api/slack/verify-permission", verifyAdminAuth, async (req, res) => {
   const { slackUserId, requiredPermission } = req.body;
   if (!slackUserId || !requiredPermission) {
     return res.status(400).json({ 
@@ -2057,625 +2395,7 @@ async function resolveFacebookObjectAndMetrics(
   };
 }
 
-// ================= BACKEND AUTHENTICATION & ROLE VERIFICATION =================
-async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string; email?: string; emailVerified?: boolean } | null> {
-  if (!idToken) return null;
-
-  let apiKey = process.env.VITE_FIREBASE_API_KEY;
-  if (!apiKey) {
-    try {
-      const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-      if (fs.existsSync(configPath)) {
-        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        apiKey = cfg.apiKey;
-      }
-    } catch (e) {
-      console.warn("Could not read apiKey from config file:", e);
-    }
-  }
-  if (!apiKey) {
-    apiKey = getUnifiedGoogleApiKey();
-  }
-
-  if (!apiKey) {
-    console.error("Firebase API Key is missing for server token verification.");
-    return null;
-  }
-
-  try {
-    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken })
-    });
-
-    if (!response.ok) {
-      const errData: any = await response.json().catch(() => ({}));
-      console.warn("Firebase ID token verification failed:", errData?.error?.message || response.statusText);
-      return null;
-    }
-
-    const data: any = await response.json();
-    if (data.users && data.users.length > 0) {
-      return {
-        uid: data.users[0].localId,
-        email: data.users[0].email,
-        emailVerified: Boolean(data.users[0].emailVerified)
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error("Error during Firebase token verification:", error);
-    return null;
-  }
-}
-
-// ================= FIRESTORE REST API TOKEN HELPER =================
-function getIdTokenFromRequest(req?: express.Request): string | undefined {
-  const authHeader = req?.headers?.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return undefined;
-  return authHeader.slice(7).trim() || undefined;
-}
-
-function getFirestoreRestConfig(): { projectId: string; databaseId: string; baseUrl: string } | null {
-  try {
-    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) return null;
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const projectId = process.env.VITE_FIREBASE_PROJECT_ID || cfg.projectId;
-    const databaseId = process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || cfg.firestoreDatabaseId || "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4";
-    if (!projectId) return null;
-    return {
-      projectId,
-      databaseId,
-      baseUrl: `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents`,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parseFirestoreValue(value: any): any {
-  if (!value || typeof value !== 'object') return value;
-  if ('stringValue' in value) return value.stringValue;
-  if ('integerValue' in value) return Number(value.integerValue);
-  if ('doubleValue' in value) return Number(value.doubleValue);
-  if ('booleanValue' in value) return value.booleanValue;
-  if ('timestampValue' in value) return value.timestampValue;
-  if ('nullValue' in value) return null;
-  if ('arrayValue' in value) return (value.arrayValue.values || []).map(parseFirestoreValue);
-  if ('mapValue' in value) {
-    const res: Record<string, any> = {};
-    for (const [k, v] of Object.entries(value.mapValue.fields || {})) {
-      res[k] = parseFirestoreValue(v);
-    }
-    return res;
-  }
-  return value;
-}
-
-function parseFirestoreDoc(docItem: any): any {
-  if (!docItem) return null;
-  const id = docItem.name ? docItem.name.split('/').pop() : '';
-  const data: Record<string, any> = { id };
-  for (const [k, v] of Object.entries(docItem.fields || {})) {
-    data[k] = parseFirestoreValue(v);
-  }
-  return data;
-}
-
-function encodeFirestoreValue(val: any): any {
-  if (val === null || val === undefined) {
-    return { nullValue: null };
-  }
-  if (typeof val === 'boolean') {
-    return { booleanValue: val };
-  }
-  if (typeof val === 'number') {
-    if (!Number.isFinite(val)) return { doubleValue: 0 };
-    if (Number.isInteger(val)) return { integerValue: String(val) };
-    return { doubleValue: val };
-  }
-  if (typeof val === 'string') {
-    return { stringValue: val };
-  }
-  if (val instanceof Date) {
-    return { timestampValue: val.toISOString() };
-  }
-  if (Array.isArray(val)) {
-    return {
-      arrayValue: {
-        values: val.filter((v) => v !== undefined).map(encodeFirestoreValue),
-      },
-    };
-  }
-  if (typeof val === 'object') {
-    return {
-      mapValue: {
-        fields: encodeFirestoreFields(val),
-      },
-    };
-  }
-  return { stringValue: String(val) };
-}
-
-function encodeFirestoreFields(obj: Record<string, any>): Record<string, any> {
-  const fields: Record<string, any> = {};
-  for (const [k, v] of Object.entries(obj || {})) {
-    if (v === undefined) continue;
-    fields[k] = encodeFirestoreValue(v);
-  }
-  return fields;
-}
-
-async function getFirestoreDocWithToken(collectionName: string, docId: string, idToken?: string): Promise<any | null> {
-  try {
-    const restCfg = getFirestoreRestConfig();
-    if (!restCfg) return null;
-    const url = `${restCfg.baseUrl}/${collectionName}/${encodeURIComponent(docId)}`;
-
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (idToken) {
-      headers["Authorization"] = `Bearer ${idToken}`;
-    }
-
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      return null;
-    }
-
-    const docData = await response.json();
-    return parseFirestoreDoc(docData);
-  } catch (err) {
-    return null;
-  }
-}
-
-async function getFirestoreCollectionWithToken(collectionName: string, idToken?: string): Promise<any[]> {
-  try {
-    const restCfg = getFirestoreRestConfig();
-    if (!restCfg) return [];
-
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (idToken) {
-      headers["Authorization"] = `Bearer ${idToken}`;
-    }
-
-    const allDocs: any[] = [];
-    let pageToken: string | undefined;
-
-    for (let page = 0; page < 10; page++) {
-      const qs = new URLSearchParams({ pageSize: "300" });
-      if (pageToken) qs.set("pageToken", pageToken);
-      const url = `${restCfg.baseUrl}/${collectionName}?${qs.toString()}`;
-
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        if (page === 0) {
-          const errData: any = await response.json().catch(() => ({}));
-          if (response.status === 403) {
-            throw new Error(errData?.error?.message || `Missing or insufficient permissions for ${collectionName}.`);
-          }
-        }
-        break;
-      }
-
-      const data: any = await response.json();
-      if (Array.isArray(data.documents)) {
-        allDocs.push(...data.documents.map(parseFirestoreDoc).filter(Boolean));
-      }
-      if (!data.nextPageToken) break;
-      pageToken = data.nextPageToken;
-    }
-
-    return allDocs;
-  } catch (err) {
-    if (err instanceof Error && err.message.toLowerCase().includes("permission")) {
-      throw err;
-    }
-    return [];
-  }
-}
-
-async function setFirestoreDocWithToken(
-  collectionName: string,
-  docId: string,
-  data: Record<string, any>,
-  idToken?: string,
-  merge = true
-): Promise<void> {
-  const restCfg = getFirestoreRestConfig();
-  if (!restCfg) {
-    throw new Error("Firestore configuration is missing on server.");
-  }
-
-  const fields = encodeFirestoreFields(data);
-  const fieldPaths = Object.keys(fields);
-  const queryParams = merge && fieldPaths.length > 0
-    ? `?${fieldPaths.map((p) => `updateMask.fieldPaths=${encodeURIComponent(p)}`).join("&")}`
-    : "";
-
-  const url = `${restCfg.baseUrl}/${collectionName}/${encodeURIComponent(docId)}${queryParams}`;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (idToken) {
-    headers["Authorization"] = `Bearer ${idToken}`;
-  }
-
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers,
-    body: JSON.stringify({ fields }),
-  });
-
-  if (!response.ok) {
-    const errData: any = await response.json().catch(() => ({}));
-    const errMsg = errData?.error?.message || response.statusText || `HTTP ${response.status}`;
-    throw new Error(`Firestore write failed (${collectionName}/${docId}): ${errMsg}`);
-  }
-}
-
-async function deleteFirestoreDocWithToken(
-  collectionName: string,
-  docId: string,
-  idToken?: string
-): Promise<void> {
-  const restCfg = getFirestoreRestConfig();
-  if (!restCfg) {
-    throw new Error("Firestore configuration is missing on server.");
-  }
-
-  const url = `${restCfg.baseUrl}/${collectionName}/${encodeURIComponent(docId)}`;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (idToken) {
-    headers["Authorization"] = `Bearer ${idToken}`;
-  }
-
-  const response = await fetch(url, {
-    method: "DELETE",
-    headers,
-  });
-
-  if (!response.ok && response.status !== 404) {
-    const errData: any = await response.json().catch(() => ({}));
-    const errMsg = errData?.error?.message || response.statusText || `HTTP ${response.status}`;
-    throw new Error(`Firestore delete failed (${collectionName}/${docId}): ${errMsg}`);
-  }
-}
-
-async function queryFirestoreCollectionWithToken(
-  collectionName: string,
-  filters: Array<{ field: string; op?: string; value: any }>,
-  idToken?: string
-): Promise<any[]> {
-  const restCfg = getFirestoreRestConfig();
-  if (!restCfg) return [];
-
-  const url = `${restCfg.baseUrl}:runQuery`;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (idToken) {
-    headers["Authorization"] = `Bearer ${idToken}`;
-  }
-
-  const fieldFilters = filters.map((f) => ({
-    fieldFilter: {
-      field: { fieldPath: f.field },
-      op: f.op || "EQUAL",
-      value: encodeFirestoreValue(f.value),
-    },
-  }));
-
-  const structuredQuery: any = {
-    from: [{ collectionId: collectionName }],
-  };
-
-  if (fieldFilters.length === 1) {
-    structuredQuery.where = fieldFilters[0];
-  } else if (fieldFilters.length > 1) {
-    structuredQuery.where = {
-      compositeFilter: {
-        op: "AND",
-        filters: fieldFilters,
-      },
-    };
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ structuredQuery }),
-  });
-
-  if (!response.ok) {
-    const errData: any = await response.json().catch(() => ({}));
-    if (response.status === 403) {
-      throw new Error(errData?.error?.message || `Missing or insufficient permissions querying ${collectionName}.`);
-    }
-    return [];
-  }
-
-  const rows: any = await response.json();
-  if (!Array.isArray(rows)) return [];
-  return rows.map((r) => (r.document ? parseFirestoreDoc(r.document) : null)).filter(Boolean);
-}
-
-async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Missing or malformed Authorization header with Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Empty Bearer token provided."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase ID token. Please authenticate again."
-    });
-  }
-
-  (req as any).idToken = idToken;
-
-  // 1. Direct super admin authorization by email
-  const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd');
-  if (isSuperAdminEmail) {
-    (req as any).user = {
-      uid: verifiedUser.uid,
-      email: verifiedUser.email,
-      role: 'super_admin',
-      emailVerified: Boolean((verifiedUser as any).emailVerified),
-      isStaff: true
-    };
-    return next();
-  }
-
-  // 2. Fetch staff role using caller's verified token first, then fallback to db
-  let userRole: string | null = null;
-  const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
-  if (userDoc) {
-    userRole = userDoc.role || null;
-  } else if (db) {
-    try {
-      const userDocRef = doc(db, "users", verifiedUser.uid);
-      const userSnap = await getDoc(userDocRef);
-      if (userSnap.exists()) {
-        userRole = userSnap.data()?.role;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr', 'customer_support'];
-  if (userRole && staffRoles.includes(userRole)) {
-    (req as any).user = {
-      uid: verifiedUser.uid,
-      email: verifiedUser.email,
-      role: userRole,
-      emailVerified: Boolean((verifiedUser as any).emailVerified),
-      isStaff: true
-    };
-    return next();
-  }
-
-  return res.status(403).json({
-    success: false,
-    error: "Access Denied. Insufficient permissions. Verified staff or admin account required."
-  });
-}
-
-async function verifyFinanceAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Missing Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Empty Bearer token provided."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase ID token."
-    });
-  }
-
-  (req as any).idToken = idToken;
-
-  // 1. Direct super admin authorization by email (instant, zero DB query)
-  const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd');
-  if (isSuperAdminEmail) {
-    (req as any).user = {
-      uid: verifiedUser.uid,
-      email: verifiedUser.email,
-      role: 'super_admin',
-      emailVerified: Boolean((verifiedUser as any).emailVerified),
-      isStaff: true
-    };
-    return next();
-  }
-
-  // 2. Fetch role for other staff members
-  let userRole: string | null = null;
-  const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
-  if (userDoc) {
-    userRole = userDoc.role || null;
-  } else if (db) {
-    try {
-      const userDocRef = doc(db, "users", verifiedUser.uid);
-      const userSnap = await getDoc(userDocRef);
-      if (userSnap.exists()) {
-        userRole = userSnap.data()?.role;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const financeRoles = ['admin', 'super_admin'];
-  if (userRole && financeRoles.includes(userRole)) {
-    (req as any).user = {
-      uid: verifiedUser.uid,
-      email: verifiedUser.email,
-      role: userRole,
-      emailVerified: Boolean((verifiedUser as any).emailVerified),
-      isStaff: true
-    };
-    return next();
-  }
-
-  return res.status(403).json({
-    success: false,
-    error: "Access Denied. Executive Financial Authority (Super Admin or Store Admin) required."
-  });
-}
-
-async function verifyUserOrStaffAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Please provide a valid Bearer token."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  if (!idToken) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Empty Bearer token provided."
-    });
-  }
-
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase ID token."
-    });
-  }
-
-  (req as any).idToken = idToken;
-  (req as any).user = verifiedUser;
-  return next();
-}
-
-async function verifyStaffOrWholesaleAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: "Authentication required. Bearer token required for wholesale ledger."
-    });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1]?.trim();
-  const verifiedUser = await verifyFirebaseIdToken(idToken);
-  if (!verifiedUser || !verifiedUser.uid) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid or expired Firebase credentials."
-    });
-  }
-
-  (req as any).idToken = idToken;
-
-  // 1. Direct super admin authorization by email
-  const isSuperAdminEmail = (verifiedUser.email === 'koreanskinfood.bd@gmail.com' || verifiedUser.email === 'admin@koreanskinfood.bd');
-  if (isSuperAdminEmail) {
-    (req as any).user = {
-      uid: verifiedUser.uid,
-      email: verifiedUser.email,
-      role: 'super_admin',
-      isStaff: true
-    };
-    return next();
-  }
-
-  let userRole = 'customer';
-  const userDoc = await getFirestoreDocWithToken("users", verifiedUser.uid, idToken);
-  if (userDoc) {
-    userRole = userDoc.role || userRole;
-  } else if (db) {
-    try {
-      const userDocRef = doc(db, "users", verifiedUser.uid);
-      const userSnap = await getDoc(userDocRef);
-      if (userSnap.exists()) {
-        userRole = userSnap.data()?.role || userRole;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const staffRoles = ['admin', 'super_admin', 'inventory_manager', 'hr'];
-  const isStaff = staffRoles.includes(userRole);
-  const requestedTargetId = (req.params?.wholesaleCustomerId || req.body?.wholesaleCustomerId || req.body?.userId || req.query?.wholesaleCustomerId) as string;
-
-  (req as any).user = {
-    uid: verifiedUser.uid,
-    email: verifiedUser.email,
-    role: userRole,
-    isStaff
-  };
-
-  if (isStaff) {
-    return next();
-  }
-
-  // If customer, ensure they are accessing only their own wholesale data
-  if (requestedTargetId && requestedTargetId !== verifiedUser.uid) {
-    try {
-      let custUserId: string | null = null;
-      const custDoc = await getFirestoreDocWithToken("wholesale_customers", requestedTargetId, idToken);
-      if (custDoc) {
-        custUserId = custDoc.userId;
-      } else if (db) {
-        try {
-          const custDocRef = doc(db, "wholesale_customers", requestedTargetId);
-          const custSnap = await getDoc(custDocRef);
-          if (custSnap.exists()) {
-            custUserId = custSnap.data()?.userId;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (!custUserId || custUserId !== verifiedUser.uid) {
-        return res.status(403).json({
-          success: false,
-          error: "Access Denied. You can only view your own wholesale ledger."
-        });
-      }
-    } catch (e) {
-      return res.status(403).json({
-        success: false,
-        error: "Access Denied. Unable to verify wholesale customer ownership."
-      });
-    }
-  }
-
-  return next();
-}
+// Auth & Firestore REST helpers are imported from ./server/middleware/auth and ./server/config/firebase
 
 // ================= CREATOR NETWORK ADMIN & PUBLIC API ENDPOINTS =================
 
@@ -3226,155 +2946,7 @@ app.delete("/api/admin/reels/:id", verifyAdminAuth, async (req, res) => {
   }
 });
 
-// CLOUDINARY CONFIG & SIGNATURE ENDPOINTS
-// GET Public Cloudinary Config (Safe, no secrets exposed)
-app.get("/api/cloudinary/config", (req, res) => {
-  const rawCloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
-  const cloudName = rawCloudName ? String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') : '';
-  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || '';
-  const hasApiKey = Boolean(process.env.CLOUDINARY_API_KEY);
-  const hasSecret = Boolean(process.env.CLOUDINARY_API_SECRET);
-
-  return res.json({
-    success: true,
-    cloudName,
-    uploadPreset,
-    hasApiKey,
-    isConfigured: Boolean(cloudName && (hasSecret || uploadPreset)),
-  });
-});
-
-// POST Generate Signed Cloudinary Signature (Keep API Secret 100% on server, require authenticated user/creator/staff)
-app.post("/api/cloudinary/sign", verifyUserOrStaffAuth, (req, res) => {
-  const rawCloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
-  const cloudName = rawCloudName ? String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') : '';
-  const apiKey = process.env.CLOUDINARY_API_KEY || '';
-  const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
-  const defaultPreset = process.env.CLOUDINARY_UPLOAD_PRESET || '';
-
-  const folder = req.body.folder || 'kbeauty_creators';
-  const resourceType = req.body.resourceType || 'video';
-
-  // 1. If signed API credentials (API key + API secret) are configured
-  if (cloudName && apiKey && apiSecret) {
-    const timestamp = Math.floor(Date.now() / 1000);
-    const paramsToSign: Record<string, string> = {
-      folder,
-      timestamp: String(timestamp),
-    };
-
-    if (req.body.tags) {
-      paramsToSign.tags = String(req.body.tags);
-    }
-
-    // Sort keys alphabetically for Cloudinary signature specification
-    const sortedKeys = Object.keys(paramsToSign).sort();
-    const stringToSign = sortedKeys.map((k) => `${k}=${paramsToSign[k]}`).join('&');
-
-    const signature = crypto
-      .createHash('sha1')
-      .update(stringToSign + apiSecret)
-      .digest('hex');
-
-    return res.json({
-      success: true,
-      mode: 'signed',
-      cloudName,
-      apiKey,
-      signature,
-      timestamp,
-      folder,
-      resourceType,
-    });
-  }
-
-  // 2. If unsigned upload preset is configured
-  if (cloudName && (defaultPreset || req.body.uploadPreset)) {
-    return res.json({
-      success: true,
-      mode: 'unsigned',
-      cloudName,
-      uploadPreset: defaultPreset || req.body.uploadPreset,
-      folder,
-      resourceType,
-    });
-  }
-
-  // 3. Not configured in server environment
-  return res.json({
-    success: false,
-    configured: false,
-    error: "Cloudinary credentials not found in server environment. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET (or CLOUDINARY_UPLOAD_PRESET).",
-  });
-});
-
-// POST Server-side direct Cloudinary upload for Stock-In invoices & media
-app.post("/api/cloudinary/upload-invoice", async (req, res) => {
-  try {
-    const { dataUrl, fileName, folder = 'kbeauty_invoices', cloudName: customCloudName, uploadPreset: customPreset } = req.body;
-    if (!dataUrl || typeof dataUrl !== 'string') {
-      return res.status(400).json({ success: false, error: "Missing dataUrl image payload" });
-    }
-
-    const rawCloudName = customCloudName || process.env.CLOUDINARY_CLOUD_NAME || 'dxvmfaxeh';
-    const cloudName = String(rawCloudName).trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'dxvmfaxeh';
-    const apiKey = process.env.CLOUDINARY_API_KEY || '';
-    const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
-    const defaultPreset = customPreset || process.env.CLOUDINARY_UPLOAD_PRESET || 'ml_default';
-
-    const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-    const bodyParams: Record<string, string> = {
-      file: dataUrl,
-      folder
-    };
-
-    if (apiKey && apiSecret) {
-      const timestamp = String(Math.floor(Date.now() / 1000));
-      bodyParams.timestamp = timestamp;
-      bodyParams.api_key = apiKey;
-
-      const paramsToSign: Record<string, string> = { folder, timestamp };
-      const sortedKeys = Object.keys(paramsToSign).sort();
-      const stringToSign = sortedKeys.map((k) => `${k}=${paramsToSign[k]}`).join('&');
-      const signature = crypto.createHash('sha1').update(stringToSign + apiSecret).digest('hex');
-      bodyParams.signature = signature;
-    } else {
-      bodyParams.upload_preset = defaultPreset;
-    }
-
-    const upstreamRes = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bodyParams)
-    });
-
-    const upstreamData: any = await upstreamRes.json();
-    if (upstreamRes.ok && upstreamData.secure_url) {
-      return res.json({
-        success: true,
-        secureUrl: upstreamData.secure_url,
-        publicId: upstreamData.public_id,
-        format: upstreamData.format,
-        bytes: upstreamData.bytes,
-        width: upstreamData.width,
-        height: upstreamData.height,
-        cloudName
-      });
-    }
-
-    console.warn("[Cloudinary Server Upload] Upstream error:", upstreamData);
-    return res.status(400).json({
-      success: false,
-      error: upstreamData.error?.message || "Failed to upload invoice to Cloudinary"
-    });
-  } catch (err: any) {
-    console.error("[Cloudinary Server Upload] Server exception:", err);
-    return res.status(500).json({
-      success: false,
-      error: err.message || "Internal server error uploading to Cloudinary"
-    });
-  }
-});
+// Cloudinary routes are mounted via ./server/modules/media/routes
 
 // ==========================================
 // YOUTUBE DATA API v3 INTEGRATION (ADMIN CHANNEL + CREATOR UPLOADS)
@@ -3386,8 +2958,11 @@ const YOUTUBE_DAILY_LIMIT = 1;
 interface YouTubeStoredConfig {
   refreshToken?: string;
   channelId?: string;
+  channelHandle?: string;
   channelTitle?: string;
   channelThumbnail?: string;
+  apiKey?: string;
+  connected?: boolean;
   connectedAt?: string;
   connectedBy?: string;
   disconnected?: boolean;
@@ -3494,7 +3069,8 @@ function writeYouTubeConfig(cfg: YouTubeStoredConfig | null) {
       }
       return;
     }
-    fs.writeFileSync(YOUTUBE_CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf-8");
+    const prev = readYouTubeFileConfig();
+    fs.writeFileSync(YOUTUBE_CONFIG_FILE, JSON.stringify({ ...prev, ...cfg }, null, 2), "utf-8");
   } catch (e) {
     console.warn("[YouTube] Could not persist config file:", e);
   }
@@ -3846,6 +3422,7 @@ async function getYouTubeAccessToken(): Promise<{
 app.get("/api/admin/youtube/status", verifyAdminAuth, async (req, res) => {
   const forceVerify = req.query.force === "1" || req.query.force === "true" || req.query.verify === "1";
   const health = await verifyYouTubeConnection(forceVerify);
+  const cfg = readYouTubeConfig();
   const initialPrivacy = (process.env.YOUTUBE_INITIAL_PRIVACY || "unlisted").toLowerCase();
   const reqOrigin = typeof req.query.origin === "string" ? req.query.origin.trim() : "";
   const headerOrigin = resolveRequestOrigin(req);
@@ -3856,6 +3433,10 @@ app.get("/api/admin/youtube/status", verifyAdminAuth, async (req, res) => {
   return res.json({
     success: true,
     ...health,
+    channelId: health.channelId || cfg.channelId || cfg.channelHandle || null,
+    channelTitle: health.channelTitle || cfg.channelTitle || null,
+    channelThumbnail: health.channelThumbnail || cfg.channelThumbnail || null,
+    apiKeyConfigured: Boolean(cfg.apiKey || process.env.YOUTUBE_API_KEY?.trim() || getUnifiedGoogleApiKey()),
     initialPrivacy: initialPrivacy === "private" ? "private" : "unlisted",
     dailyLimitPerCreator: YOUTUBE_DAILY_LIMIT,
     redirectUri: `${baseOrigin}/api/youtube/callback`,
@@ -4791,8 +4372,8 @@ app.get("/api/creators", verifyAdminAuth, async (req, res) => {
   }
 });
 
-// SLACK NOTIFICATION LOGS, AUDIT LOGS & INTERACTIVE ACTION HANDLERS
-app.get("/api/slack/notification-logs", async (req, res) => {
+// SLACK NOTIFICATION LOGS, AUDIT LOGS & INTERACTIVE ACTION HANDLERS (Staff Authenticated)
+app.get("/api/slack/notification-logs", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -4800,7 +4381,7 @@ app.get("/api/slack/notification-logs", async (req, res) => {
   });
 });
 
-app.get("/api/slack/audit-logs", async (req, res) => {
+app.get("/api/slack/audit-logs", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -4808,7 +4389,7 @@ app.get("/api/slack/audit-logs", async (req, res) => {
   });
 });
 
-app.get("/api/slack/product-imports", async (req, res) => {
+app.get("/api/slack/product-imports", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -4816,7 +4397,7 @@ app.get("/api/slack/product-imports", async (req, res) => {
   });
 });
 
-app.get("/api/slack/channels", async (req, res) => {
+app.get("/api/slack/channels", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -4824,7 +4405,7 @@ app.get("/api/slack/channels", async (req, res) => {
   });
 });
 
-app.get("/api/slack/support-tickets", async (req, res) => {
+app.get("/api/slack/support-tickets", verifyAdminAuth, async (req, res) => {
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   res.json({
     success: true,
@@ -4832,7 +4413,7 @@ app.get("/api/slack/support-tickets", async (req, res) => {
   });
 });
 
-app.post("/api/slack/support-tickets", async (req, res) => {
+app.post("/api/slack/support-tickets", publicFormRateLimiter, async (req, res) => {
   const { customerName, customerPhone, customerEmail, orderId, subject, description, priority } = req.body;
   if (!customerName || !subject || !description) {
     return res.status(400).json({ success: false, error: "customerName, subject, and description are required" });
@@ -4847,7 +4428,7 @@ app.post("/api/slack/support-tickets", async (req, res) => {
       ticketNumber,
       orderId,
       customerName,
-      customerPhone: customerPhone || '+8801700000000',
+      customerPhone: customerPhone || '',
       customerEmail,
       subject,
       description,
@@ -4879,7 +4460,7 @@ app.post("/api/slack/support-tickets", async (req, res) => {
   }
 });
 
-app.post("/api/slack/command", async (req, res) => {
+app.post("/api/slack/command", verifyAdminAuth, async (req, res) => {
   const { command, text, user_name, user_id } = req.body;
   if (!command) {
     return res.status(400).json({ success: false, error: "command is required" });
@@ -4899,7 +4480,7 @@ app.post("/api/slack/command", async (req, res) => {
   }
 });
 
-app.post("/api/slack/support-tickets/:id/reply", async (req, res) => {
+app.post("/api/slack/support-tickets/:id/reply", verifyAdminAuth, async (req, res) => {
   const { id } = req.params;
   const { message, authorName, slackUserId } = req.body;
 
@@ -4940,7 +4521,7 @@ app.post("/api/slack/support-tickets/:id/refund", verifyAdminAuth, async (req, r
   }
 });
 
-app.get("/api/slack/summary", async (req, res) => {
+app.get("/api/slack/summary", verifyAdminAuth, async (req, res) => {
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
     const summary = await slackNotificationService.getOpsSummary();
@@ -4950,7 +4531,7 @@ app.get("/api/slack/summary", async (req, res) => {
   }
 });
 
-app.post("/api/slack/retry-queue", async (req, res) => {
+app.post("/api/slack/retry-queue", verifyAdminAuth, async (req, res) => {
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
     const result = await slackNotificationService.retryFailedQueue();
@@ -4960,7 +4541,7 @@ app.post("/api/slack/retry-queue", async (req, res) => {
   }
 });
 
-app.post("/api/slack/test-notification", async (req, res) => {
+app.post("/api/slack/test-notification", verifyAdminAuth, async (req, res) => {
   const { channel } = req.body;
   try {
     const { slackNotificationService } = await import('./src/services/slackNotificationService');
@@ -4988,7 +4569,7 @@ app.post("/api/slack/support-tickets/:id/close", verifyAdminAuth, async (req, re
   }
 });
 
-app.post("/api/slack/notify-product-import", async (req, res) => {
+app.post("/api/slack/notify-product-import", verifyAdminAuth, async (req, res) => {
   const { productName, brand, barcode, variant, volume, imageMatchScore, imageUrl, category, price, stock, description, source, performedBy } = req.body;
 
   if (!productName || !barcode) {
@@ -5010,7 +4591,7 @@ app.post("/api/slack/notify-product-import", async (req, res) => {
       category: category || 'Serum & Essence',
       price: price || 1500,
       stock: stock || 20,
-      description: description || `Authentic ${productName} by ${brand}.`,
+      description: description || `${productName} by ${brand}.`,
       status: 'pending_approval' as const,
       source: source || 'barcode_scan',
       timestamp: new Date().toISOString(),
@@ -5029,7 +4610,7 @@ app.post("/api/slack/notify-product-import", async (req, res) => {
   }
 });
 
-app.post("/api/slack/interactive", async (req, res) => {
+app.post("/api/slack/interactive", verifyAdminAuth, async (req, res) => {
   const { actionId, payloadValue, slackUserId, slackUsername } = req.body;
 
   if (!actionId || !slackUserId) {
@@ -5066,7 +4647,7 @@ app.post("/api/slack/interactive", async (req, res) => {
   }
 });
 
-app.post("/api/slack/trigger-test-notification", async (req, res) => {
+app.post("/api/slack/trigger-test-notification", verifyAdminAuth, async (req, res) => {
   const { type, orderId, productId } = req.body;
   const { slackNotificationService } = await import('./src/services/slackNotificationService');
   const { posService } = await import('./src/services/posService');
@@ -5121,222 +4702,7 @@ app.post("/api/slack/trigger-test-notification", async (req, res) => {
   }
 });
 
-// In-memory idempotency store for online checkout retries (15-minute TTL)
-const placeOrderIdempotencyCache = new Map<string, { order: any; expiresAt: number }>();
-
-function stripUndefinedFields<T>(val: T): T {
-  if (Array.isArray(val)) {
-    return val.map(stripUndefinedFields) as unknown as T;
-  }
-  if (val !== null && typeof val === "object") {
-    const out: Record<string, any> = {};
-    for (const [k, v] of Object.entries(val)) {
-      if (v !== undefined) {
-        out[k] = stripUndefinedFields(v);
-      }
-    }
-    return out as T;
-  }
-  return val;
-}
-
-// 1. placeOrder Endpoint (Authoritative Server-Side Price & Stock Validation with Idempotency)
-app.post("/api/functions/placeOrder", checkoutRateLimiter, async (req, res) => {
-  const { 
-    items, 
-    customerName, 
-    customerPhone, 
-    customerEmail, 
-    address, 
-    deliveryArea,
-    isFreeDelivery,
-    customer_uid,
-    couponCode,
-    couponDiscount,
-    pointsDiscount,
-    idempotencyKey,
-    attribution
-  } = req.body;
-
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: "Cart cannot be empty" });
-  }
-
-  if (!db) {
-    return res.status(500).json({ error: "Database not initialized" });
-  }
-
-  // Prune expired idempotency entries periodically
-  const nowMs = Date.now();
-  if (placeOrderIdempotencyCache.size > 200) {
-    for (const [k, entry] of placeOrderIdempotencyCache.entries()) {
-      if (nowMs > entry.expiresAt) {
-        placeOrderIdempotencyCache.delete(k);
-      }
-    }
-  }
-
-  // Idempotency Check
-  if (idempotencyKey) {
-    const existing = placeOrderIdempotencyCache.get(String(idempotencyKey));
-    if (existing && nowMs <= existing.expiresAt && existing.order) {
-      return res.json({
-        success: true,
-        orderId: existing.order.id,
-        order: existing.order,
-        message: `Successfully placed order ${existing.order.id}`
-      });
-    }
-  }
-
-  const orderId = "ORD-" + Math.floor(100000 + Math.random() * 900000);
-  const deliveryCharge = isFreeDelivery ? 0 : (deliveryArea === "outside" ? 150 : 80);
-  const nowIso = new Date().toISOString();
-
-  try {
-    const validatedProducts: Array<{
-      data: any;
-      productId: string;
-      quantity: number;
-      name: string;
-      unitPrice: number;
-      barcode: string;
-    }> = [];
-
-    for (const item of items) {
-      const productRef = doc(db, "products", item.productId);
-      const productDoc = await getDoc(productRef);
-
-      if (!productDoc.exists()) {
-        return res.status(400).json({ error: `Product "${item.name || item.productId}" does not exist.` });
-      }
-
-      const productData = productDoc.data() as any;
-      const currentStock = Number(productData?.stock ?? 0);
-      const qty = Math.max(1, Number(item.quantity || 1));
-
-      if (currentStock < qty) {
-        return res.status(400).json({
-          error: `Insufficient stock for "${productData?.name || item.name}". Requested: ${qty}, Available: ${currentStock}`
-        });
-      }
-
-      // Authoritative server-side retail price
-      const retail = Number(productData.retailPrice ?? productData.price ?? 0);
-      const discount =
-        productData.discountRetailPrice !== undefined &&
-        Number(productData.discountRetailPrice) > 0 &&
-        Number(productData.discountRetailPrice) < retail
-          ? Number(productData.discountRetailPrice)
-          : productData.discountPrice !== undefined &&
-            Number(productData.discountPrice) > 0 &&
-            Number(productData.discountPrice) < retail
-            ? Number(productData.discountPrice)
-            : undefined;
-      const unitPrice = discount ?? retail;
-
-      validatedProducts.push({
-        productId: item.productId,
-        quantity: qty,
-        name: productData.name || item.name,
-        unitPrice,
-        barcode: productData.barcode || item.barcode || "",
-        data: productData
-      });
-    }
-
-    // Calculate server-side totals
-    const itemsSubtotal = validatedProducts.reduce((sum, p) => sum + p.unitPrice * p.quantity, 0);
-    const totalDiscount = Number(couponDiscount || 0) + Number(pointsDiscount || 0);
-    const totalAmount = Math.max(0, itemsSubtotal + deliveryCharge - totalDiscount);
-    const cogsAmount = validatedProducts.reduce((sum, p) => {
-      const cost = Number(p.data.wholesalePrice || p.data.costPrice || Math.round(p.unitPrice * 0.58));
-      return sum + cost * p.quantity;
-    }, 0);
-    const grossProfit = Math.max(0, totalAmount - cogsAmount);
-
-    const earnedPoints = customer_uid ? Math.floor(totalAmount / 10) : 0;
-    const redeemedPoints = customer_uid ? Number(pointsDiscount || 0) : 0;
-
-    // Note: Stock is NOT deducted on online order creation (stock_deducted: false);
-    // Staff deducts stock transactionally upon scan & fulfillment in Admin Order Management.
-    const rawOrder = {
-      id: orderId,
-      customerName: (customerName || "").trim() || "Website Customer",
-      customerPhone: (customerPhone || "").trim() || "N/A",
-      customerEmail: customerEmail || "",
-      customer_uid: customer_uid || null,
-      address: (address || "").trim() || "Inside Dhaka",
-      items: validatedProducts.map((p, idx) => {
-        const orig = items[idx] || {};
-        return {
-          productId: p.productId,
-          name: p.name,
-          price: p.unitPrice,
-          quantity: p.quantity,
-          scannedQuantity: 0,
-          barcode: p.barcode,
-          ...(orig.isCombo ? { isCombo: true, comboType: orig.comboType } : {}),
-          ...(Array.isArray(orig.comboComponents) && orig.comboComponents.length > 0
-            ? { comboComponents: orig.comboComponents }
-            : {})
-        };
-      }),
-      totalAmount,
-      discountAmount: totalDiscount,
-      totalPaid: 0,
-      dueAmount: totalAmount,
-      paymentStatus: "UNPAID",
-      status: "pending",
-      order_source: "WEBSITE",
-      stock_deducted: false,
-      createdAt: nowIso,
-      paymentMethod: "COD",
-      sessionType: "Online",
-      isPaid: false,
-      ...(couponCode ? { couponCode } : {}),
-      ...(Number(couponDiscount) > 0 ? { couponDiscount: Number(couponDiscount) } : {}),
-      ...(isFreeDelivery ? { isFreeDelivery: true } : {}),
-      ...(Number(pointsDiscount) > 0 ? { pointsDiscount: Number(pointsDiscount) } : {}),
-      pointsEarned: earnedPoints,
-      pointsRedeemed: redeemedPoints,
-      shippingCharge: deliveryCharge,
-      cogsAmount,
-      grossProfit,
-      attribution: attribution || {},
-      analytics: {
-        purchaseEventId: `purchase_${orderId}`,
-        capiStatus: "pending"
-      },
-      paymentTransactions: []
-    };
-
-    const committedOrder = stripUndefinedFields(rawOrder);
-    await setDoc(doc(db, "orders", orderId), committedOrder);
-
-    if (idempotencyKey) {
-      placeOrderIdempotencyCache.set(String(idempotencyKey), {
-        order: committedOrder,
-        expiresAt: nowMs + 15 * 60 * 1000
-      });
-    }
-
-    // Notify Slack asynchronously
-    import('./src/services/slackNotificationService').then(({ slackNotificationService }) => {
-      slackNotificationService.notifyNewOrder(committedOrder as any).catch(console.warn);
-    }).catch(() => {});
-
-    return res.json({
-      success: true,
-      orderId,
-      order: committedOrder,
-      message: `Successfully placed order ${orderId}`
-    });
-  } catch (error: any) {
-    console.error("placeOrder failed:", error);
-    return res.status(500).json({ error: error.message || "Could not create order" });
-  }
-});
+// placeOrder endpoint is mounted via ./server/modules/orders-checkout/routes
 
 // 1C. Finance Collect Due Endpoint (Executive Finance Only)
 app.post("/api/finance/collect-due", verifyFinanceAuth, async (req, res) => {
@@ -5608,8 +4974,8 @@ app.post("/api/finance/transaction", verifyFinanceAuth, async (req, res) => {
   }
 });
 
-// 2. inventoryWatch Endpoint (mirrors Firebase Scheduled Cloud Function)
-app.post("/api/functions/inventoryWatch", async (req, res) => {
+// 2. inventoryWatch Endpoint (Staff Authenticated)
+app.post("/api/functions/inventoryWatch", verifyAdminAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({ error: "Database not initialized" });
   }
@@ -5668,8 +5034,8 @@ app.post("/api/functions/inventoryWatch", async (req, res) => {
   }
 });
 
-// 3. generateProductContent Endpoint (mirrors Firebase Cloud Function)
-app.post("/api/functions/generateProductContent", async (req, res) => {
+// 3. generateProductContent Endpoint (Staff Authenticated)
+app.post("/api/functions/generateProductContent", verifyAdminAuth, aiRateLimiter, async (req, res) => {
   const { productId } = req.body;
   if (!productId) {
     return res.status(400).json({ error: "Product ID is required" });
@@ -5823,8 +5189,8 @@ Do not include any Markdown tags, backticks (\`\`\`json), or raw wrapper texts o
   }
 });
 
-// 4. pricingSuggestion Endpoint (mirrors Firebase Scheduled Cloud Function)
-app.post("/api/functions/pricingSuggestion", async (req, res) => {
+// 4. pricingSuggestion Endpoint (Staff Authenticated)
+app.post("/api/functions/pricingSuggestion", verifyAdminAuth, aiRateLimiter, async (req, res) => {
   if (!db) {
     return res.status(500).json({ error: "Database not initialized" });
   }
@@ -6128,7 +5494,7 @@ Do not wrap in markdown or backticks. Return ONLY valid parseable JSON.`;
 });
 
 // 0. Gemini Barcode Product Identification Endpoint
-app.post("/api/gemini/identify-barcode", async (req, res) => {
+app.post("/api/gemini/identify-barcode", verifyAdminAuth, async (req, res) => {
   const { barcode } = req.body;
   if (!barcode || typeof barcode !== "string") {
     return res.status(400).json({ error: "Barcode string is required" });
@@ -6313,7 +5679,7 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
 });
 
 // 0. Gemini Skincare Product Image Analysis Endpoint
-app.post("/api/gemini/analyze-image", async (req, res) => {
+app.post("/api/gemini/analyze-image", verifyAdminAuth, async (req, res) => {
   const { imageBase64, imageUrl, mimeType } = req.body;
   if (!imageBase64 && !imageUrl) {
     return res.status(400).json({ error: "Image data (imageBase64 or imageUrl) is required" });
@@ -6510,8 +5876,8 @@ Do not write backticks (\`\`\`json) or standard conversational padding around th
   }
 });
 
-// Gemini Product Search by Image Endpoint
-app.post("/api/gemini/search-by-image", async (req, res) => {
+// Gemini Product Search by Image Endpoint (Rate-limited Public Storefront Visual Search)
+app.post("/api/gemini/search-by-image", publicFormRateLimiter, async (req, res) => {
   const { imageBase64, mimeType, catalog } = req.body;
   if (!imageBase64) {
     return res.status(400).json({ error: "imageBase64 is required for image search" });
@@ -7233,178 +6599,7 @@ Do not include any markdown syntax, raw text, or backticks (\`\`\`json) outside 
   }
 });
 
-// Steadfast Courier API Integration
-app.post("/api/steadfast/create-consignment", verifyAdminAuth, async (req, res) => {
-  const { orderId, note } = req.body;
-
-  if (!orderId) {
-    return res.status(400).json({ success: false, error: "Missing required orderId" });
-  }
-
-  if (!db) {
-    return res.status(503).json({ success: false, error: "Database not initialized on server" });
-  }
-
-  try {
-    const orderRef = doc(db, "orders", String(orderId));
-    const orderSnap = await getDoc(orderRef);
-
-    if (!orderSnap.exists()) {
-      return res.status(404).json({ success: false, error: `Order #${orderId} not found in database` });
-    }
-
-    const orderData = orderSnap.data();
-    const customerName = orderData.customerName || orderData.name || orderData.shippingAddress?.fullName || "Customer";
-    const customerPhone = orderData.customerPhone || orderData.phone || orderData.shippingAddress?.phone || "";
-    const customerAddress = orderData.shippingAddress?.address || orderData.address || orderData.shippingAddress || "Dhaka, Bangladesh";
-    const numCodAmount = Number(orderData.totalAmount || orderData.total || 0);
-    const numDeliveryFee = Number(orderData.deliveryFee || (String(customerAddress).toLowerCase().includes("dhaka") ? 60 : 120));
-
-    if (!customerName || !customerPhone) {
-      return res.status(400).json({ success: false, error: "Order is missing customer name or phone number" });
-    }
-
-    const apiKey = process.env.STEADFAST_API_KEY;
-    const secretKey = process.env.STEADFAST_SECRET_KEY;
-    const baseUrl = process.env.STEADFAST_BASE_URL || "https://portal.steadfast.com.bd/api/v1";
-    const isSandboxMode = process.env.STEADFAST_SANDBOX_MODE === "true";
-
-    // If environment keys are provided, attempt real call to Steadfast Courier API
-    if (apiKey && secretKey) {
-      try {
-        console.log(`Sending consignment creation to Steadfast API (${baseUrl}/create_order) for Order #${orderId}`);
-        const apiResponse = await fetch(`${baseUrl}/create_order`, {
-          method: "POST",
-          headers: {
-            "Api-Key": apiKey,
-            "Secret-Key": secretKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            invoice: String(orderId),
-            recipient_name: customerName,
-            recipient_phone: customerPhone,
-            recipient_address: typeof customerAddress === 'string' ? customerAddress : JSON.stringify(customerAddress),
-            cod_amount: numCodAmount,
-            note: note || "Korean Skin Food BD cosmetics"
-          })
-        });
-
-        const responseData: any = await apiResponse.json();
-        if (apiResponse.ok && (responseData.status === 200 || responseData.code === 200) && responseData.consignment) {
-          const c = responseData.consignment;
-          const consignmentId = String(c.consignment_id || c.id || `SF-${Math.floor(100000 + Math.random() * 900000)}`);
-          const trackingCode = String(c.tracking_code || c.tracking_id || consignmentId);
-          const trackingUrl = `https://steadfast.com.bd/t/${trackingCode}`;
-
-          return res.json({
-            success: true,
-            message: "Consignment created successfully on Steadfast Courier",
-            courier: {
-              provider: "steadfast",
-              consignmentId,
-              trackingCode,
-              status: "in_transit",
-              codAmount: numCodAmount,
-              deliveryFee: numDeliveryFee,
-              trackingUrl,
-              createdAt: new Date().toISOString()
-            }
-          });
-        } else {
-          console.warn("Steadfast API returned non-200 or error:", responseData);
-          const apiErrorMessage = responseData?.errors
-            ? (typeof responseData.errors === 'string' ? responseData.errors : JSON.stringify(responseData.errors))
-            : (responseData?.message || responseData?.error || "Steadfast API request failed");
-
-          if (!isSandboxMode) {
-            return res.status(400).json({
-              success: false,
-              error: `Steadfast API error: ${apiErrorMessage}`
-            });
-          }
-        }
-      } catch (err: any) {
-        console.error("Error communicating with Steadfast Courier API:", err.message);
-        if (!isSandboxMode) {
-          return res.status(500).json({
-            success: false,
-            error: `Network error connecting to Steadfast API: ${err.message}`
-          });
-        }
-      }
-    } else {
-      if (!isSandboxMode) {
-        return res.status(400).json({
-          success: false,
-          error: "Steadfast is not configured yet. Add API credentials in settings."
-        });
-      }
-    }
-
-    // Explicit opt-in sandbox mode only (STEADFAST_SANDBOX_MODE=true)
-    const consignmentId = `SANDBOX-SF-${Math.floor(100000 + Math.random() * 900000)}`;
-    const trackingCode = `S${Math.floor(1000000 + Math.random() * 9000000)}`;
-    const trackingUrl = `https://steadfast.com.bd/t/${trackingCode}`;
-
-    return res.json({
-      success: true,
-      message: "[SANDBOX MODE] Consignment simulated for testing",
-      isSandboxFallback: true,
-      courier: {
-        provider: "steadfast",
-        consignmentId,
-        trackingCode,
-        status: "in_transit",
-        codAmount: numCodAmount,
-        deliveryFee: numDeliveryFee,
-        trackingUrl,
-        createdAt: new Date().toISOString()
-      }
-    });
-
-  } catch (err: any) {
-    console.error("Error loading order for steadfast consignment:", err);
-    return res.status(500).json({ success: false, error: "Internal server error processing consignment" });
-  }
-});
-
-app.get("/api/steadfast/status/:consignmentId", async (req, res) => {
-  const { consignmentId } = req.params;
-  const apiKey = process.env.STEADFAST_API_KEY;
-  const secretKey = process.env.STEADFAST_SECRET_KEY;
-  const baseUrl = process.env.STEADFAST_BASE_URL || "https://portal.steadfast.com.bd/api/v1";
-
-  if (apiKey && secretKey && consignmentId) {
-    try {
-      const apiResponse = await fetch(`${baseUrl}/status_by_cid/${consignmentId}`, {
-        headers: {
-          "Api-Key": apiKey,
-          "Secret-Key": secretKey
-        }
-      });
-      if (apiResponse.ok) {
-        const data = await apiResponse.json();
-        return res.json(data);
-      }
-    } catch (err: any) {
-      console.warn("Failed to fetch Steadfast status online:", err.message);
-    }
-  }
-
-  if (process.env.STEADFAST_SANDBOX_MODE === "true" || consignmentId.startsWith("SANDBOX")) {
-    return res.json({
-      status: 200,
-      delivery_status: "in_transit",
-      consignment_id: consignmentId
-    });
-  }
-
-  res.status(400).json({
-    success: false,
-    error: "Steadfast API is not configured or consignment status lookup failed."
-  });
-});
+// Steadfast Courier endpoints are mounted via ./server/modules/steadfast-courier/routes
 
 // ==========================================
 // ==========================================
@@ -7483,11 +6678,10 @@ async function getOrFetchTrackingSettings(): Promise<ServerTrackingSettings> {
 
 const serverDispatchedCapiEvents = new Set<string>();
 
-// Get dynamic tracking settings
-app.get("/api/tracking/settings", async (req, res) => {
+// Get dynamic tracking settings (Staff Authenticated; raw accessToken NEVER exposed)
+app.get("/api/tracking/settings", verifyAdminAuth, async (req, res) => {
   try {
     const settings = await getOrFetchTrackingSettings();
-    // Return settings with partially masked accessToken for security
     const maskedToken = settings.metaCapi.accessToken
       ? `${settings.metaCapi.accessToken.slice(0, 8)}••••••••${settings.metaCapi.accessToken.slice(-6)}`
       : "";
@@ -7496,7 +6690,8 @@ app.get("/api/tracking/settings", async (req, res) => {
       settings: {
         ...settings,
         metaCapi: {
-          ...settings.metaCapi,
+          enabled: settings.metaCapi.enabled,
+          testEventCode: settings.metaCapi.testEventCode || "",
           hasToken: Boolean(settings.metaCapi.accessToken),
           maskedToken,
         }
@@ -7507,8 +6702,8 @@ app.get("/api/tracking/settings", async (req, res) => {
   }
 });
 
-// Update dynamic tracking settings
-app.post("/api/tracking/settings", async (req, res) => {
+// Update dynamic tracking settings (Staff Authenticated)
+app.post("/api/tracking/settings", verifyAdminAuth, async (req, res) => {
   try {
     const incoming = req.body;
     const current = await getOrFetchTrackingSettings();
@@ -7535,7 +6730,7 @@ app.post("/api/tracking/settings", async (req, res) => {
           : current.metaCapi.testEventCode || "").trim().toUpperCase(),
       },
       updatedAt: new Date().toISOString(),
-      updatedBy: req.body.updatedBy || "admin"
+      updatedBy: (req as any).user?.email || req.body.updatedBy || "admin"
     };
 
     serverTrackingSettingsCache = updated;
@@ -7546,15 +6741,34 @@ app.post("/api/tracking/settings", async (req, res) => {
       await setDoc(trackingDocRef, updated, { merge: true });
     }
 
-    console.log("[Server Tracking] Dynamic settings updated and synced to cache & Firestore");
-    res.json({ success: true, message: "Tracking settings saved and synchronized", settings: updated });
+    await writeAuditLog({
+      action: "TRACKING_SETTINGS_UPDATED",
+      entityType: "settings",
+      entityId: "tracking",
+      actorUid: (req as any).user?.uid,
+      actorEmail: (req as any).user?.email,
+      actorRole: (req as any).user?.role,
+    });
+
+    res.json({
+      success: true,
+      message: "Tracking settings saved and synchronized",
+      settings: {
+        ...updated,
+        metaCapi: {
+          enabled: updated.metaCapi.enabled,
+          testEventCode: updated.metaCapi.testEventCode || "",
+          hasToken: Boolean(updated.metaCapi.accessToken),
+        }
+      }
+    });
   } catch (err: any) {
     console.error("[Server Tracking] Error updating settings:", err);
     res.status(500).json({ success: false, error: err?.message || "Failed to save tracking settings" });
   }
 });
 
-app.get("/api/tracking/meta-capi/status", async (req, res) => {
+app.get("/api/tracking/meta-capi/status", verifyAdminAuth, async (req, res) => {
   const settings = await getOrFetchTrackingSettings();
   const pixelId = settings.metaPixel.pixelId || process.env.META_PIXEL_ID || "1181966473667367";
   const hasToken = Boolean(settings.metaCapi.accessToken || process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN);
@@ -7807,9 +7021,9 @@ app.post("/api/tracking/meta-capi", async (req, res) => {
 });
 
 // =========================================================================
-// POS CHECKOUT FUNCTION SERVER ENDPOINT
+// POS CHECKOUT FUNCTION SERVER ENDPOINT (Staff Authenticated)
 // =========================================================================
-app.post("/api/functions/posCheckout", async (req, res) => {
+app.post("/api/functions/posCheckout", verifyAdminAuth, async (req, res) => {
   try {
     if (!db) {
       return res.status(503).json({ success: false, error: "Firestore database not initialized on server." });
@@ -8123,6 +7337,16 @@ app.post("/api/functions/posCheckout", async (req, res) => {
       return newOrder;
     });
 
+    await writeAuditLog({
+      action: 'POS_ORDER_CREATED',
+      entityType: 'order',
+      entityId: committedOrder.id,
+      actorUid: (req as any).user?.uid,
+      actorEmail: (req as any).user?.email,
+      actorRole: (req as any).user?.role,
+      details: { totalAmount: committedOrder.totalAmount, paymentMethod: committedOrder.paymentMethod },
+    });
+
     return res.json({
       success: true,
       order: committedOrder,
@@ -8295,7 +7519,7 @@ app.post("/api/wholesale/payments", verifyFinanceAuth, async (req, res) => {
 });
 
 
-app.post("/api/wholesale/orders/create", async (req, res) => {
+app.post("/api/wholesale/orders/create", verifyStaffOrWholesaleAuth, async (req, res) => {
   if (!db) {
     return res.status(500).json({
       success: false,
@@ -8303,6 +7527,7 @@ app.post("/api/wholesale/orders/create", async (req, res) => {
     });
   }
 
+  const actor = (req as any).user;
   const {
     userId,
     items,
@@ -8314,15 +7539,17 @@ app.post("/api/wholesale/orders/create", async (req, res) => {
     orderSource = 'wholesale_portal'
   } = req.body;
 
-  // 1. Authenticate user identifier
-  if (!userId || typeof userId !== 'string' || !userId.trim()) {
+  // 1. Resolve authoritative caller UID (prevent impersonation by non-staff)
+  const cleanUserId = actor?.isStaff && typeof userId === 'string' && userId.trim()
+    ? String(userId).trim()
+    : actor.uid;
+
+  if (!cleanUserId) {
     return res.status(401).json({
       success: false,
       error: "User authentication required. Missing or invalid userId."
     });
   }
-
-  const cleanUserId = String(userId).trim();
 
   // 2. Validate Items & Checkout Info structure
   if (!Array.isArray(items) || items.length === 0) {
@@ -8404,20 +7631,21 @@ app.post("/api/wholesale/orders/create", async (req, res) => {
       console.warn("[WholesaleOrder] Note: could not pre-fetch users document:", uErr);
     }
 
-    // Verify wholesale access authority (allow any authenticated user or registered partner)
-    const hasWholesaleAccess = 
-      Boolean(cleanUserId) ||
+    // Strict wholesale access check (NEVER trust truthy userId alone)
+    const hasWholesaleAccess = Boolean(
+      actor?.isStaff ||
       (wsCustomerData && (wsCustomerData.wholesaleAccess === true || wsCustomerData.status === 'active')) ||
-      (userData && (userData.wholesaleAccess === true || ['admin', 'super_admin', 'inventory_manager', 'staff'].includes(userData.role)));
+      (userData && (userData.wholesaleAccess === true || ['admin', 'super_admin', 'inventory_manager', 'hr'].includes(userData.role)))
+    );
 
     if (!hasWholesaleAccess) {
       return res.status(403).json({
         success: false,
-        error: "Wholesale ordering access denied. Please log in to your wholesale account."
+        error: "Wholesale ordering access denied. Verified wholesale account required."
       });
     }
 
-    // Auto-create or ensure wholesale customer profile exists
+    // Ensure wholesale customer profile exists when user/staff authorized
     if (!wsCustomerData) {
       try {
         await setDoc(wsCustomerRef, {
@@ -10196,8 +9424,8 @@ app.get("/api/meta-catalog/preview", async (req, res) => {
   }
 });
 
-// 4. Get Meta Catalog Settings
-app.get("/api/meta-catalog/settings", async (req, res) => {
+// 4. Get Meta Catalog Settings (Staff Authenticated)
+app.get("/api/meta-catalog/settings", verifyAdminAuth, async (req, res) => {
   try {
     const dynamicSiteUrl = resolveSiteBaseUrl(req);
     let settings: any = {
@@ -10222,7 +9450,7 @@ app.get("/api/meta-catalog/settings", async (req, res) => {
           pixelId: data.pixelId || "1181966467366737",
           domainUrl: normalizeConfiguredDomainUrl(data.domainUrl, req),
           hasAccessToken: !!data.accessToken,
-          accessToken: undefined // Do not leak full token
+          accessToken: undefined
         };
       }
     }
@@ -10233,8 +9461,8 @@ app.get("/api/meta-catalog/settings", async (req, res) => {
   }
 });
 
-// 5. Save Meta Catalog Settings
-app.post("/api/meta-catalog/settings", async (req, res) => {
+// 5. Save Meta Catalog Settings (Staff Authenticated)
+app.post("/api/meta-catalog/settings", verifyAdminAuth, async (req, res) => {
   try {
     const { catalogId, accessToken, pixelId, currency, domainUrl, defaultCategory } = req.body;
     
@@ -10268,8 +9496,8 @@ app.post("/api/meta-catalog/settings", async (req, res) => {
   }
 });
 
-// 6. Test Meta Graph API Connection
-app.post("/api/meta-catalog/test-connection", async (req, res) => {
+// 6. Test Meta Graph API Connection (Staff Authenticated)
+app.post("/api/meta-catalog/test-connection", verifyAdminAuth, async (req, res) => {
   try {
     let catalogId = req.body?.catalogId;
     let accessToken = req.body?.accessToken;
@@ -10330,8 +9558,8 @@ app.post("/api/meta-catalog/test-connection", async (req, res) => {
   }
 });
 
-// 7. Direct Meta Graph API Batch Items Sync (/items_batch)
-app.post("/api/meta-catalog/sync", async (req, res) => {
+// 7. Direct Meta Graph API Batch Items Sync (/items_batch) (Staff Authenticated)
+app.post("/api/meta-catalog/sync", verifyAdminAuth, async (req, res) => {
   try {
     let catalogId = req.body?.catalogId;
     let accessToken = req.body?.accessToken;
@@ -10759,7 +9987,7 @@ app.get("/api/pinterest/settings", async (req, res) => {
   }
 });
 
-app.post("/api/pinterest/settings", async (req, res) => {
+app.post("/api/pinterest/settings", verifyAdminAuth, async (req, res) => {
   try {
     const incoming = req.body || {};
     if (db) {
@@ -10775,7 +10003,7 @@ app.post("/api/pinterest/settings", async (req, res) => {
 });
 
 // 6. Test Pinterest Domain Verification Endpoint
-app.get("/api/pinterest/test-verify", async (req, res) => {
+app.get("/api/pinterest/test-verify", verifyAdminAuth, async (req, res) => {
   let verificationCode = "7da0826bf938ef0f99cb087f3822459f";
   let fileName = "pinterest-7da08.html";
   if (db) {
@@ -10805,317 +10033,8 @@ app.get("/api/pinterest/test-verify", async (req, res) => {
   });
 });
 
-// ==========================================
-// TECHNICAL SEO & GOOGLE RANKING ENGINE
-// ==========================================
-
-const BASE_STORE_URL = DEFAULT_SITE_URL;
-
-function isSearchEngineBot(userAgent?: string): boolean {
-  if (!userAgent) return false;
-  const botList = [
-    "googlebot", "bingbot", "slurp", "duckduckbot", "baiduspider",
-    "yandexbot", "sogou", "exabot", "facebot", "facebookexternalhit",
-    "twitterbot", "rogerbot", "linkedinbot", "embedly", "quora link preview",
-    "showyoubot", "outbrain", "pinterest", "slackbot", "vkshare", "w3c_validator",
-    "whatsapp", "telegrambot", "discordbot", "applebot"
-  ];
-  const ua = userAgent.toLowerCase();
-  return botList.some(bot => ua.includes(bot));
-}
-
-// 1. Technical robots.txt Endpoint (Dynamically adapts to active domain, defaulting to https://koreanskinfood.com)
-app.get("/robots.txt", (req, res) => {
-  const siteBase = resolveSiteBaseUrl(req);
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=3600");
-
-  const defaultRobots = [
-    `# robots.txt for Korean Skin Food BD (${siteBase}/)`,
-    "User-agent: *",
-    "Allow: /",
-    "Allow: /shop",
-    "Allow: /brand/",
-    "Allow: /brands",
-    "Allow: /guides",
-    "Allow: /guide/",
-    "Allow: /about-us",
-    "Allow: /contact-us",
-    "Allow: /privacy-policy",
-    "Allow: /terms-of-service",
-    "Allow: /become-a-creator",
-    "",
-    "# Block administrative, private user, checkout, and internal POS paths",
-    "Disallow: /admin/",
-    "Disallow: /login",
-    "Disallow: /profile",
-    "Disallow: /checkout",
-    "Disallow: /thank-you",
-    "Disallow: /wholesale/profile",
-    "Disallow: /wholesale/checkout",
-    "Disallow: /wholesale/cart",
-    "Disallow: /creator/dashboard",
-    "Disallow: /creator/reels/upload",
-    "Disallow: /pos/",
-    "Disallow: /api/",
-    "",
-    `Sitemap: ${siteBase}/sitemap.xml`
-  ].join("\n");
-
-  return res.send(defaultRobots);
-});
-
-// 2. Dynamic XML Sitemap (/sitemap.xml)
-app.get("/sitemap.xml", async (req, res) => {
-  try {
-    const siteBase = resolveSiteBaseUrl(req);
-    res.setHeader("Content-Type", "application/xml; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=14400");
-
-    let products: any[] = [];
-    if (db) {
-      try {
-        const snap = await getDocs(collection(db, "products"));
-        snap.forEach(d => {
-          const data = d.data();
-          products.push({ id: d.id, ...data });
-        });
-      } catch (err) {
-        console.warn("[Sitemap] Firestore products load warning:", err);
-      }
-    }
-
-    // Static core pages
-    const staticRoutes = [
-      { url: `${siteBase}/`, priority: "1.0", changefreq: "daily", lastmod: "2026-03-25" },
-      { url: `${siteBase}/shop`, priority: "0.9", changefreq: "daily", lastmod: "2026-03-25" },
-      { url: `${siteBase}/brands`, priority: "0.9", changefreq: "weekly", lastmod: "2026-03-22" },
-      { url: `${siteBase}/guides`, priority: "0.85", changefreq: "weekly", lastmod: "2026-03-24" },
-      { url: `${siteBase}/about-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
-      { url: `${siteBase}/contact-us`, priority: "0.6", changefreq: "monthly", lastmod: "2026-02-15" },
-      { url: `${siteBase}/become-a-creator`, priority: "0.7", changefreq: "monthly", lastmod: "2026-02-20" },
-      { url: `${siteBase}/privacy-policy`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" },
-      { url: `${siteBase}/terms-of-service`, priority: "0.3", changefreq: "yearly", lastmod: "2026-01-10" }
-    ];
-
-    // Top Flagship Brands
-    const brandSlugs = ["cosrx", "beauty-of-joseon", "skin1004", "anua", "some-by-mi", "round-lab"];
-    const brandRoutes = brandSlugs.map(slug => ({
-      url: `${siteBase}/brand/${slug}`,
-      priority: "0.85",
-      changefreq: "weekly",
-      lastmod: "2026-03-22"
-    }));
-
-    // Top 10 Skincare Routine Guides
-    const guideSlugs = [
-      "korean-skincare-routine-for-beginners-in-bangladesh",
-      "best-korean-sunscreen-for-oily-skin",
-      "korean-skincare-for-sensitive-skin",
-      "how-to-build-a-skincare-routine-for-acne-prone-skin",
-      "korean-moisturizer-for-dry-skin",
-      "how-to-identify-authentic-korean-skincare-products",
-      "understanding-centella-asiatica-in-skincare",
-      "niacinamide-uses-and-precautions",
-      "how-to-layer-korean-skincare-products",
-      "choosing-skincare-products-according-to-skin-type"
-    ];
-    const guideRoutes = guideSlugs.map(slug => ({
-      url: `${siteBase}/guide/${slug}`,
-      priority: "0.8",
-      changefreq: "weekly",
-      lastmod: "2026-03-24"
-    }));
-
-    // Product routes from active Firestore products
-    const productRoutes = products
-      .filter(p => p.id && !p.noindex)
-      .map(p => {
-        let lastmod = "2026-03-20";
-        if (p.updatedAt) {
-          try {
-            lastmod = new Date(p.updatedAt).toISOString().split("T")[0];
-          } catch {}
-        } else if (p.createdAt) {
-          try {
-            lastmod = new Date(p.createdAt).toISOString().split("T")[0];
-          } catch {}
-        }
-        return {
-          url: `${siteBase}/product/${encodeURIComponent(p.id)}`,
-          priority: "0.8",
-          changefreq: "weekly",
-          lastmod
-        };
-      });
-
-    const allUrls = [...staticRoutes, ...brandRoutes, ...guideRoutes, ...productRoutes];
-
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
-
-    for (const item of allUrls) {
-      xml += `  <url>\n`;
-      xml += `    <loc>${escapeXmlString(item.url)}</loc>\n`;
-      xml += `    <lastmod>${item.lastmod}</lastmod>\n`;
-      xml += `    <changefreq>${item.changefreq}</changefreq>\n`;
-      xml += `    <priority>${item.priority}</priority>\n`;
-      xml += `  </url>\n`;
-    }
-
-    xml += `</urlset>`;
-    return res.send(xml);
-  } catch (err: any) {
-    console.error("[Sitemap] Error building sitemap:", err);
-    return res.status(500).send("<!-- Error building sitemap -->");
-  }
-});
-
-// 3. Admin SEO Health Overview Endpoint
-app.get("/api/seo/overview", async (req, res) => {
-  try {
-    let products: any[] = [];
-    if (db) {
-      const snap = await getDocs(collection(db, "products"));
-      snap.forEach(d => {
-        products.push({ id: d.id, ...d.data() });
-      });
-    }
-
-    let missingSeoTitleCount = 0;
-    let missingMetaDescriptionCount = 0;
-    let missingAltTextCount = 0;
-    let overlongTitleCount = 0;
-    let overlongDescriptionCount = 0;
-    let invalidSchemaCount = 0;
-    const issuesList: Array<{ productId: string; name: string; issue: string; severity: "warning" | "error" }> = [];
-    const seenTitles = new Map<string, string>();
-    let duplicateTitlesCount = 0;
-
-    for (const p of products) {
-      const title = (p.seoTitle || p.metaTitle || "").trim();
-      const desc = (p.metaDescription || "").trim();
-      const alt = (p.imageAltText || p.altText || "").trim();
-
-      if (!title) {
-        missingSeoTitleCount++;
-        issuesList.push({ productId: p.id, name: p.name, issue: "Missing custom SEO title", severity: "warning" });
-      } else if (title.length > 60) {
-        overlongTitleCount++;
-        issuesList.push({ productId: p.id, name: p.name, issue: `SEO title over 60 chars (${title.length} chars)`, severity: "warning" });
-      }
-
-      if (title) {
-        const lower = title.toLowerCase();
-        if (seenTitles.has(lower)) {
-          duplicateTitlesCount++;
-          issuesList.push({ productId: p.id, name: p.name, issue: `Duplicate title with product ID: ${seenTitles.get(lower)}`, severity: "error" });
-        } else {
-          seenTitles.set(lower, p.id);
-        }
-      }
-
-      if (!desc) {
-        missingMetaDescriptionCount++;
-        issuesList.push({ productId: p.id, name: p.name, issue: "Missing meta description", severity: "warning" });
-      } else if (desc.length > 160) {
-        overlongDescriptionCount++;
-        issuesList.push({ productId: p.id, name: p.name, issue: `Meta description exceeds 160 chars (${desc.length} chars)`, severity: "warning" });
-      }
-
-      if (!alt) {
-        missingAltTextCount++;
-        issuesList.push({ productId: p.id, name: p.name, issue: "Missing image alt text for accessibility and Image SEO", severity: "warning" });
-      }
-
-      if (p.generatedSeoContent) {
-        try {
-          const parsed = typeof p.generatedSeoContent === "string" ? JSON.parse(p.generatedSeoContent) : p.generatedSeoContent;
-          if (parsed.jsonLdSchema && typeof parsed.jsonLdSchema === "string") {
-            JSON.parse(parsed.jsonLdSchema);
-          }
-        } catch {
-          invalidSchemaCount++;
-          issuesList.push({ productId: p.id, name: p.name, issue: "Malformed JSON-LD schema syntax", severity: "error" });
-        }
-      }
-    }
-
-    const sitemapProductCount = products.filter(p => !p.noindex).length;
-
-    return res.json({
-      success: true,
-      stats: {
-        totalProducts: products.length,
-        missingSeoTitleCount,
-        missingMetaDescriptionCount,
-        missingAltTextCount,
-        overlongTitleCount,
-        overlongDescriptionCount,
-        duplicateTitlesCount,
-        invalidSchemaCount,
-        sitemapProductCount,
-        lastAuditTimestamp: new Date().toISOString()
-      },
-      issues: issuesList.slice(0, 50)
-    });
-  } catch (err: any) {
-    console.error("[SEO Overview] Error auditing catalog:", err);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Helper: Injects pre-rendered SEO tags into base index.html for crawlers
-function injectMetaIntoHtml(html: string, options: {
-  title: string;
-  description: string;
-  canonicalUrl: string;
-  ogImage?: string;
-  ogImageAlt?: string;
-  ogType?: string;
-  jsonLd?: Record<string, any> | Array<Record<string, any>>;
-  noindex?: boolean;
-}): string {
-  const { title, description, canonicalUrl, ogImage, ogImageAlt, ogType, jsonLd, noindex } = options;
-  const image = ogImage || "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80";
-  const imageAlt = ogImageAlt || title;
-  const type = ogType || "website";
-  const robots = noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1";
-
-  let tags = `\n    <!-- Server-Side SEO & OpenGraph Meta Injection (Crawler Optimized) -->\n`;
-  tags += `    <title>${escapeXmlString(title)}</title>\n`;
-  tags += `    <meta name="description" content="${escapeXmlString(description)}" />\n`;
-  tags += `    <meta name="robots" content="${robots}" />\n`;
-  tags += `    <link rel="canonical" href="${escapeXmlString(canonicalUrl)}" />\n`;
-  tags += `    <meta property="og:title" content="${escapeXmlString(title)}" />\n`;
-  tags += `    <meta property="og:description" content="${escapeXmlString(description)}" />\n`;
-  tags += `    <meta property="og:url" content="${escapeXmlString(canonicalUrl)}" />\n`;
-  tags += `    <meta property="og:site_name" content="Korean Skin Food BD" />\n`;
-  tags += `    <meta property="og:type" content="${type}" />\n`;
-  tags += `    <meta property="og:image" content="${escapeXmlString(image)}" />\n`;
-  tags += `    <meta property="og:image:alt" content="${escapeXmlString(imageAlt)}" />\n`;
-  tags += `    <meta name="twitter:card" content="summary_large_image" />\n`;
-  tags += `    <meta name="twitter:title" content="${escapeXmlString(title)}" />\n`;
-  tags += `    <meta name="twitter:description" content="${escapeXmlString(description)}" />\n`;
-  tags += `    <meta name="twitter:image" content="${escapeXmlString(image)}" />\n`;
-
-  if (jsonLd) {
-    tags += `    <script id="seo-json-ld" type="application/ld+json">${JSON.stringify(jsonLd)}</script>\n`;
-  }
-
-  // Replace existing title and standard meta, or insert right before </head>
-  let cleanHtml = html
-    .replace(/<title>.*?<\/title>/gi, "")
-    .replace(/<meta\s+name=["']description["'][^>]*>/gi, "")
-    .replace(/<meta\s+property=["']og:title["'][^>]*>/gi, "")
-    .replace(/<meta\s+property=["']og:description["'][^>]*>/gi, "")
-    .replace(/<meta\s+property=["']og:image["'][^>]*>/gi, "")
-    .replace(/<meta\s+name=["']twitter:title["'][^>]*>/gi, "")
-    .replace(/<meta\s+name=["']twitter:description["'][^>]*>/gi, "");
-
-  cleanHtml = cleanHtml.replace("</head>", `${tags}  </head>`);
-  return cleanHtml;
-}
+// Technical SEO routes (/robots.txt, /sitemap.xml, /api/seo/overview, SSR meta injection)
+// are imported from ./server/modules/catalog-seo/routes
 
 async function startServer() {
   let vite: any = null;
@@ -11132,7 +10051,6 @@ async function startServer() {
 
   // CRAWLER SSR META INJECTION & SPA FALLBACK
   app.get('*', async (req, res, next) => {
-    // If request is an API route or static asset, pass along
     if (req.path.startsWith("/api/") || req.path.includes(".")) {
       return next();
     }
@@ -11154,123 +10072,15 @@ async function startServer() {
         rawHtml = await vite.transformIndexHtml(req.url, rawHtml);
       }
 
-      // If it's a regular browser user, deliver standard index.html for client SPA hydration
       if (!isBot) {
         return res.status(200).send(rawHtml);
       }
 
-      console.log(`[SEO Bot Crawler Detected] User-Agent: "${userAgent.slice(0, 45)}" requested path: ${req.path}`);
-      const siteBase = resolveSiteBaseUrl(req);
-
-      // Build target metadata according to requested path
-      let meta = {
-        title: "Korean Skin Food BD | Authentic Korean Skincare in Bangladesh",
-        description: "Shop authentic Korean skincare products in Bangladesh at Korean Skin Food BD. Explore trusted Korean beauty brands, skincare essentials, product information and convenient nationwide delivery.",
-        canonicalUrl: `${siteBase}${req.path === "/" ? "/" : req.path}`,
-        ogImage: "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1200&q=80",
-        ogImageAlt: "Korean Skin Food BD Authentic Korean Skincare in Bangladesh",
-        ogType: "website",
-        jsonLd: undefined as any,
-        noindex: false
-      };
-
-      // 1. Product Detail Page
-      if (req.path.startsWith("/product/")) {
-        const prodId = req.path.replace("/product/", "").trim();
-        let product: any = null;
-
-        if (db && prodId) {
-          try {
-            const pDoc = await getDoc(doc(db, "products", prodId));
-            if (pDoc.exists()) {
-              product = { id: pDoc.id, ...pDoc.data() };
-            }
-          } catch (e) {
-            console.warn("[Bot SSR] Error fetching product doc:", e);
-          }
-        }
-
-        if (product) {
-          const sizeSuffix = product.ml && product.ml.trim() ? ` ${product.ml.trim()}` : "";
-          const pTitle = (product.seoTitle || product.metaTitle)?.trim() || `${product.name}${sizeSuffix} | Price in Bangladesh | Korean Skin Food BD`;
-          const pDesc = (product.metaDescription)?.trim() || `Discover ${product.name} at Korean Skin Food BD. Explore product details, ingredients, skin compatibility, directions for use, and current availability in Bangladesh.`;
-          const regularPrice = typeof product.price === 'number' ? product.price : (product.retailPrice || 0);
-          const salePrice = typeof product.discountPrice === 'number' && product.discountPrice > 0 ? product.discountPrice : regularPrice;
-          const activePrice = salePrice > 0 ? salePrice : regularPrice;
-          const isAvail = (product.stock ?? 0) > 0;
-
-          meta = {
-            title: pTitle,
-            description: pDesc,
-            canonicalUrl: `${siteBase}/product/${encodeURIComponent(product.id)}`,
-            ogImage: product.image || (Array.isArray(product.images) && product.images[0]) || meta.ogImage,
-            ogImageAlt: product.imageAltText || `${product.name} ${product.brand || 'Korean Skin Food BD'}`,
-            ogType: "product",
-            noindex: !!product.noindex,
-            jsonLd: {
-              "@context": "https://schema.org",
-              "@type": "Product",
-              "@id": `${siteBase}/product/${encodeURIComponent(product.id)}#product`,
-              name: product.name,
-              image: [product.image, ...(product.images || [])].filter(Boolean),
-              description: pDesc,
-              sku: product.sku || product.barcode || product.id,
-              brand: {
-                "@type": "Brand",
-                name: product.brand || "Korean Skin Food BD"
-              },
-              offers: {
-                "@type": "Offer",
-                url: `${siteBase}/product/${encodeURIComponent(product.id)}`,
-                priceCurrency: "BDT",
-                price: activePrice,
-                availability: isAvail ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-                itemCondition: "https://schema.org/NewCondition"
-              }
-            }
-          };
-        } else {
-          // Real 404 for bots requesting non-existent products
-          meta.title = "Product Not Found | Korean Skin Food BD";
-          meta.description = "The requested Korean skincare product could not be found or has been discontinued.";
-          meta.noindex = true;
-          const modifiedHtml = injectMetaIntoHtml(rawHtml, meta);
-          return res.status(404).send(modifiedHtml);
-        }
-      } 
-      // 2. Dedicated Brand Page
-      else if (req.path.startsWith("/brand/")) {
-        const bSlug = req.path.replace("/brand/", "").trim();
-        const brandName = bSlug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-        meta.title = `${brandName} Bangladesh | Authentic Korean Skincare | Korean Skin Food BD`;
-        meta.description = `Shop 100% authentic ${brandName} skincare in Bangladesh. Direct Seoul imports, genuine ingredients, verified batch standards, and fast nationwide delivery.`;
-        meta.canonicalUrl = `${siteBase}/brand/${bSlug}`;
-      }
-      // 3. Educational Guide Page
-      else if (req.path.startsWith("/guide/")) {
-        const gSlug = req.path.replace("/guide/", "").trim();
-        const guideTitle = gSlug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-        meta.title = `${guideTitle} | Korean Skin Food BD`;
-        meta.description = `Learn essential Korean skincare routines, active ingredients, and barrier protection adapted for Bangladesh's climate.`;
-        meta.canonicalUrl = `${siteBase}/guide/${gSlug}`;
-        meta.ogType = "article";
-      }
-      // 4. Private / Transactional / Admin routes should strictly return noindex to bots
-      else if (
-        req.path.startsWith("/admin") ||
-        req.path === "/login" ||
-        req.path.startsWith("/profile") ||
-        req.path.startsWith("/checkout") ||
-        req.path.startsWith("/thank-you") ||
-        req.path.startsWith("/wholesale/profile")
-      ) {
-        meta.noindex = true;
-      }
-
+      const { status, meta } = await buildBotSsrMetadata(req);
       const injectedHtml = injectMetaIntoHtml(rawHtml, meta);
-      return res.status(200).send(injectedHtml);
+      return res.status(status).send(injectedHtml);
     } catch (err) {
-      console.error("[Crawler Meta Injection Error]:", err);
+      logger.warn('ssr-meta', 'Crawler meta injection error', { error: (err as any)?.message });
       return next();
     }
   });

@@ -7,6 +7,7 @@ import { useCategories } from '../hooks/queries/categories';
 import { useBrands } from '../hooks/queries/brands';
 import { useAllTaxonomies } from '../hooks/queries/taxonomies';
 import { agentService } from '../services/agentService';
+import { authFetch } from '../services/apiClient';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { Product, TaxonomyDimensionType } from '../types';
 import { MediaLibraryModal } from './MediaLibraryModal';
@@ -37,6 +38,7 @@ import { useAuth } from '../context/AuthContext';
 import { KOREAN_BRANDS, getUniqueBrandList, isSameBrand, getCanonicalBrandName } from '../data/brands';
 import { normalizeProductPricing, getRetailPrice, getWholesalePrice, getComboEffectiveStock } from '../utils/pricing';
 import { ComboPackageModal } from './ComboPackageModal';
+import { evaluateProductCompleteness } from '../utils/productCompleteness';
 
 const SINGLE_CATEGORIES = [
   'All', 
@@ -255,7 +257,7 @@ export const ProductManagement: React.FC = () => {
           escapeCsvCell(np.discountRetailPrice ?? ''),
           escapeCsvCell(np.cashPrice ?? ''),
           escapeCsvCell(totalValuation),
-          escapeCsvCell(p.rating ?? 5),
+          escapeCsvCell(p.rating ?? 0),
           escapeCsvCell(p.reviewsCount ?? 0),
           escapeCsvCell(Array.isArray(p.skinTypes) ? p.skinTypes.join(', ') : ''),
           escapeCsvCell(p.image || ''),
@@ -530,7 +532,7 @@ export const ProductManagement: React.FC = () => {
       // Search online/Google for product name
       setAlertMsg({ type: 'info', text: `🔍 Barcode "${cleanBc}" inventory-তে পাওয়া যায়নি। Google search করে Product Name খোঁজ করা হচ্ছে...` });
 
-      const res = await fetch('/api/gemini/identify-barcode', {
+      const res = await authFetch('/api/gemini/identify-barcode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ barcode: cleanBc })
@@ -543,7 +545,7 @@ export const ProductManagement: React.FC = () => {
           setPendingScannedBarcode(cleanBc);
 
           // Notify Slack of scanned barcode product import request
-          fetch('/api/slack/notify-product-import', {
+          authFetch('/api/slack/notify-product-import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -576,8 +578,8 @@ export const ProductManagement: React.FC = () => {
             images: [],
             description: data.description || `Authentic Korean skincare product with barcode ${cleanBc}. Formulated to hydrate and restore natural radiance.`,
             descriptionBN: data.descriptionBN || 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।',
-            rating: 4.8,
-            reviewsCount: 1,
+            rating: 0,
+            reviewsCount: 0,
             barcode: cleanBc,
             barcodeNormalized: cleanBc,
             sku: '',
@@ -787,7 +789,7 @@ export const ProductManagement: React.FC = () => {
     }
     setIsSearchingNames(true);
     try {
-      const res = await fetch('/api/gemini/search-skincare', {
+      const res = await authFetch('/api/gemini/search-skincare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: queryVal.trim() })
@@ -886,7 +888,7 @@ export const ProductManagement: React.FC = () => {
       let nameBN = sug.nameBN || '';
       if (!nameBN) {
         try {
-          const transRes = await fetch('/api/gemini/translate-name', {
+          const transRes = await authFetch('/api/gemini/translate-name', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: sug.name })
@@ -921,8 +923,8 @@ export const ProductManagement: React.FC = () => {
         images: [],
         description: sug.description || 'Premium skincare product imported directly from Seoul, Korea.',
         descriptionBN: 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের যত্নে অত্যন্ত কার্যকরী।',
-        rating: 4.8,
-        reviewsCount: 1,
+        rating: 0,
+        reviewsCount: 0,
         barcode: barcodeToUse,
         barcodeNormalized: barcodeToUse,
         sku: '',
@@ -979,7 +981,7 @@ export const ProductManagement: React.FC = () => {
     
     try {
       // 1. Fetch analysis details from Gemini
-      const res = await fetch('/api/gemini/analyze-image', {
+      const res = await authFetch('/api/gemini/analyze-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageBase64: base64Img })
@@ -1011,7 +1013,7 @@ export const ProductManagement: React.FC = () => {
       let nameBN = data.nameBN || '';
       if (!nameBN) {
         try {
-          const transRes = await fetch('/api/gemini/translate-name', {
+          const transRes = await authFetch('/api/gemini/translate-name', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: productName })
@@ -1048,8 +1050,8 @@ export const ProductManagement: React.FC = () => {
         images: [],
         description: data.description || 'Premium Korean skincare imported directly from Seoul.',
         descriptionBN: data.descriptionBN || 'আমদানিকৃত আসল কোরিয়ান স্কিনকেয়ার প্রোডাক্ট যা আপনার ত্বকের গভীর আর্দ্রতা ও গ্লো প্রদান করে।',
-        rating: 4.8,
-        reviewsCount: 1,
+        rating: 0,
+        reviewsCount: 0,
         barcode: barcode || undefined,
         barcodeNormalized: barcode || undefined,
         sku: '',
@@ -1107,8 +1109,8 @@ export const ProductManagement: React.FC = () => {
       description: '',
       descriptionBN: '',
       skinTypes: ['All'],
-      rating: 4.8,
-      reviewsCount: 1,
+      rating: 0,
+      reviewsCount: 0,
       barcode: '',
       barcodeNormalized: '',
       sku: '',
@@ -1325,7 +1327,7 @@ export const ProductManagement: React.FC = () => {
     }
     setIsTranslatingName(true);
     try {
-      const res = await fetch('/api/gemini/translate-name', {
+      const res = await authFetch('/api/gemini/translate-name', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editingProduct.name.trim() })
@@ -1360,7 +1362,7 @@ export const ProductManagement: React.FC = () => {
         ? { imageBase64: editingProduct.image } 
         : { imageUrl: editingProduct.image };
 
-      const res = await fetch('/api/gemini/analyze-image', {
+      const res = await authFetch('/api/gemini/analyze-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -2246,6 +2248,7 @@ export const ProductManagement: React.FC = () => {
               const discountPercent = hasDiscount ? Math.round(((p.price - p.discountPrice!) / p.price) * 100) : 0;
               const isLowStock = p.stock > 0 && p.stock <= (p.lowStockThreshold ?? 5);
               const isOutOfStock = p.stock === 0;
+              const completeness = evaluateProductCompleteness(p);
 
               return (
                 <div 
@@ -2283,10 +2286,21 @@ export const ProductManagement: React.FC = () => {
                         ) : null}
                       </div>
 
-                      {/* Category Pill Tag */}
-                      <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none">
+                      {/* Category Pill Tag + Completeness */}
+                      <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none flex flex-col items-end gap-1">
                         <span className="bg-white/90 backdrop-blur text-slate-700 text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-lg border border-pink-100/80 shadow-xs">
                           {p.category}
+                        </span>
+                        <span
+                          className={`text-[9px] font-mono font-extrabold px-1.5 py-0.5 rounded-md border shadow-xs ${
+                            completeness.level === 'complete'
+                              ? 'bg-emerald-50/95 text-emerald-700 border-emerald-200'
+                              : completeness.level === 'good'
+                                ? 'bg-amber-50/95 text-amber-700 border-amber-200'
+                                : 'bg-rose-50/95 text-rose-700 border-rose-200'
+                          }`}
+                        >
+                          {completeness.score}% Ready
                         </span>
                       </div>
 
@@ -3663,6 +3677,143 @@ export const ProductManagement: React.FC = () => {
                   className="w-full bg-pink-50/10 text-gray-800 px-3 py-2 rounded-lg border border-pink-100 outline-none focus:border-[#E91E8C]"
                 />
               </div>
+
+              {/* Catalog Readiness Score & Usage / Precautions / Texture / FAQs */}
+              {(() => {
+                const completeness = evaluateProductCompleteness(editingProduct);
+                const faqsList = Array.isArray(editingProduct.faqs) ? editingProduct.faqs : [];
+                return (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider">
+                        PDP Completeness & Guidance Fields
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono font-black px-2.5 py-0.5 rounded-full border ${
+                          completeness.level === 'complete'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : completeness.level === 'good'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {completeness.score}% ({completeness.completedCount}/{completeness.totalCount})
+                      </span>
+                    </div>
+
+                    {completeness.missingFields.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        <span className="text-[10px] font-bold text-slate-500 mr-1">Missing:</span>
+                        {completeness.missingFields.map((mf) => (
+                          <span key={mf} className="text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md">
+                            {mf}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-1">How to Use (EN)</label>
+                        <textarea
+                          rows={2}
+                          value={editingProduct.howToUse || ''}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, howToUse: e.target.value })}
+                          placeholder="Apply gently after cleansing and toning..."
+                          className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-1">How to Use (BN)</label>
+                        <textarea
+                          rows={2}
+                          value={editingProduct.howToUseBN || ''}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, howToUseBN: e.target.value })}
+                          placeholder="ক্লিনজিং ও টোনিংয়ের পর ত্বকে ব্যবহার করুন..."
+                          className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-1">Precautions / Patch Test Note (EN)</label>
+                        <textarea
+                          rows={2}
+                          value={editingProduct.precautions || ''}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, precautions: e.target.value })}
+                          placeholder="Patch test for 24 hours before full application..."
+                          className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-1">Texture & Finish (EN)</label>
+                        <input
+                          type="text"
+                          value={editingProduct.textureAndFinish || ''}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, textureAndFinish: e.target.value })}
+                          placeholder="e.g. Lightweight watery gel, dewy finish"
+                          className="w-full bg-white text-gray-800 px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 pt-1 border-t border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-extrabold text-slate-700 uppercase">Product FAQs</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingProduct({
+                              ...editingProduct,
+                              faqs: [...faqsList, { question: '', answer: '' }],
+                            })
+                          }
+                          className="text-[10px] font-bold text-[#E91E8C] hover:underline cursor-pointer"
+                        >
+                          + Add FAQ
+                        </button>
+                      </div>
+                      {faqsList.map((faq, idx) => (
+                        <div key={idx} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-start bg-white p-2 rounded-xl border border-slate-200">
+                          <input
+                            type="text"
+                            placeholder="Question"
+                            value={faq.question}
+                            onChange={(e) => {
+                              const next = [...faqsList];
+                              next[idx] = { ...next[idx], question: e.target.value };
+                              setEditingProduct({ ...editingProduct, faqs: next });
+                            }}
+                            className="sm:col-span-5 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Answer"
+                            value={faq.answer}
+                            onChange={(e) => {
+                              const next = [...faqsList];
+                              next[idx] = { ...next[idx], answer: e.target.value };
+                              setEditingProduct({ ...editingProduct, faqs: next });
+                            }}
+                            className="sm:col-span-6 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingProduct({
+                                ...editingProduct,
+                                faqs: faqsList.filter((_, i) => i !== idx),
+                              })
+                            }
+                            className="sm:col-span-1 p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer"
+                            title="Remove FAQ"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Meta Data & Keywords Generated */}
               {editingProduct.generatedSeoContent && (

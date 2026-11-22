@@ -18,6 +18,7 @@ import {
   getComboEffectivePrice
 } from '../utils/pricing';
 import { useProducts } from '../hooks/queries/products';
+import { userPortalService } from '../services/userPortalService';
 
 interface ProductCardProps {
   product: Product;
@@ -33,7 +34,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const { addToCart, language } = useCart();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { data: allProducts = [] } = useProducts();
   const [isAdded, setIsAdded] = useState(false);
 
@@ -46,36 +47,22 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     ? getComboEffectiveStock(product, allProducts)
     : (product.stock || 0);
 
-  // Local Wishlist State
-  const [isWishlisted, setIsWishlisted] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('ksf_wishlist');
-      if (saved) {
-        const list: string[] = JSON.parse(saved);
-        return list.includes(product.id);
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  });
+  // Synced Wishlist State (localStorage + cloud for signed-in users)
+  const [isWishlisted, setIsWishlisted] = useState<boolean>(() =>
+    userPortalService.getLocalWishlistIds().includes(product.id)
+  );
 
-  const toggleWishlist = (e: React.MouseEvent) => {
+  React.useEffect(() => {
+    const unsub = userPortalService.subscribeWishlist(undefined, (ids) => {
+      setIsWishlisted(ids.includes(product.id));
+    });
+    return unsub;
+  }, [product.id]);
+
+  const toggleWishlist = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      const saved = localStorage.getItem('ksf_wishlist');
-      let list: string[] = saved ? JSON.parse(saved) : [];
-      if (list.includes(product.id)) {
-        list = list.filter((id) => id !== product.id);
-        setIsWishlisted(false);
-      } else {
-        list.push(product.id);
-        setIsWishlisted(true);
-      }
-      localStorage.setItem('ksf_wishlist', JSON.stringify(list));
-    } catch (err) {
-      console.warn('Wishlist toggle error:', err);
-    }
+    const added = await userPortalService.toggleWishlist(product.id, user?.uid);
+    setIsWishlisted(added);
   };
 
   const handleAddToCart = (e: React.MouseEvent) => {
@@ -231,23 +218,29 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             {displayName}
           </h3>
 
-          {/* Skin Type & Rating Pill Row */}
-          <div className="flex items-center justify-between gap-1 pt-0.5">
+          {/* Skin Type & Verified Rating Pill Row */}
+          <div className="flex items-center justify-between gap-1 pt-0.5 min-h-[18px]">
             {product.skinTypes && product.skinTypes.length > 0 ? (
               <span className="text-[9px] font-bold text-slate-600 bg-pink-50/80 px-2 py-0.5 rounded-md truncate max-w-[110px] sm:max-w-[130px]">
                 {product.skinTypes[0]}
               </span>
+            ) : product.ml ? (
+              <span className="text-[9px] font-bold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md truncate">
+                {product.ml}
+              </span>
             ) : (
               <span className="text-[9px] font-bold text-slate-400">
-                Seoul Authentic
+                K-Beauty Formula
               </span>
             )}
 
-            <div className="flex items-center gap-0.5 text-amber-500 font-mono text-[10px] sm:text-[11px] shrink-0 font-bold">
-              <Star size={11} className="fill-current text-amber-400" />
-              <span>{product.rating ? Number(product.rating).toFixed(1) : '5.0'}</span>
-              <span className="text-slate-400 text-[9px]">({product.reviewsCount || 14})</span>
-            </div>
+            {(product.reviewsCount ?? 0) > 0 && (product.rating ?? 0) > 0 && (
+              <div className="flex items-center gap-0.5 text-amber-500 font-mono text-[10px] sm:text-[11px] shrink-0 font-bold">
+                <Star size={11} className="fill-current text-amber-400" />
+                <span>{Number(product.rating).toFixed(1)}</span>
+                <span className="text-slate-400 text-[9px]">({product.reviewsCount})</span>
+              </div>
+            )}
           </div>
         </div>
 

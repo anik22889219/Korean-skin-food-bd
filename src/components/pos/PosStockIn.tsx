@@ -4,6 +4,7 @@ import { StockInQueueItem } from './types';
 import { productService } from '../../services/productService';
 import { userService } from '../../services/userService';
 import { uploadFileToCloudinary, uploadInvoiceImageToCloudinary } from '../../services/cloudinaryService';
+import { authFetch } from '../../services/apiClient';
 import { StockReceiptSlip } from './StockReceiptSlip';
 import { findProductByScannedCode } from '../../utils/barcode';
 import { playSuccessBeep, playErrorBeep } from '../PosScan';
@@ -321,7 +322,7 @@ export const PosStockIn: React.FC<PosStockInProps> = ({
 
       // 3. Fallback: Local Server Upload Endpoint
       try {
-        const uploadRes = await fetch('/api/upload/invoice', {
+        const uploadRes = await authFetch('/api/upload/invoice', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

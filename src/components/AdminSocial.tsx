@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { productService } from '../services/productService';
 import { themeService } from '../services/themeService';
+import { authFetch } from '../services/apiClient';
 import { Product } from '../types';
 import { HomeThemeSettings, ReelItem } from '../types/theme';
 import { MediaLibraryModal } from './MediaLibraryModal';
@@ -321,7 +322,7 @@ export const AdminSocial: React.FC = () => {
     setCopied(false);
 
     try {
-      const response = await fetch('/api/functions/generateProductContent', {
+      const response = await authFetch('/api/functions/generateProductContent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: selectedProduct.id })

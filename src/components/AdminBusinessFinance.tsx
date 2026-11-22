@@ -320,7 +320,7 @@ export default function AdminBusinessFinance({ orders }: AdminBusinessFinancePro
           </div>
         </div>
 
-        {/* Card 3: Estimated COGS & Gross Profit */}
+        {/* Card 3: Actual vs Estimated COGS & Gross Profit */}
         <div className="bg-white p-5 rounded-3xl border border-pink-100 shadow-xs space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Gross Profit (After COGS)</span>
@@ -331,8 +331,18 @@ export default function AdminBusinessFinance({ orders }: AdminBusinessFinancePro
           <div className="text-xl sm:text-2xl font-black text-blue-900 font-mono">
             ৳{summary.grossProfit.toLocaleString()}
           </div>
-          <div className="text-[11px] text-gray-500 font-mono">
-            COGS: ৳{summary.totalCOGS.toLocaleString()} ({summary.totalRevenue ? Math.round((summary.grossProfit / summary.totalRevenue) * 100) : 0}% Margin)
+          <div className="text-[11px] text-gray-500 font-mono space-y-0.5">
+            <div>
+              COGS: ৳{summary.totalCOGS.toLocaleString()} ({summary.totalRevenue ? Math.round((summary.grossProfit / summary.totalRevenue) * 100) : 0}% Margin)
+            </div>
+            <div className="text-[10px] font-sans text-gray-500">
+              Verified: ৳{summary.verifiedCOGS.toLocaleString()}
+              {summary.estimatedCOGS > 0 && (
+                <span className="text-amber-700 font-semibold">
+                  {' '}• Est. 58% fallback: ৳{summary.estimatedCOGS.toLocaleString()} ({summary.estimatedOrdersCount} orders)
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -461,7 +471,69 @@ export default function AdminBusinessFinance({ orders }: AdminBusinessFinancePro
 
       {/* TAB 1: OVERVIEW */}
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="space-y-6">
+          {/* Payment Method Tender Breakdown & COGS Provenance */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white p-5 rounded-3xl border border-pink-100 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">
+                  Collected Tender Breakdown (By Method)
+                </h3>
+                <span className="text-[11px] text-gray-400 font-medium">From recorded payment transactions</span>
+              </div>
+              {Object.keys(summary.paymentMethodBreakdown).length === 0 ? (
+                <p className="text-xs text-gray-400 py-3">
+                  No payment tender transactions recorded yet. Use Collect Due or POS settlements to populate method totals.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {Object.entries(summary.paymentMethodBreakdown)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([method, amount]) => (
+                      <div key={method} className="p-3 rounded-2xl bg-pink-50/40 border border-pink-100">
+                        <span className="text-[10px] font-bold uppercase text-gray-500 block">{method}</span>
+                        <span className="text-sm font-black font-mono text-gray-900">
+                          ৳{amount.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white p-5 rounded-3xl border border-blue-100 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">
+                  COGS Data Provenance
+                </h3>
+                <span className="text-[11px] text-blue-700 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+                  Audit Transparency
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-200">
+                  <span className="text-[10px] font-bold uppercase text-emerald-800 block">Verified Actual COGS</span>
+                  <span className="text-base font-black font-mono text-emerald-950">
+                    ৳{summary.verifiedCOGS.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-emerald-700 block mt-0.5">
+                    {summary.cogsCoveredOrdersCount} orders with recorded batch cost + COGS ledger entries
+                  </span>
+                </div>
+                <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-200">
+                  <span className="text-[10px] font-bold uppercase text-amber-800 block">Estimated Fallback COGS (58%)</span>
+                  <span className="text-base font-black font-mono text-amber-950">
+                    ৳{summary.estimatedCOGS.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-amber-700 block mt-0.5">
+                    {summary.estimatedOrdersCount} delivered orders missing item unit cost
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left Column: Recent Ledger Inflows & Outflows */}
           <div className="lg:col-span-7 bg-white p-6 rounded-3xl border border-pink-100 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-pink-50 pb-3">
@@ -589,6 +661,7 @@ export default function AdminBusinessFinance({ orders }: AdminBusinessFinancePro
                 })}
               </div>
             )}
+          </div>
           </div>
         </div>
       )}

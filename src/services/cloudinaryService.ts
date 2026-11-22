@@ -344,7 +344,7 @@ export async function uploadInvoiceImageToCloudinary(
     reader.readAsDataURL(file);
   });
 
-  const srvRes = await fetch('/api/cloudinary/upload-invoice', {
+  const srvRes = await authFetch('/api/cloudinary/upload-invoice', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -1,6 +1,7 @@
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { initializeApp, getApps } from 'firebase/app';
+import { GoogleAuthProvider, getAuth, onAuthStateChanged, signInWithPopup } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, firebaseConfig } from './firebase';
 import { authFetch } from './apiClient';
 import {
   GoogleBusinessLocationOption,
@@ -88,9 +89,13 @@ export function sanitizeGoogleBusinessProfile(
     ? raw!.reviews.filter(isRealGoogleReview)
     : [];
 
+  const hasValidPlacesSync =
+    base.connectionMethod === 'google_places_api' &&
+    (realReviews.length > 0 || (typeof base.placeId === 'string' && base.placeId.startsWith('ChIJ')));
+
   const isConnected =
     base.connectionMethod === 'google_business_oauth' ||
-    base.connectionMethod === 'google_places_api' ||
+    hasValidPlacesSync ||
     realReviews.length > 0;
 
   if (!isConnected) {
@@ -120,6 +125,103 @@ export function sanitizeGoogleBusinessProfile(
 // In-memory cache ONLY for Google Business OAuth access token (never localStorage/sessionStorage)
 let cachedGmbAccessToken: string | null = null;
 let cachedGmbEmail: string | null = null;
+let serverHasActiveSession = false;
+let serverHasOAuthCredentials = false;
+
+function getIsolatedGmbAuth() {
+  const helperName = 'gmb-oauth-helper';
+  const existing = getApps().find((a) => a.name === helperName);
+  const helperApp = existing || initializeApp(firebaseConfig, helperName);
+  return getAuth(helperApp);
+}
+
+function buildGoogleHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  if (cachedGmbAccessToken) {
+    headers['X-Google-Access-Token'] = cachedGmbAccessToken;
+  }
+  return headers;
+}
+
+function formatGmbPopupError(err: any): Error {
+  const code = err?.code || '';
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return new Error('Google sign-in popup was closed before completing authorization.');
+  }
+  if (code === 'auth/popup-blocked') {
+    return new Error('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+    return new Error(
+      `This domain (${host}) is not listed under Firebase Authentication → Settings → Authorized domains. Please add it in Firebase Console or connect from an authorized domain.`
+    );
+  }
+  return err instanceof Error ? err : new Error(err?.message || 'Google Business OAuth authorization failed.');
+}
+
+async function openServerOAuthPopup(authUrl: string): Promise<{ accessToken?: string; email?: string }> {
+  return new Promise((resolve, reject) => {
+    const width = 520;
+    const height = 640;
+    const left = Math.max(0, (window.screen?.width || 1024) / 2 - width / 2);
+    const top = Math.max(0, (window.screen?.height || 768) / 2 - height / 2);
+    const popup = window.open(
+      authUrl,
+      'gmb_oauth_popup',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+
+    if (!popup) {
+      reject(new Error('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.'));
+      return;
+    }
+
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      clearInterval(closedTimer);
+      clearTimeout(timeoutTimer);
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'GMB_OAUTH_SUCCESS' || data.type === 'GOOGLE_BUSINESS_OAUTH_SUCCESS') {
+        settled = true;
+        cleanup();
+        resolve({ accessToken: data.accessToken, email: data.email });
+      } else if (data.type === 'GMB_OAUTH_ERROR' || data.type === 'GOOGLE_BUSINESS_OAUTH_ERROR') {
+        settled = true;
+        cleanup();
+        reject(new Error(data.error || 'Google Business authorization failed.'));
+      }
+    };
+
+    const closedTimer = window.setInterval(() => {
+      if (popup.closed && !settled) {
+        settled = true;
+        cleanup();
+        reject(new Error('Google sign-in popup was closed before completing authorization.'));
+      }
+    }, 500);
+
+    const timeoutTimer = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        try {
+          popup.close();
+        } catch {
+          // ignore
+        }
+        reject(new Error('Google Business authorization timed out. Please try again.'));
+      }
+    }, 3 * 60 * 1000);
+
+    window.addEventListener('message', onMessage);
+  });
+}
 
 if (typeof window !== 'undefined') {
   try {
@@ -131,6 +233,7 @@ if (typeof window !== 'undefined') {
     if (!user) {
       cachedGmbAccessToken = null;
       cachedGmbEmail = null;
+      serverHasActiveSession = false;
     }
   });
 }
@@ -147,7 +250,7 @@ function saveProfileToCache(data: GoogleBusinessProfileData) {
 
 export const googleBusinessService = {
   hasOAuthToken(): boolean {
-    return Boolean(cachedGmbAccessToken);
+    return Boolean(cachedGmbAccessToken || serverHasActiveSession);
   },
 
   getConnectedEmail(): string | null {
@@ -157,11 +260,142 @@ export const googleBusinessService = {
   setOAuthAccessToken(token: string, email?: string | null) {
     cachedGmbAccessToken = token;
     if (email) cachedGmbEmail = email;
+    if (token) serverHasActiveSession = true;
   },
 
   clearOAuthToken() {
     cachedGmbAccessToken = null;
     cachedGmbEmail = null;
+    serverHasActiveSession = false;
+  },
+
+  /**
+   * Check whether the backend has an active GMB OAuth session or server OAuth client credentials.
+   * Gracefully falls back for static hosting deployments where /api/* returns HTML.
+   */
+  async checkOAuthSession(): Promise<{
+    hasActiveSession: boolean;
+    connectedEmail: string | null;
+    hasServerOAuthCredentials: boolean;
+  }> {
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const qs = origin ? `?origin=${encodeURIComponent(origin)}` : '';
+      const response = await authFetch(`/api/google-business/oauth/status${qs}`);
+      const contentType = response.headers.get('content-type') || '';
+      if (response.ok && !contentType.includes('text/html')) {
+        const json = await response.json();
+        if (json.success) {
+          serverHasActiveSession = Boolean(json.hasActiveSession);
+          serverHasOAuthCredentials = Boolean(json.hasServerOAuthCredentials);
+          if (json.connectedEmail && !cachedGmbEmail) {
+            cachedGmbEmail = json.connectedEmail;
+          }
+          return {
+            hasActiveSession: Boolean(cachedGmbAccessToken || serverHasActiveSession),
+            connectedEmail: cachedGmbEmail || json.connectedEmail || null,
+            hasServerOAuthCredentials: serverHasOAuthCredentials,
+          };
+        }
+      }
+    } catch {
+      // Static hosting or offline fallback
+    }
+
+    return {
+      hasActiveSession: Boolean(cachedGmbAccessToken || serverHasActiveSession),
+      connectedEmail: cachedGmbEmail,
+      hasServerOAuthCredentials: false,
+    };
+  },
+
+  /**
+   * Obtain a fresh Google Business OAuth access token via server OAuth flow (if configured)
+   * or isolated Firebase GoogleAuthProvider popup, then persist to backend session cache if available.
+   */
+  async obtainOAuthToken(): Promise<{ accessToken: string; email: string }> {
+    let accessToken = '';
+    let email = '';
+
+    // 1. If server OAuth client credentials are configured, try server-side OAuth popup first
+    if (serverHasOAuthCredentials && typeof window !== 'undefined') {
+      try {
+        const origin = window.location.origin;
+        const res = await authFetch(`/api/google-business/oauth/auth-url?origin=${encodeURIComponent(origin)}`);
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && !contentType.includes('text/html')) {
+          const json = await res.json();
+          if (json.success && json.url) {
+            const popupRes = await openServerOAuthPopup(json.url);
+            if (popupRes.accessToken) {
+              accessToken = popupRes.accessToken;
+              email = popupRes.email || '';
+            }
+          }
+        }
+      } catch (err: any) {
+        // Re-throw if the user explicitly closed/cancelled or blocked the popup
+        const msg = err?.message || '';
+        if (msg.includes('closed') || msg.includes('blocked')) {
+          throw err;
+        }
+        // Otherwise fall back to Firebase popup
+      }
+    }
+
+    // 2. Firebase GoogleAuthProvider popup using isolated auth instance so admin session isn't overwritten
+    if (!accessToken) {
+      const provider = new GoogleAuthProvider();
+      GMB_SCOPES.forEach((scope) => provider.addScope(scope));
+      provider.setCustomParameters({
+        prompt: 'consent select_account',
+        include_granted_scopes: 'true',
+      });
+
+      try {
+        const helperAuth = getIsolatedGmbAuth();
+        const result = await signInWithPopup(helperAuth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        accessToken =
+          credential?.accessToken ||
+          (result as any)?._tokenResponse?.oauthAccessToken ||
+          '';
+        email = result.user?.email || (result as any)?._tokenResponse?.email || '';
+      } catch (err: any) {
+        throw formatGmbPopupError(err);
+      }
+    }
+
+    if (!accessToken) {
+      throw new Error(
+        'Google OAuth access token could not be obtained. Please allow Google Business Profile permissions and try again.'
+      );
+    }
+
+    cachedGmbAccessToken = accessToken;
+    cachedGmbEmail = email || cachedGmbEmail;
+    serverHasActiveSession = true;
+
+    // Best-effort sync to backend session cache (non-blocking on static hosting)
+    try {
+      await authFetch('/api/google-business/oauth/session', {
+        method: 'POST',
+        headers: {
+          'X-Google-Access-Token': accessToken,
+        },
+        body: JSON.stringify({
+          email: cachedGmbEmail || '',
+          googleAccessToken: accessToken,
+        }),
+      });
+    } catch {
+      // Safe to ignore on static hosting
+    }
+
+    return {
+      accessToken,
+      email: cachedGmbEmail || '',
+    };
   },
 
   /**
@@ -191,31 +425,12 @@ export const googleBusinessService = {
     needsApiAccess?: boolean;
     message?: string;
   }> {
-    const provider = new GoogleAuthProvider();
-    GMB_SCOPES.forEach((scope) => provider.addScope(scope));
-    provider.setCustomParameters({
-      prompt: 'consent select_account',
-      include_granted_scopes: 'true',
-    });
-
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const accessToken = credential?.accessToken;
-
-    if (!accessToken) {
-      throw new Error(
-        'Google OAuth access token could not be obtained. Please allow Google Business Profile permissions and try again.'
-      );
-    }
-
-    cachedGmbAccessToken = accessToken;
-    cachedGmbEmail = result.user?.email || null;
-
+    await this.obtainOAuthToken();
     return this.fetchOAuthLocations();
   },
 
   /**
-   * Fetch Google Business Profile accounts & locations using the in-memory OAuth access token.
+   * Fetch Google Business Profile accounts & locations using the active OAuth access token.
    */
   async fetchOAuthLocations(): Promise<{
     email: string;
@@ -223,25 +438,24 @@ export const googleBusinessService = {
     needsApiAccess?: boolean;
     message?: string;
   }> {
-    if (!cachedGmbAccessToken) {
+    if (!cachedGmbAccessToken && !serverHasActiveSession) {
       throw new Error('Please connect your Google Business account first.');
     }
 
     try {
       const response = await authFetch('/api/google-business/oauth/locations', {
         method: 'POST',
-        headers: {
-          'X-Google-Access-Token': cachedGmbAccessToken,
-        },
+        headers: buildGoogleHeaders(),
         body: JSON.stringify({
           email: cachedGmbEmail || '',
+          googleAccessToken: cachedGmbAccessToken || undefined,
         }),
       });
 
       const contentType = response.headers.get('content-type') || '';
-      if (response.ok && !contentType.includes('text/html')) {
-        const json = await response.json();
-        if (json.success) {
+      if (!contentType.includes('text/html')) {
+        const json = await response.json().catch(() => ({}));
+        if (response.ok && json.success) {
           return {
             email: cachedGmbEmail || json.email || '',
             locations: json.locations || [],
@@ -249,9 +463,26 @@ export const googleBusinessService = {
             message: json.message,
           };
         }
+        if (response.status === 401) {
+          serverHasActiveSession = false;
+          if (!cachedGmbAccessToken) {
+            throw new Error(json.error || 'Google Business session expired. Please reconnect your Google Business account.');
+          }
+        }
+        if (json.needsApiAccess) {
+          const err: any = new Error(json.error || 'Google Business Profile API access is pending.');
+          err.needsApiAccess = true;
+          throw err;
+        }
       }
-    } catch {
-      // Proceed to direct browser API call
+    } catch (err: any) {
+      if (err?.needsApiAccess) throw err;
+      if (!cachedGmbAccessToken) throw err;
+      // Proceed to direct browser API call when backend is unavailable or static-hosted
+    }
+
+    if (!cachedGmbAccessToken) {
+      throw new Error('Missing Google Business OAuth access token. Please connect your Google Business account.');
     }
 
     // Direct Google Business Profile API lookup from browser
@@ -310,23 +541,9 @@ export const googleBusinessService = {
       };
     } catch (err: any) {
       if (err?.needsApiAccess) throw err;
-      return {
-        email: cachedGmbEmail || '',
-        locations: [
-          {
-            accountName: 'accounts/official',
-            accountDisplayName: 'Korean Skin Food BD',
-            locationName: 'locations/banani',
-            title: 'Korean Skin Food BD',
-            address: 'Banani Road 11, Dhaka 1213, Bangladesh',
-            placeId: 'ChIJ_yHk_5fAVTcR3p3E53-nIes',
-            mapsUri: 'https://share.google/lEQv5trQv88b0w8WT',
-            newReviewUri: 'https://g.page/r/CaiTn1_7AA34EAE/review',
-            phoneNumber: '+880 1755-837545',
-          },
-        ],
-        message: 'Connected to official Korean Skin Food BD location.',
-      };
+      throw err instanceof Error
+        ? err
+        : new Error('Unable to fetch Google Business Profile locations. Please check your permissions and try again.');
     }
   },
 
@@ -338,34 +555,163 @@ export const googleBusinessService = {
     data: GoogleBusinessProfileData;
     message?: string;
   }> {
-    if (!cachedGmbAccessToken) {
+    if (!cachedGmbAccessToken && !serverHasActiveSession) {
       throw new Error('Google Business session expired. Please reconnect your Google Business account.');
     }
 
+    let serverUnavailable = false;
     try {
       const response = await authFetch('/api/google-business/oauth/sync-reviews', {
         method: 'POST',
-        headers: {
-          'X-Google-Access-Token': cachedGmbAccessToken,
-        },
+        headers: buildGoogleHeaders(),
         body: JSON.stringify({
           location,
           connectedEmail: cachedGmbEmail || auth.currentUser?.email || '',
+          googleAccessToken: cachedGmbAccessToken || undefined,
         }),
       });
 
       const contentType = response.headers.get('content-type') || '';
-      if (response.ok && !contentType.includes('text/html')) {
-        const json = await response.json();
-        if (json.success && json.data) {
+      if (contentType.includes('text/html')) {
+        serverUnavailable = true;
+      } else {
+        const json = await response.json().catch(() => ({}));
+        if (response.ok && json.success && json.data) {
           const clean = sanitizeGoogleBusinessProfile(json.data);
           saveProfileToCache(clean);
           return { success: true, data: clean, message: json.message };
         }
+        if (response.status === 401) {
+          serverHasActiveSession = false;
+          throw new Error(json.error || 'Google Business OAuth session expired. Please reconnect your Google Business account.');
+        }
+        const errMsg = json.error || `Failed to sync reviews from Google Business Profile (HTTP ${response.status}).`;
+        const err: any = new Error(errMsg);
+        if (
+          json.needsApiAccess ||
+          response.status === 403 ||
+          response.status === 429 ||
+          errMsg.toLowerCase().includes('quota') ||
+          errMsg.toLowerCase().includes('disabled')
+        ) {
+          err.needsApiAccess = true;
+        }
+        throw err;
       }
-    } catch {
-      // Proceed to direct Firestore fallback
+    } catch (err: any) {
+      if (!serverUnavailable && err instanceof Error && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      // Network error or static hosting (HTML response) — proceed to direct browser GMB v4 fetch
     }
+
+    if (!cachedGmbAccessToken) {
+      throw new Error('Missing Google Business OAuth access token. Please reconnect your Google Business account.');
+    }
+
+    // Direct browser GMB v4 Reviews API fetch (for static hosting like Firebase Hosting)
+    const cleanAccount = String(location.accountName || '').replace(/^\/+/, '');
+    const cleanLocation = String(location.locationName || '').replace(/^\/+/, '');
+    const parentPath = cleanLocation.startsWith('accounts/')
+      ? cleanLocation
+      : `${cleanAccount}/${cleanLocation}`;
+
+    const allReviews: GoogleBusinessReview[] = [];
+    let pageToken: string | undefined;
+    let averageRating = 0;
+    let totalReviewCount = 0;
+
+    for (let page = 0; page < 10; page++) {
+      const qs = new URLSearchParams({ pageSize: '50' });
+      if (pageToken) qs.set('pageToken', pageToken);
+      const reviewsRes = await fetch(
+        `https://mybusiness.googleapis.com/v4/${parentPath}/reviews?${qs.toString()}`,
+        { headers: { Authorization: `Bearer ${cachedGmbAccessToken}` } }
+      );
+      const reviewsJson = await reviewsRes.json().catch(() => ({}));
+
+      if (!reviewsRes.ok) {
+        const apiMsg = reviewsJson?.error?.message || `Google Reviews API returned HTTP ${reviewsRes.status}`;
+        const err: any = new Error(apiMsg);
+        if (
+          reviewsRes.status === 403 ||
+          reviewsRes.status === 429 ||
+          apiMsg.toLowerCase().includes('quota') ||
+          apiMsg.toLowerCase().includes('disabled') ||
+          apiMsg.toLowerCase().includes('not been used')
+        ) {
+          err.needsApiAccess = true;
+        }
+        throw err;
+      }
+
+      if (typeof reviewsJson.averageRating === 'number') {
+        averageRating = reviewsJson.averageRating;
+      }
+      if (typeof reviewsJson.totalReviewCount === 'number') {
+        totalReviewCount = reviewsJson.totalReviewCount;
+      }
+
+      const items = Array.isArray(reviewsJson.reviews) ? reviewsJson.reviews : [];
+      for (const item of items) {
+        const starUpper = String(item.starRating || '').toUpperCase();
+        const rating =
+          typeof item.starRating === 'number'
+            ? Math.min(5, Math.max(1, item.starRating))
+            : starUpper === 'FIVE'
+              ? 5
+              : starUpper === 'FOUR'
+                ? 4
+                : starUpper === 'THREE'
+                  ? 3
+                  : starUpper === 'TWO'
+                    ? 2
+                    : starUpper === 'ONE'
+                      ? 1
+                      : 5;
+        const publishTime = item.createTime || item.updateTime || new Date().toISOString();
+        allReviews.push({
+          id: item.reviewId || item.name || `gmb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          reviewName: item.name || '',
+          source: 'google_business_api',
+          authorName: item.reviewer?.displayName || 'Google Customer',
+          authorPhotoUrl: item.reviewer?.profilePhotoUrl || '',
+          rating,
+          relativeTimeDescription: new Date(publishTime).toLocaleDateString(),
+          publishTime,
+          updateTime: item.updateTime || publishTime,
+          isVerifiedCustomer: true,
+          isLocalGuide: false,
+          text: item.comment || '',
+          reply: item.reviewReply?.comment
+            ? {
+                text: item.reviewReply.comment,
+                replyDate: item.reviewReply.updateTime
+                  ? new Date(item.reviewReply.updateTime).toLocaleDateString()
+                  : 'Recently',
+              }
+            : undefined,
+        });
+      }
+
+      if (!reviewsJson.nextPageToken) break;
+      pageToken = reviewsJson.nextPageToken;
+    }
+
+    const breakdown = {
+      fiveStar: allReviews.filter((r) => Math.round(r.rating) === 5).length,
+      fourStar: allReviews.filter((r) => Math.round(r.rating) === 4).length,
+      threeStar: allReviews.filter((r) => Math.round(r.rating) === 3).length,
+      twoStar: allReviews.filter((r) => Math.round(r.rating) === 2).length,
+      oneStar: allReviews.filter((r) => Math.round(r.rating) === 1).length,
+    };
+
+    const computedAvg =
+      averageRating > 0
+        ? Number(averageRating.toFixed(1))
+        : allReviews.length > 0
+          ? Number((allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length).toFixed(1))
+          : 0;
 
     const current = this.getProfileData();
     const updated: GoogleBusinessProfileData = {
@@ -376,8 +722,13 @@ export const googleBusinessService = {
       googleMapsUrl: location.mapsUri || current.googleMapsUrl,
       writeReviewUrl: location.newReviewUri || current.writeReviewUrl,
       phoneNumber: location.phoneNumber || current.phoneNumber,
-      connectedAccountName: location.accountName,
-      connectedLocationName: location.locationName,
+      overallRating: computedAvg,
+      totalReviewsCount: totalReviewCount || allReviews.length,
+      ratingBreakdown: breakdown,
+      reviews: allReviews,
+      connectedAccountName: cleanAccount,
+      connectedLocationName: cleanLocation,
+      connectedEmail: cachedGmbEmail || current.connectedEmail || '',
       status: 'verified',
       connectionMethod: 'google_business_oauth',
       lastSyncedAt: new Date().toISOString(),
@@ -393,7 +744,11 @@ export const googleBusinessService = {
 
     const clean = sanitizeGoogleBusinessProfile(updated);
     saveProfileToCache(clean);
-    return { success: true, data: clean, message: `Connected to ${location.title}!` };
+    return {
+      success: true,
+      data: clean,
+      message: `Synced ${allReviews.length} genuine review(s) from ${location.title}!`,
+    };
   },
 
   /**
@@ -403,20 +758,30 @@ export const googleBusinessService = {
     reviewName: string,
     replyText: string
   ): Promise<{ success: boolean; data: GoogleBusinessProfileData; message?: string }> {
-    if (!cachedGmbAccessToken) {
+    if (!cachedGmbAccessToken && !serverHasActiveSession) {
       throw new Error('Please connect your Google Business account first to post a reply on Google.');
     }
 
     const response = await authFetch('/api/google-business/oauth/reply', {
       method: 'POST',
-      headers: {
-        'X-Google-Access-Token': cachedGmbAccessToken,
-      },
-      body: JSON.stringify({ reviewName, comment: replyText }),
+      headers: buildGoogleHeaders(),
+      body: JSON.stringify({
+        reviewName,
+        comment: replyText,
+        googleAccessToken: cachedGmbAccessToken || undefined,
+      }),
     });
 
-    const json = await response.json();
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error('Google Business reply API is unavailable on static hosting.');
+    }
+
+    const json = await response.json().catch(() => ({}));
     if (!response.ok || !json.success) {
+      if (response.status === 401) {
+        serverHasActiveSession = false;
+      }
       throw new Error(json.error || 'Failed to post reply to Google Business Profile.');
     }
 
@@ -431,20 +796,29 @@ export const googleBusinessService = {
   async deleteGmbReply(
     reviewName: string
   ): Promise<{ success: boolean; data: GoogleBusinessProfileData; message?: string }> {
-    if (!cachedGmbAccessToken) {
+    if (!cachedGmbAccessToken && !serverHasActiveSession) {
       throw new Error('Please connect your Google Business account first.');
     }
 
     const response = await authFetch('/api/google-business/oauth/reply', {
       method: 'DELETE',
-      headers: {
-        'X-Google-Access-Token': cachedGmbAccessToken,
-      },
-      body: JSON.stringify({ reviewName }),
+      headers: buildGoogleHeaders(),
+      body: JSON.stringify({
+        reviewName,
+        googleAccessToken: cachedGmbAccessToken || undefined,
+      }),
     });
 
-    const json = await response.json();
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error('Google Business reply API is unavailable on static hosting.');
+    }
+
+    const json = await response.json().catch(() => ({}));
     if (!response.ok || !json.success) {
+      if (response.status === 401) {
+        serverHasActiveSession = false;
+      }
       throw new Error(json.error || 'Failed to delete reply on Google Business Profile.');
     }
 
@@ -462,46 +836,25 @@ export const googleBusinessService = {
     data: GoogleBusinessProfileData;
     message?: string;
   }> {
-    try {
-      const response = await authFetch('/api/google-business/places/sync', {
-        method: 'POST',
-        body: JSON.stringify({ queryOrPlaceId }),
-      });
-      const contentType = response.headers.get('content-type') || '';
-      if (response.ok && !contentType.includes('text/html')) {
-        const json = await response.json();
-        if (json.success && json.data) {
-          const clean = sanitizeGoogleBusinessProfile(json.data);
-          saveProfileToCache(clean);
-          return { success: true, data: clean, message: json.message };
-        }
-      }
-    } catch {
-      // Proceed to client direct fallback
+    const response = await authFetch('/api/google-business/places/sync', {
+      method: 'POST',
+      body: JSON.stringify({ queryOrPlaceId }),
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error(
+        'Google Places sync server endpoint is unavailable on static hosting. Please connect from the Node server or enable Places API (New) on your server.'
+      );
     }
 
-    const trimmed = (queryOrPlaceId || '').trim();
-    const current = this.getProfileData();
-    const updated: GoogleBusinessProfileData = {
-      ...current,
-      placeId: trimmed,
-      writeReviewUrl: `https://search.google.com/local/writereview?placeid=${encodeURIComponent(trimmed)}`,
-      status: 'verified',
-      connectionMethod: 'google_places_api',
-      lastSyncedAt: new Date().toISOString(),
-    };
-
-    if (db) {
-      try {
-        await setDoc(doc(db, 'settings', 'google_business_profile'), updated, { merge: true });
-      } catch (e) {
-        console.warn('[GoogleBusinessService] Could not write to settings/google_business_profile:', e);
-      }
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json.success || !json.data) {
+      throw new Error(json.error || `Google Places API sync failed (HTTP ${response.status}).`);
     }
 
-    const clean = sanitizeGoogleBusinessProfile(updated);
+    const clean = sanitizeGoogleBusinessProfile(json.data);
     saveProfileToCache(clean);
-    return { success: true, data: clean, message: 'Google Place ID linked and verified!' };
+    return { success: true, data: clean, message: json.message };
   },
 
   /**
@@ -510,6 +863,7 @@ export const googleBusinessService = {
   async disconnectAndClearReviews(): Promise<GoogleBusinessProfileData> {
     cachedGmbAccessToken = null;
     cachedGmbEmail = null;
+    serverHasActiveSession = false;
     this.clearCache();
 
     try {
@@ -577,9 +931,14 @@ export const googleBusinessService = {
   /**
    * Refresh reviews using active connection (Places sync if configured, or OAuth if connected).
    */
-  async syncWithMaps(): Promise<{ success: boolean; data: GoogleBusinessProfileData; message?: string }> {
+  async syncWithMaps(): Promise<{
+    success: boolean;
+    data: GoogleBusinessProfileData;
+    message?: string;
+    needsReconnect?: boolean;
+  }> {
     const current = await this.getProfile();
-    if (cachedGmbAccessToken && current.connectedAccountName && current.connectedLocationName) {
+    if ((cachedGmbAccessToken || serverHasActiveSession) && current.connectedAccountName && current.connectedLocationName) {
       return this.syncOAuthLocationReviews({
         accountName: current.connectedAccountName,
         accountDisplayName: current.businessName,
@@ -596,16 +955,33 @@ export const googleBusinessService = {
     try {
       const response = await authFetch('/api/google-business/sync', {
         method: 'POST',
+        headers: buildGoogleHeaders(),
+        body: JSON.stringify({
+          googleAccessToken: cachedGmbAccessToken || undefined,
+        }),
       });
-      const result = await response.json();
-      if (result.success && result.data) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text/html')) {
+        if (current.placeId) {
+          return this.syncByPlaceIdOrSearch(current.placeId);
+        }
+        return {
+          success: false,
+          needsReconnect: true,
+          data: current,
+          message: 'Please connect your Google Business Profile to sync live reviews.',
+        };
+      }
+      const result = await response.json().catch(() => ({}));
+      if (response.ok && result.success && result.data) {
         const clean = sanitizeGoogleBusinessProfile(result.data);
         saveProfileToCache(clean);
         return { success: true, data: clean, message: result.message };
       }
       return {
         success: false,
-        data: current,
+        needsReconnect: Boolean(result.needsReconnect),
+        data: result.data ? sanitizeGoogleBusinessProfile(result.data) : current,
         message: result.error || result.message || 'Please connect your Google Business Profile to sync live reviews.',
       };
     } catch (err: any) {

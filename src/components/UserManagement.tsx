@@ -1,15 +1,17 @@
 import { WholesaleLedgerModal } from './WholesaleLedgerModal';
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { db, handleFirestoreError, OperationType } from '../services/firebase';
+import { db } from '../services/firebase';
 import { doc, updateDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from '../types';
 import { useUsers } from '../hooks/queries/users';
 import { wholesaleService } from '../services/wholesaleService';
+import { authFetch } from '../services/apiClient';
+import { LoyaltyLedgerEntry, userPortalService } from '../services/userPortalService';
 import { 
-  Users, ShieldAlert, Search, Filter, UserCheck, Shield, UserPlus, 
+  Users, Search, Filter, UserCheck, Shield, UserPlus, 
   Edit3, Trash2, Award, Mail, Phone, Lock, Sparkles, CheckCircle2, 
-  XCircle, ChevronDown, RefreshCw, AlertCircle, Building2, Crown, BadgeCheck
+  XCircle, RefreshCw, AlertCircle, Building2, Crown, BadgeCheck, History, Plus, Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -23,6 +25,12 @@ export const UserManagement: React.FC = () => {
   // Modals state
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [ledgerCustomerId, setLedgerCustomerId] = useState<string | null>(null);
+  const [loyaltyLedgerUser, setLoyaltyLedgerUser] = useState<UserProfile | null>(null);
+  const [loyaltyLedgerEntries, setLoyaltyLedgerEntries] = useState<LoyaltyLedgerEntry[]>([]);
+  const [loyaltyLedgerLoading, setLoyaltyLedgerLoading] = useState<boolean>(false);
+  const [loyaltyDeltaInput, setLoyaltyDeltaInput] = useState<string>('50');
+  const [loyaltyReasonInput, setLoyaltyReasonInput] = useState<string>('');
+  const [loyaltyAdjusting, setLoyaltyAdjusting] = useState<boolean>(false);
   const [isAddUserOpen, setIsAddUserOpen] = useState<boolean>(false);
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -132,6 +140,57 @@ export const UserManagement: React.FC = () => {
     setFormWholesaleAccess(userItem.wholesaleAccess === true);
   };
 
+  // Open Loyalty Ledger modal for a user
+  const openLoyaltyLedger = async (userItem: UserProfile) => {
+    setLoyaltyLedgerUser(userItem);
+    setLoyaltyLedgerLoading(true);
+    setLoyaltyReasonInput('');
+    try {
+      const entries = await userPortalService.getMyLoyaltyLedger(userItem.uid);
+      setLoyaltyLedgerEntries(entries);
+    } catch (err) {
+      console.error('Failed to load loyalty ledger:', err);
+      setLoyaltyLedgerEntries([]);
+    } finally {
+      setLoyaltyLedgerLoading(false);
+    }
+  };
+
+  const handleQuickLoyaltyAdjust = async (sign: 1 | -1) => {
+    if (!loyaltyLedgerUser) return;
+    const rawDelta = Math.floor(Math.abs(Number(loyaltyDeltaInput) || 0));
+    if (rawDelta <= 0) {
+      showToast('error', 'Enter a positive number of points to adjust.');
+      return;
+    }
+    const delta = rawDelta * sign;
+    const reason = loyaltyReasonInput.trim() || (sign > 0 ? 'Admin loyalty bonus' : 'Admin loyalty deduction');
+    setLoyaltyAdjusting(true);
+    try {
+      const res = await authFetch('/api/admin/loyalty/adjust', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: loyaltyLedgerUser.uid,
+          delta,
+          reason,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Failed to adjust loyalty balance.');
+      }
+      setLoyaltyLedgerUser((prev) => (prev ? { ...prev, loyaltyPoints: json.newBalance } : prev));
+      const refreshed = await userPortalService.getMyLoyaltyLedger(loyaltyLedgerUser.uid);
+      setLoyaltyLedgerEntries(refreshed);
+      setLoyaltyReasonInput('');
+      showToast('success', `Adjusted balance by ${delta > 0 ? '+' : ''}${delta} pts (New: ${json.newBalance} pts).`);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Could not adjust loyalty points.');
+    } finally {
+      setLoyaltyAdjusting(false);
+    }
+  };
+
   // Submit edit form
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,11 +205,27 @@ export const UserManagement: React.FC = () => {
         phone: formPhone,
         role: formRole,
         department: formDepartment,
-        loyaltyPoints: Number(formLoyaltyPoints),
         status: formStatus,
         wholesaleAccess: formWholesaleAccess,
         updatedAt: serverTimestamp()
       });
+
+      const prevPoints = Math.max(0, Math.floor(Number(editingUser.loyaltyPoints || 0)));
+      const nextPoints = Math.max(0, Math.floor(Number(formLoyaltyPoints || 0)));
+      if (nextPoints !== prevPoints) {
+        const adjRes = await authFetch('/api/admin/loyalty/adjust', {
+          method: 'POST',
+          body: JSON.stringify({
+            userId: editingUser.uid,
+            newBalance: nextPoints,
+            reason: `Admin user profile adjustment (${prevPoints} → ${nextPoints})`,
+          }),
+        });
+        const adjJson = await adjRes.json().catch(() => ({}));
+        if (!adjRes.ok || !adjJson.success) {
+          throw new Error(adjJson.error || 'Profile saved, but loyalty ledger adjustment failed.');
+        }
+      }
 
       // Synchronize wholesale_customers collection record
       await wholesaleService.adminUpdateWholesaleCustomer(editingUser.uid, {
@@ -163,9 +238,9 @@ export const UserManagement: React.FC = () => {
 
       showToast('success', `User profile for "${formName}" updated successfully.`);
       setEditingUser(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating user:', err);
-      showToast('error', 'Failed to save changes. Please try again.');
+      showToast('error', err?.message || 'Failed to save changes. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -704,10 +779,16 @@ export const UserManagement: React.FC = () => {
 
                 {/* Footer: Loyalty Points & Actions */}
                 <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1 font-black text-xs text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                  <button
+                    type="button"
+                    onClick={() => openLoyaltyLedger(u)}
+                    className="inline-flex items-center gap-1.5 font-black text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200 transition cursor-pointer"
+                    title="View & Adjust Loyalty Ledger"
+                  >
                     <Award size={13} className="text-amber-500" />
-                    {u.loyaltyPoints || 0} Points
-                  </span>
+                    <span>{u.loyaltyPoints || 0} Points</span>
+                    <History size={11} className="text-amber-600/80" />
+                  </button>
 
                   <div className="flex items-center gap-1">
                     <button
@@ -739,6 +820,125 @@ export const UserManagement: React.FC = () => {
           wholesaleCustomerId={ledgerCustomerId}
           onClose={() => setLedgerCustomerId(null)}
         />
+      )}
+
+      {loyaltyLedgerUser && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <Award size={19} className="text-amber-500" />
+                  Loyalty Ledger — {loyaltyLedgerUser.name}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Current Balance:{' '}
+                  <span className="font-black text-amber-700">{loyaltyLedgerUser.loyaltyPoints || 0} pts</span>
+                  {' • '}Every adjustment creates an immutable audit record.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLoyaltyLedgerUser(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            {/* Quick Adjustment Bar */}
+            <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200 mb-4 space-y-2.5">
+              <div className="text-[11px] font-black uppercase tracking-wider text-amber-900">
+                Audited Points Adjustment
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={loyaltyDeltaInput}
+                  onChange={(e) => setLoyaltyDeltaInput(e.target.value)}
+                  className="w-28 px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  placeholder="Points"
+                />
+                <input
+                  type="text"
+                  value={loyaltyReasonInput}
+                  onChange={(e) => setLoyaltyReasonInput(e.target.value)}
+                  placeholder="Reason (e.g. Goodwill credit for delayed courier)"
+                  className="flex-1 px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+                <div className="flex gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    disabled={loyaltyAdjusting}
+                    onClick={() => handleQuickLoyaltyAdjust(1)}
+                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loyaltyAdjusting}
+                    onClick={() => handleQuickLoyaltyAdjust(-1)}
+                    className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Minus size={13} /> Deduct
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Ledger History */}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-2">
+              {loyaltyLedgerLoading ? (
+                <div className="py-10 text-center text-xs text-slate-400 font-semibold">
+                  Loading loyalty ledger entries...
+                </div>
+              ) : loyaltyLedgerEntries.length === 0 ? (
+                <div className="py-10 text-center text-xs text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  No loyalty ledger entries recorded for this account yet.
+                </div>
+              ) : (
+                loyaltyLedgerEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="p-3 rounded-2xl border border-slate-100 bg-slate-50/70 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 truncate">{entry.description}</div>
+                      <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2 mt-0.5">
+                        <span className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-[10px] font-bold">
+                          {entry.type}
+                        </span>
+                        {entry.orderId && <span className="font-mono">Order #{entry.orderId}</span>}
+                        {entry.actor && <span>By {entry.actor}</span>}
+                        <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 font-mono">
+                      <div
+                        className={`text-sm font-black ${
+                          entry.pointsDelta >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                        }`}
+                      >
+                        {entry.pointsDelta >= 0 ? '+' : ''}
+                        {entry.pointsDelta} pts
+                      </div>
+                      {typeof entry.balanceAfter === 'number' && (
+                        <div className="text-[10px] text-slate-500">Bal: {entry.balanceAfter} pts</div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        </div>
       )}
 
         {editingUser && (

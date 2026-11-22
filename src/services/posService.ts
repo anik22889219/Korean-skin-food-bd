@@ -2177,6 +2177,12 @@ export const posService = {
       }).catch(console.error);
     } else {
       setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order)).catch(console.error);
+      if (auth.currentUser) {
+        authFetch('/api/admin/orders/' + encodeURIComponent(order.id) + '/status', {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'delivered', note: `Fulfilled by ${staffName}` })
+        }).catch(console.warn);
+      }
     }
     notifyOrderSubscribers();
 
@@ -2360,6 +2366,12 @@ export const posService = {
         }).catch(console.error);
       } else {
         setDoc(doc(db, 'orders', updatedOrder.id), sanitizeForFirestore(updatedOrder)).catch(console.error);
+        if (status === 'delivered' && auth.currentUser) {
+          authFetch('/api/admin/orders/' + encodeURIComponent(updatedOrder.id) + '/status', {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'delivered' })
+          }).catch(console.warn);
+        }
       }
       notifyOrderSubscribers();
 

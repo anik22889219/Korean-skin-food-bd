@@ -69,19 +69,33 @@ service cloud.firestore {
         (!('wholesaleAccess' in request.resource.data) || request.resource.data.wholesaleAccess == false) &&
         (!('creditLimit' in request.resource.data) || request.resource.data.creditLimit == 0) &&
         (!('currentDue' in request.resource.data) || request.resource.data.currentDue == 0) &&
+        (!('loyaltyPoints' in request.resource.data) || request.resource.data.loyaltyPoints == 0) &&
         (!('permissions' in request.resource.data) || request.resource.data.permissions.size() == 0)
       );
 
-      // Update: Staff can edit all fields; users cannot escalate privileges or modify financials
+      // Update: Staff can edit all fields; users cannot escalate privileges or modify financials/loyaltyPoints
       allow update: if isStaff() || (
         isSignedIn() && 
         request.auth.uid == userId && 
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'role', 'wholesaleAccess', 'creditLimit', 'currentDue', 'permissions', 'status'
+          'uid', 'role', 'wholesaleAccess', 'creditLimit', 'currentDue', 'loyaltyPoints', 'permissions', 'status'
         ])
       );
 
       allow delete: if isStaff();
+
+      match /wishlist/{itemId} {
+        allow read, write: if isStaff() || (isSignedIn() && request.auth.uid == userId);
+      }
+      match /addresses/{addressId} {
+        allow read, write: if isStaff() || (isSignedIn() && request.auth.uid == userId);
+      }
+      match /skin_profile/{docId} {
+        allow read, write: if isStaff() || (isSignedIn() && request.auth.uid == userId);
+      }
+      match /routines/{routineId} {
+        allow read, write: if isStaff() || (isSignedIn() && request.auth.uid == userId);
+      }
     }
 
     // ==========================================
@@ -178,6 +192,58 @@ service cloud.firestore {
       allow read, write: if isAdminOrSuperAdmin();
     }
 
+    function isValidYouTubeShort(data) {
+      return data.keys().hasAll([
+          'videoId', 'title', 'thumbnailUrl', 'videoUrl', 'embedUrl',
+          'channelId', 'publishedAt', 'durationSeconds', 'viewsCount',
+          'likesCount', 'commentsCount', 'isVisible', 'isPinned',
+          'displayOrder', 'taggedProductIds', 'metricsSyncedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'videoId', 'title', 'customTitle', 'description', 'thumbnailUrl',
+          'videoUrl', 'embedUrl', 'channelId', 'channelTitle', 'publishedAt',
+          'durationSeconds', 'viewsCount', 'likesCount', 'commentsCount',
+          'privacyStatus', 'isVisible', 'isPinned', 'displayOrder',
+          'taggedProductIds', 'metricsSyncedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.videoId is string && data.videoId.size() >= 6 && data.videoId.size() <= 32 &&
+        data.title is string && data.title.size() <= 300 &&
+        data.thumbnailUrl is string && data.thumbnailUrl.size() <= 1000 &&
+        data.videoUrl is string && data.videoUrl.size() <= 1000 &&
+        data.embedUrl is string && data.embedUrl.size() <= 1000 &&
+        data.channelId is string && data.channelId.size() <= 128 &&
+        data.publishedAt is string && data.publishedAt.size() <= 64 &&
+        data.durationSeconds is number && data.durationSeconds >= 0 &&
+        data.viewsCount is number && data.viewsCount >= 0 &&
+        data.likesCount is number && data.likesCount >= 0 &&
+        data.commentsCount is number && data.commentsCount >= 0 &&
+        data.isVisible is bool &&
+        data.isPinned is bool &&
+        data.displayOrder is number &&
+        data.taggedProductIds is list && data.taggedProductIds.size() <= 6 &&
+        data.metricsSyncedAt is string && data.metricsSyncedAt.size() <= 64 &&
+        (!('customTitle' in data) || data.customTitle == null || (data.customTitle is string && data.customTitle.size() <= 300)) &&
+        (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 5000)) &&
+        (!('channelTitle' in data) || data.channelTitle == null || (data.channelTitle is string && data.channelTitle.size() <= 200)) &&
+        (!('privacyStatus' in data) || data.privacyStatus == null || data.privacyStatus in ['public', 'unlisted', 'private']) &&
+        (!('createdAt' in data) || data.createdAt == null || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // youtube_shorts - Synced official YouTube channel Shorts with storefront curation
+    match /youtube_shorts/{videoId} {
+      allow read: if (resource != null && resource.data.isVisible == true) || isStaff();
+      allow create: if isStaff() &&
+        videoId.matches('^[a-zA-Z0-9_\\-]{6,32}$') &&
+        request.resource.data.videoId == videoId &&
+        isValidYouTubeShort(request.resource.data);
+      allow update: if isStaff() &&
+        videoId.matches('^[a-zA-Z0-9_\\-]{6,32}$') &&
+        request.resource.data.videoId == resource.data.videoId &&
+        isValidYouTubeShort(request.resource.data);
+      allow delete: if isStaff();
+    }
+
     // ==========================================
     // CATALOG & STORE TAXONOMY (STAFF ONLY WRITES)
     // ==========================================
@@ -236,8 +302,20 @@ service cloud.firestore {
     }
 
     match /product_reviews/{reviewId} {
-      allow read: if true;
-      allow create: if isSignedIn();
+      allow read: if resource == null ||
+        !('status' in resource.data) ||
+        resource.data.status == 'approved' ||
+        isStaff() ||
+        (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isStaff() || (
+        isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.isVerifiedPurchaser == false &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5
+      );
       allow update, delete: if isStaff();
     }
 
@@ -296,6 +374,14 @@ service cloud.firestore {
       allow read, write: if isStaff();
     }
     match /audit_logs/{logId} {
+      allow read, create: if isStaff();
+      allow update, delete: if false;
+    }
+    match /loyalty_ledger/{entryId} {
+      allow read: if isStaff() || (isSignedIn() && resource != null && resource.data.userId == request.auth.uid);
+      allow write: if isStaff();
+    }
+    match /abandoned_carts/{cartId} {
       allow read, write: if isStaff();
     }
     match /support_tickets/{ticketId} {
@@ -355,7 +441,12 @@ service cloud.firestore {
           resource.data.wholesaleCustomerId == request.auth.uid
         )
       );
-      allow create: if isStaff() || (isSignedIn() && request.resource.data.userId == request.auth.uid);
+      allow create: if isStaff() || (
+        isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.wholesaleAccess == true
+      );
       allow update, delete: if isStaff();
     }
 
@@ -365,16 +456,15 @@ service cloud.firestore {
 
     match /fcm_tokens/{tokenId} {
       allow read: if isStaff() || (isSignedIn() && resource != null && resource.data.userId == request.auth.uid);
-      allow create, update: if true;
+      allow create, update: if request.resource.data.token is string &&
+        request.resource.data.token.size() >= 10 &&
+        (!('userId' in request.resource.data) || request.resource.data.userId == null || (isSignedIn() && request.resource.data.userId == request.auth.uid));
       allow delete: if isStaff() || (isSignedIn() && resource != null && resource.data.userId == request.auth.uid);
     }
 
     match /coupons/{couponId} {
       allow read: if true;
-      allow create, delete: if isStaff();
-      allow update: if isStaff() || (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount', 'updatedAt'])
-      );
+      allow create, update, delete: if isStaff();
     }
   }
 }

@@ -15,6 +15,7 @@
     ]
   },
   "firestore": {
+    "database": "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4",
     "rules": "firestore.rules"
   }
 }

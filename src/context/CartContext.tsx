@@ -3,8 +3,7 @@ import { Product, Order, OrderItem, Coupon, ComboComponentDetail } from '../type
 import { posService } from '../services/posService';
 import { discountService } from '../services/discountService';
 import { useAuth } from './AuthContext';
-import { db, sanitizeForFirestore } from '../services/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { sanitizeForFirestore } from '../services/firebase';
 import { analytics } from '../services/analyticsService';
 import { captureAndPersistAttribution, getStoredAttribution } from '../services/attributionService';
 import { getProductUnitPrice, getRetailPrice } from '../utils/pricing';
@@ -278,7 +277,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const calculateShipping = () => {
     if (cart.length === 0) return 0;
-    if (isFreeDelivery) return 0;
+    if (isFreeDelivery || calculateCartSubtotal() >= 2000) return 0;
     return checkoutForm.area === 'dhaka' ? 80 : 150;
   };
 
@@ -514,6 +513,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
 
       let createdOrder: Order;
+      let serverCheckoutSucceeded = false;
 
       // Authoritative Server-Side Checkout with Idempotency & Transactional stock locking
       try {
@@ -542,6 +542,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const respData = await response.json();
           if (respData.order) {
             createdOrder = respData.order;
+            serverCheckoutSucceeded = true;
           } else {
             createdOrder = posService.createOnlineOrder(sanitizeForFirestore(orderData) as any);
           }
@@ -555,7 +556,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (srvErr: any) {
         // Re-throw explicit validation errors (e.g. insufficient stock) instead of bypassing them
-        if (srvErr?.message && /insufficient stock|does not exist|cannot be empty|rate limit/i.test(srvErr.message)) {
+        if (srvErr?.message && /insufficient stock|does not exist|cannot be empty|rate limit|valid Bangladesh|invalid phone/i.test(srvErr.message)) {
           throw srvErr;
         }
         console.warn('[CartContext] Server transactional checkout call failed, falling back to client posService:', srvErr);
@@ -587,22 +588,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Track Authoritative Purchase immediately on order placement
       analytics.trackPurchase(enrichedOrder).catch(console.warn);
 
-      // Record coupon redemption count if applicable
-      if (appliedCoupon?.id) {
+      // Server checkout already updates coupon usage & deducts redeemed loyalty points atomically.
+      // Earned points are only credited by the server when the order is marked delivered.
+      if (!serverCheckoutSucceeded && appliedCoupon?.id) {
         discountService.incrementCouponUsage(appliedCoupon.id).catch(console.warn);
-      }
-
-      // Update user's loyalty points balance in Firestore
-      if (user?.uid) {
-        const currentBalance = profile?.loyaltyPoints ?? 0;
-        const newBalance = Math.max(0, currentBalance - redeemedPts + earnedPts);
-        try {
-          await setDoc(doc(db, 'users', user.uid), sanitizeForFirestore({
-            loyaltyPoints: newBalance
-          }), { merge: true });
-        } catch (ptsErr) {
-          console.warn('[CartContext] Failed to update user loyalty points balance:', ptsErr);
-        }
       }
 
       setLastCreatedOrder(enrichedOrder);

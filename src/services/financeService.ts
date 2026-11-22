@@ -86,6 +86,10 @@ export interface FinancialSummary {
   totalDueOutstanding: number;
   totalExpenses: number;
   totalCOGS: number;
+  verifiedCOGS: number;
+  estimatedCOGS: number;
+  cogsCoveredOrdersCount: number;
+  estimatedOrdersCount: number;
   grossProfit: number;
   netProfit: number;
   totalCapitalAdded: number;
@@ -97,6 +101,7 @@ export interface FinancialSummary {
     bank: number;
     pettyCash: number;
   };
+  paymentMethodBreakdown: Record<string, number>;
   totalLiquidCash: number;
   recentTransactions: FinancialTransaction[];
   recentPaymentTransactions: PaymentTransaction[];
@@ -650,7 +655,10 @@ export const financeService = {
 
     let totalRevenue = 0;
     let totalExpenses = 0;
-    let totalCOGS = 0;
+    let verifiedCOGS = 0;
+    let estimatedCOGS = 0;
+    let cogsCoveredOrdersCount = 0;
+    let estimatedOrdersCount = 0;
     let totalCapitalAdded = 0;
     let totalWithdrawals = 0;
 
@@ -662,6 +670,12 @@ export const financeService = {
       bank: 0,
       pettyCash: 0
     };
+
+    const paymentMethodBreakdown: Record<string, number> = {};
+    payTxs.forEach((ptx) => {
+      const methodKey = String(ptx.method || 'OTHER').toUpperCase();
+      paymentMethodBreakdown[methodKey] = (paymentMethodBreakdown[methodKey] || 0) + Number(ptx.amount || 0);
+    });
 
     const updateWallet = (account: string | undefined, delta: number) => {
       if (!account) return;
@@ -681,7 +695,7 @@ export const financeService = {
         updateWallet(tx.accountCode, amt);
       } else if (tx.transactionType === 'EXPENSE' || tx.transactionType === 'MONEY_OUT') {
         if (tx.category === 'COGS') {
-          totalCOGS += amt;
+          verifiedCOGS += amt;
         } else {
           totalExpenses += amt;
         }
@@ -701,7 +715,7 @@ export const financeService = {
       }
     });
 
-    // Factor completed orders for due balances & COGS
+    // Factor completed orders for due balances & COGS provenance
     let totalDueOutstanding = 0;
     let totalCollected = 0;
     let billedOrderRevenue = 0;
@@ -716,14 +730,17 @@ export const financeService = {
       totalCollected += paid;
       totalDueOutstanding += due;
 
-      // Real COGS calculation or fallback to standard 58% K-Beauty wholesale landing cost
-      if (o.cogsAmount) {
-        totalCOGS += Number(o.cogsAmount);
+      // Track verified recorded COGS separately from fallback 58% estimate
+      if (typeof o.cogsAmount === 'number' && o.cogsAmount > 0) {
+        verifiedCOGS += Number(o.cogsAmount);
+        cogsCoveredOrdersCount += 1;
       } else if (o.status === 'delivered') {
-        totalCOGS += Math.round(orderTotal * 0.58);
+        estimatedCOGS += Math.round(orderTotal * 0.58);
+        estimatedOrdersCount += 1;
       }
     });
 
+    const totalCOGS = verifiedCOGS + estimatedCOGS;
     const effectiveRevenue = Math.max(totalRevenue, billedOrderRevenue);
     const grossProfit = Math.max(0, effectiveRevenue - totalCOGS);
     const netProfit = grossProfit - totalExpenses;
@@ -736,11 +753,16 @@ export const financeService = {
       totalDueOutstanding,
       totalExpenses,
       totalCOGS,
+      verifiedCOGS,
+      estimatedCOGS,
+      cogsCoveredOrdersCount,
+      estimatedOrdersCount,
       grossProfit,
       netProfit,
       totalCapitalAdded,
       totalWithdrawals,
       accountBalances,
+      paymentMethodBreakdown,
       totalLiquidCash,
       recentTransactions: finTxs.slice(0, 20),
       recentPaymentTransactions: payTxs.slice(0, 20)

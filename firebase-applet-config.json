@@ -7,5 +7,6 @@
   "messagingSenderId": "857142946228",
   "measurementId": "G-8DXKFYM3YQ",
   "oAuthClientId": "857142946228-a5ujb512a1op6l0i43bluke1mjtvrgve.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "recaptchaSiteKey": "",
+  "firestoreDatabaseId": "ai-studio-koreanskinfoodbd-59297321-4843-435b-aad0-f55eda410cd4"
 }

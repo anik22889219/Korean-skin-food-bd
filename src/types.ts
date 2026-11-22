@@ -49,6 +49,13 @@ export interface Product {
   routineStep?: string;
   keyIngredients?: string[];
   expiryDate?: string;
+  howToUse?: string;
+  howToUseBN?: string;
+  precautions?: string;
+  precautionsBN?: string;
+  textureAndFinish?: string;
+  textureAndFinishBN?: string;
+  faqs?: Array<{ question: string; answer: string }>;
 }
 
 export type TaxonomyDimensionType =
@@ -791,6 +798,10 @@ export interface ProductReview {
   createdAt: string;
   helpfulCount?: number;
   helpfulVoters?: string[];
+  status?: 'pending' | 'approved' | 'rejected';
+  moderationNote?: string;
+  moderatedBy?: string;
+  moderatedAt?: string;
 }
 
 export type SlackRole = 'customer' | 'admin' | 'super_admin' | 'inventory_manager' | 'customer_support';
@@ -1023,4 +1034,64 @@ export interface GoogleBusinessProfileData {
     };
   }>;
 }
+
+export interface YouTubeShortItem {
+  videoId: string;
+  title: string;
+  customTitle?: string;
+  description?: string;
+  thumbnailUrl: string;
+  videoUrl: string;
+  embedUrl: string;
+  channelId: string;
+  channelTitle?: string;
+  publishedAt: string;
+  durationSeconds: number;
+  viewsCount: number;
+  likesCount: number;
+  commentsCount: number;
+  privacyStatus?: 'public' | 'unlisted' | 'private';
+  isVisible: boolean;
+  isPinned: boolean;
+  displayOrder: number;
+  taggedProductIds: string[];
+  metricsSyncedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface YouTubeShortsDisplaySettings {
+  enabled: boolean;
+  title: string;
+  subtitle: string;
+  viewAllLinkText: string;
+  viewAllLinkUrl: string;
+  maxDisplayCount: number;
+  autoPlayCarousel: boolean;
+  carouselSlideIntervalSeconds?: number;
+  autoSyncEnabled: boolean;
+  autoSyncIntervalMinutes: number;
+  maxShortDurationSeconds: number;
+  lastSyncedAt?: string | null;
+  lastSyncCount?: number;
+  lastSyncedChannelId?: string | null;
+  lastSyncedChannelTitle?: string | null;
+  updatedAt?: string;
+}
+
+export interface YouTubeSyncResult {
+  success: boolean;
+  channelId: string;
+  channelTitle: string;
+  channelThumbnail?: string;
+  fetchedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  totalStored: number;
+  syncedAt: string;
+  sourceMethod?: 'oauth_uush' | 'oauth_uploads' | 'apikey_uush' | 'apikey_uploads' | 'rss_shorts';
+  shorts?: YouTubeShortItem[];
+  error?: string;
+}
+
 

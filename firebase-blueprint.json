@@ -166,6 +166,8 @@
         "comment": { "type": "string" },
         "photos": { "type": "array", "items": { "type": "string" } },
         "isVerifiedPurchaser": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "moderationNote": { "type": "string" },
         "createdAt": { "type": "string" },
         "helpfulCount": { "type": "number" },
         "helpfulVoters": { "type": "array", "items": { "type": "string" } }
@@ -289,6 +291,36 @@
         "publishedAt": { "type": "string" }
       },
       "required": ["creatorReelId", "creatorId", "creatorUserId", "videoUrl", "caption", "facebookPostUrl", "status"]
+    },
+    "YouTubeShort": {
+      "title": "YouTubeShort",
+      "description": "Synced YouTube Channel Short with admin visibility, pinning, ordering, and Shop-the-Video product tags",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string" },
+        "title": { "type": "string" },
+        "customTitle": { "type": "string" },
+        "description": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "embedUrl": { "type": "string" },
+        "channelId": { "type": "string" },
+        "channelTitle": { "type": "string" },
+        "publishedAt": { "type": "string" },
+        "durationSeconds": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "privacyStatus": { "type": "string", "enum": ["public", "unlisted", "private"] },
+        "isVisible": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "displayOrder": { "type": "number" },
+        "taggedProductIds": { "type": "array", "items": { "type": "string" } },
+        "metricsSyncedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["videoId", "title", "thumbnailUrl", "videoUrl", "embedUrl", "channelId", "publishedAt", "isVisible", "isPinned", "displayOrder", "taggedProductIds", "metricsSyncedAt"]
     },
     "ProductImport": {
       "title": "ProductImport",
@@ -633,6 +665,86 @@
         "updatedAt": { "type": "string" },
         "updatedBy": { "type": "string" }
       }
+    },
+    "LoyaltyLedgerEntry": {
+      "title": "LoyaltyLedgerEntry",
+      "description": "Immutable loyalty points earn/redeem/adjust ledger entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "type": { "type": "string", "enum": ["earn", "redeem", "adjust"] },
+        "points": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "points", "createdAt"]
+    },
+    "AbandonedCart": {
+      "title": "AbandonedCart",
+      "description": "Recovered/abandoned checkout capture for follow-up",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "items", "updatedAt"]
+    },
+    "CustomerWishlistItem": {
+      "title": "CustomerWishlistItem",
+      "description": "Saved wishlist product for customer",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "addedAt": { "type": "string" }
+      },
+      "required": ["productId", "addedAt"]
+    },
+    "CustomerAddress": {
+      "title": "CustomerAddress",
+      "description": "Saved delivery address for customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "area": { "type": "string", "enum": ["dhaka", "outside"] },
+        "isDefault": { "type": "boolean" }
+      },
+      "required": ["id", "recipientName", "phone", "address", "area"]
+    },
+    "CustomerSkinProfile": {
+      "title": "CustomerSkinProfile",
+      "description": "Saved skin profile quiz result",
+      "type": "object",
+      "properties": {
+        "skinType": { "type": "string" },
+        "concerns": { "type": "array", "items": { "type": "string" } },
+        "sensitivity": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["skinType", "updatedAt"]
+    },
+    "CustomerRoutine": {
+      "title": "CustomerRoutine",
+      "description": "Saved AM/PM skincare routine",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "timeOfDay": { "type": "string", "enum": ["AM", "PM", "BOTH"] },
+        "steps": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "steps", "updatedAt"]
     }
   },
   "firestore": {
@@ -679,6 +791,10 @@
     "/creator_reels/{creatorReelId}": {
       "schema": "CreatorReel",
       "description": "Short video reels uploaded by creators with status tracking and moderation"
+    },
+    "/youtube_shorts/{videoId}": {
+      "schema": "YouTubeShort",
+      "description": "Synced official YouTube Channel Shorts curated from Admin Creators for the storefront Community Live section"
     },
     "/creators/{creatorId}": {
       "schema": "CreatorProfile",
@@ -755,6 +871,30 @@
     "/settings/{settingId}": {
       "schema": "TrackingSettings",
       "description": "Site-wide configuration and tracking settings documents"
+    },
+    "/loyalty_ledger/{entryId}": {
+      "schema": "LoyaltyLedgerEntry",
+      "description": "Customer loyalty points audit ledger"
+    },
+    "/abandoned_carts/{cartId}": {
+      "schema": "AbandonedCart",
+      "description": "Abandoned checkout telemetry for customer recovery"
+    },
+    "/users/{userId}/wishlist/{itemId}": {
+      "schema": "CustomerWishlistItem",
+      "description": "Customer saved wishlist products"
+    },
+    "/users/{userId}/addresses/{addressId}": {
+      "schema": "CustomerAddress",
+      "description": "Customer saved delivery addresses"
+    },
+    "/users/{userId}/skin_profile/{docId}": {
+      "schema": "CustomerSkinProfile",
+      "description": "Customer skin quiz profile"
+    },
+    "/users/{userId}/routines/{routineId}": {
+      "schema": "CustomerRoutine",
+      "description": "Customer saved AM/PM skincare routines"
     }
   }
 }

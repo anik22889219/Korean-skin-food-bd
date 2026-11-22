@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from './firebase';
+import { authFetch } from './apiClient';
 import { productService } from './productService';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { getSiteUrl } from '../utils/siteUrl';
@@ -189,8 +190,8 @@ class PinterestService {
             this.saveToLocalStorage(merged);
             this.notifyListeners();
             this.updateMetaTag(merged.domainVerification.verificationCode);
-          } else {
-            // First time seeding
+          } else if (auth.currentUser) {
+            // First time seeding when signed in
             this.saveSettings(DEFAULT_PINTEREST_SETTINGS).catch(() => {});
           }
         },
@@ -278,15 +279,17 @@ class PinterestService {
       this.notifyListeners();
       this.updateMetaTag(merged.domainVerification.verificationCode);
 
-      // Notify the server runtime proxy if available
-      try {
-        await fetch('/api/pinterest/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(merged),
-        });
-      } catch (syncErr) {
-        // Server proxy optional in static deployments
+      // Notify the server runtime proxy if available and signed in
+      if (auth.currentUser) {
+        try {
+          await authFetch('/api/pinterest/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(merged),
+          });
+        } catch (syncErr) {
+          // Server proxy optional in static deployments
+        }
       }
 
       return merged;

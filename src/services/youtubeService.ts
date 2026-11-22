@@ -11,7 +11,7 @@ export interface YouTubeAdminStatus {
   hasStaleToken?: boolean;
   tokenError?: string | null;
   errorCode?: string | null;
-  tokenSource?: 'oauth_file' | 'env_secret' | 'firestore' | 'disconnected' | 'none';
+  tokenSource?: 'oauth_file' | 'env_secret' | 'firestore' | 'default' | 'disconnected' | 'none';
   channelId: string | null;
   channelTitle: string | null;
   channelThumbnail: string | null;

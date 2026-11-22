@@ -1,4 +1,5 @@
 import { Product } from '../types';
+import { authFetch } from '../services/apiClient';
 import { BrowserMultiFormatReader, BarcodeFormat, IScannerControls } from '@zxing/browser';
 import { DecodeHintType } from '@zxing/library';
 
@@ -459,7 +460,7 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
     });
 
     if (readerBase64) {
-      const res = await fetch('/api/gemini/read-barcode-image', {
+      const res = await authFetch('/api/gemini/read-barcode-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

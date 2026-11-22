@@ -63,15 +63,15 @@ export const Footer: React.FC = () => {
         
         {/* Top Section: Guarantee Badges */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pb-8 border-b border-pink-100/70">
-          <div className="flex items-center gap-3 bg-pink-50/30 p-3.5 rounded-2xl border border-pink-100/50">
+          <Link to="/authenticity" className="flex items-center gap-3 bg-pink-50/30 hover:bg-pink-50/60 p-3.5 rounded-2xl border border-pink-100/50 transition-colors">
             <div className="w-10 h-10 rounded-xl bg-[#E91E8C]/10 text-[#E91E8C] flex items-center justify-center shrink-0">
               <ShieldCheck size={20} />
             </div>
             <div>
-              <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">100% Genuine Imports</h4>
-              <p className="text-[11px] text-gray-500 font-medium">Directly sourced from Seoul, South Korea</p>
+              <h4 className="text-xs font-black text-gray-900 uppercase tracking-wide">Batch & Seal Checked</h4>
+              <p className="text-[11px] text-gray-500 font-medium">Read our authenticity & inspection guide</p>
             </div>
-          </div>
+          </Link>
 
           <div className="flex items-center gap-3 bg-pink-50/30 p-3.5 rounded-2xl border border-pink-100/50">
             <div className="w-10 h-10 rounded-xl bg-[#E91E8C]/10 text-[#E91E8C] flex items-center justify-center shrink-0">
@@ -118,7 +118,7 @@ export const Footer: React.FC = () => {
             </Link>
 
             <p className="text-gray-500 text-xs leading-relaxed font-medium pr-2">
-              {globalTheme.siteTagline || 'Your trusted destination in Bangladesh for 100% authentic Korean skincare, K-Beauty formulations, and barrier-repairing cosmeceuticals straight from Seoul.'}
+              {globalTheme.siteTagline || 'Curated Korean skincare and daily beauty essentials with Cash on Delivery across Bangladesh.'}
             </p>
 
             {/* Social Media Links Section */}
@@ -186,7 +186,7 @@ export const Footer: React.FC = () => {
                   id="footer_google_business_link"
                   aria-label="Google Business Profile & Reviews"
                   className="w-10 h-10 rounded-xl bg-white hover:bg-slate-50 text-gray-700 border border-pink-200/80 flex items-center justify-center transition-all duration-200 shadow-sm hover:scale-105 active:scale-95 group cursor-pointer"
-                  title="Google Business Reviews (4.9 ★)"
+                  title="Google Business Profile & Reviews"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
@@ -241,8 +241,8 @@ export const Footer: React.FC = () => {
               </div>
               <div className="flex items-center gap-2.5">
                 <Phone size={16} className="text-[#E91E8C] shrink-0" />
-                <a href={`tel:${(globalTheme.contactPhone || '+8801700000000').replace(/\s+/g, '')}`} className="hover:text-[#E91E8C] font-mono font-bold transition-colors">
-                  {globalTheme.contactPhone || '+880 1700-000000'}
+                <a href={`tel:${(globalTheme.contactPhone || '+8801755837545').replace(/\s+/g, '')}`} className="hover:text-[#E91E8C] font-mono font-bold transition-colors">
+                  {globalTheme.contactPhone || '+880 1755-837545'}
                 </a>
               </div>
               <div className="flex items-center gap-2.5">
@@ -274,7 +274,7 @@ export const Footer: React.FC = () => {
               {globalTheme.footerText || 'Korean Skin Food BD © 2026. All rights reserved.'}
             </p>
             <p className="text-[10px] text-gray-400 mt-0.5">
-              100% Original imported Cosmeceuticals straight from Seoul for skin care enthusiasts in Bangladesh.
+              Curated Korean skincare and daily routine essentials delivered across Bangladesh.
             </p>
           </div>
 

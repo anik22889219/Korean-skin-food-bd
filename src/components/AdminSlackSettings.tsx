@@ -95,13 +95,13 @@ export const AdminSlackSettings: React.FC = () => {
     setRefreshing(true);
     try {
       const [statusRes, usersRes, logsRes, importsRes, auditsRes, channelsRes, ticketsRes] = await Promise.all([
-        fetch('/api/slack/status'),
-        fetch('/api/slack/users'),
-        fetch('/api/slack/notification-logs'),
-        fetch('/api/slack/product-imports'),
-        fetch('/api/slack/audit-logs'),
-        fetch('/api/slack/channels'),
-        fetch('/api/slack/support-tickets')
+        authFetch('/api/slack/status'),
+        authFetch('/api/slack/users'),
+        authFetch('/api/slack/notification-logs'),
+        authFetch('/api/slack/product-imports'),
+        authFetch('/api/slack/audit-logs'),
+        authFetch('/api/slack/channels'),
+        authFetch('/api/slack/support-tickets')
       ]);
 
       if (statusRes.ok) setStatus(await statusRes.json());
@@ -240,7 +240,7 @@ export const AdminSlackSettings: React.FC = () => {
     setTestResult(null);
 
     try {
-      const res = await fetch('/api/slack/verify-permission', {
+      const res = await authFetch('/api/slack/verify-permission', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -273,7 +273,7 @@ export const AdminSlackSettings: React.FC = () => {
     setTestIntegrationResult(null);
 
     try {
-      const res = await fetch('/api/slack/test-notification', {
+      const res = await authFetch('/api/slack/test-notification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel: channelToTest })
@@ -328,7 +328,7 @@ export const AdminSlackSettings: React.FC = () => {
   const handleTriggerTestNotification = async (type: 'new_order' | 'stock_alert' | 'courier_event') => {
     setTriggeringTest(true);
     try {
-      const res = await fetch('/api/slack/trigger-test-notification', {
+      const res = await authFetch('/api/slack/trigger-test-notification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type })
@@ -394,7 +394,7 @@ export const AdminSlackSettings: React.FC = () => {
       ];
 
       const item = testItems[Math.floor(Math.random() * testItems.length)];
-      const res = await fetch('/api/slack/notify-product-import', {
+      const res = await authFetch('/api/slack/notify-product-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -427,7 +427,7 @@ export const AdminSlackSettings: React.FC = () => {
     setActionMessage(null);
 
     try {
-      const res = await fetch('/api/slack/interactive', {
+      const res = await authFetch('/api/slack/interactive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -465,7 +465,7 @@ export const AdminSlackSettings: React.FC = () => {
     const actingUser = users.find(u => u.slackUserId === selectedSlackUserForAction) || users[0];
 
     try {
-      const res = await fetch(`/api/slack/support-tickets/${selectedTicket.id}/reply`, {
+      const res = await authFetch(`/api/slack/support-tickets/${selectedTicket.id}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -529,7 +529,7 @@ export const AdminSlackSettings: React.FC = () => {
     }
 
     try {
-      const res = await fetch('/api/slack/support-tickets', {
+      const res = await authFetch('/api/slack/support-tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newTicketForm)
@@ -564,7 +564,7 @@ export const AdminSlackSettings: React.FC = () => {
     const text = parts.slice(1).join(' ');
 
     try {
-      const res = await fetch('/api/slack/command', {
+      const res = await authFetch('/api/slack/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

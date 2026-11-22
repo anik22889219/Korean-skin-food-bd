@@ -27,6 +27,7 @@ import {
   CheckCheck
 } from 'lucide-react';
 import { analytics } from '../services/analyticsService';
+import { authFetch } from '../services/apiClient';
 import { 
   trackingSettingsService, 
   TrackingSettings, 
@@ -138,7 +139,7 @@ export const AdminAnalyticsHealth: React.FC = () => {
   const checkCapiServer = useCallback(async () => {
     setCapiStatus(prev => ({ ...prev, checking: true }));
     try {
-      const res = await fetch('/api/tracking/meta-capi/status');
+      const res = await authFetch('/api/tracking/meta-capi/status');
       if (res.ok) {
         const data = await res.json();
         setCapiStatus({

@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, auth } from './firebase';
+import { authFetch } from './apiClient';
 
 export interface TrackingSettings {
   gtm: {
@@ -165,8 +166,8 @@ class TrackingSettingsService {
             this.currentSettings = merged;
             this.saveToLocalStorage(merged);
             this.notifyListeners();
-          } else {
-            // First time seeding if document does not exist
+          } else if (auth.currentUser) {
+            // Seed defaults only when an authenticated user is active
             this.saveSettings(DEFAULT_TRACKING_SETTINGS).catch(() => {});
           }
         },
@@ -236,14 +237,16 @@ class TrackingSettingsService {
       this.notifyListeners();
 
       // Notify the server runtime proxy to update its CAPI credentials immediately
-      try {
-        await fetch('/api/tracking/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(merged),
-        });
-      } catch (syncErr) {
-        console.warn('[TrackingSettingsService] Server proxy sync notification warning:', syncErr);
+      if (auth.currentUser) {
+        try {
+          await authFetch('/api/tracking/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(merged),
+          });
+        } catch (syncErr) {
+          console.warn('[TrackingSettingsService] Server proxy sync notification warning:', syncErr);
+        }
       }
 
       return merged;

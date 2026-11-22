@@ -59,6 +59,11 @@ import { BrandLandingPage } from './components/BrandLandingPage';
 import { BrandsIndexPage } from './components/BrandsIndexPage';
 import { SkincareGuidesIndex } from './components/SkincareGuidesIndex';
 import { SkincareGuideDetail } from './components/SkincareGuideDetail';
+import { AuthenticityCenter } from './components/AuthenticityCenter';
+import { IngredientLibraryPage } from './components/IngredientLibraryPage';
+import { SkinConcernLibraryPage } from './components/SkinConcernLibraryPage';
+import { SkinProfileQuizPage } from './components/SkinProfileQuizPage';
+import { RoutineBuilderPage } from './components/RoutineBuilderPage';
 import { NotFoundPage } from './components/NotFoundPage';
 import { GoogleBusinessOAuthCallback } from './components/GoogleBusinessOAuthCallback';
 import PosRegister from './components/PosRegister';
@@ -197,6 +202,13 @@ export default function App() {
                   <Route path="brand/:brandSlug" element={<BrandLandingPage />} />
                   <Route path="guides" element={<SkincareGuidesIndex />} />
                   <Route path="guide/:slug" element={<SkincareGuideDetail />} />
+                  <Route path="authenticity" element={<AuthenticityCenter />} />
+                  <Route path="ingredients" element={<IngredientLibraryPage />} />
+                  <Route path="ingredient/:slug" element={<IngredientLibraryPage />} />
+                  <Route path="concerns" element={<SkinConcernLibraryPage />} />
+                  <Route path="concern/:slug" element={<SkinConcernLibraryPage />} />
+                  <Route path="skin-quiz" element={<SkinProfileQuizPage />} />
+                  <Route path="routine-builder" element={<RoutineBuilderPage />} />
                   <Route path="login" element={<Login />} />
                   <Route path="checkout" element={<CheckoutPage />} />
                   <Route path="thank-you" element={<ThankYouPage />} />

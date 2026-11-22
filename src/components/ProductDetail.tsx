@@ -15,10 +15,10 @@ import { analytics } from '../services/analyticsService';
 import { themeService, DEFAULT_GLOBAL_THEME, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { GlobalThemeSettings, ProductDetailPageThemeSettings } from '../types/theme';
 import { 
-  ShoppingBag, ChevronRight, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, 
+  ShoppingBag, ChevronRight, ChevronDown, Star, Heart, CheckCircle, ArrowLeft, ShieldCheck, ShieldAlert,
   RefreshCw, MessageSquare, Camera, ThumbsUp, Image as ImageIcon, X, Upload, 
   Wand2, Check, AlertCircle, Filter, SlidersHorizontal, Lock, User as UserIcon, MessageCircle,
-  Share2, Copy, Sparkles, Send, ExternalLink, Plus, Minus, Building2, Layers, Box
+  Share2, Copy, Sparkles, Send, ExternalLink, Plus, Minus, Building2, Layers, Box, Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductDetailSkeleton } from './Skeletons';
@@ -35,6 +35,9 @@ import {
 import { ComboComponentDetail } from '../types';
 import { SeoHead } from './SeoHead';
 import { buildProductSeo } from '../services/seoService';
+import { userPortalService } from '../services/userPortalService';
+import { findIngredientSlug } from '../data/ingredientLibrary';
+import { findConcernSlug } from '../data/skinConcerns';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -46,12 +49,14 @@ export const ProductDetail: React.FC = () => {
   const { data: product, isLoading: isProductLoading, isError } = useProduct(id);
   const { data: allProducts = [] } = useProducts();
 
-  const [activeTab, setActiveTab] = useState<'desc' | 'ingredients' | 'how-to'>('desc');
+  const [activeTab, setActiveTab] = useState<'desc' | 'ingredients' | 'how-to' | 'safety'>('desc');
   const [selectedMainImage, setSelectedMainImage] = useState<string>('');
   const [whatsappNumber, setWhatsappNumber] = useState('8801755837545');
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [pageTheme, setPageTheme] = useState<ProductDetailPageThemeSettings>(DEFAULT_PAGES_THEME.productDetail);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [openFaqIdx, setOpenFaqIdx] = useState<number | null>(0);
 
   // Sync main image when product changes
   useEffect(() => {
@@ -316,6 +321,7 @@ export const ProductDetail: React.FC = () => {
   const [newPhotos, setNewPhotos] = useState<string[]>([]);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewSuccessMsg, setReviewSuccessMsg] = useState<string | null>(null);
+  const [reviewErrorMsg, setReviewErrorMsg] = useState<string | null>(null);
 
   // Review Filters & Sorting
   const [filterRating, setFilterRating] = useState<number | 'all' | 'photos'>('all');
@@ -337,8 +343,24 @@ export const ProductDetail: React.FC = () => {
     if (product && trackedProductIdRef.current !== product.id) {
       trackedProductIdRef.current = product.id;
       analytics.trackViewItem(product);
+      userPortalService.addRecentlyViewed(product.id);
     }
   }, [product]);
+
+  // Sync wishlist status for this product
+  useEffect(() => {
+    if (!product?.id) return;
+    const unsub = userPortalService.subscribeWishlist(user?.uid, (ids) => {
+      setIsWishlisted(ids.includes(product.id));
+    });
+    return unsub;
+  }, [product?.id, user?.uid]);
+
+  const handleToggleWishlist = async () => {
+    if (!product) return;
+    const added = await userPortalService.toggleWishlist(product.id, user?.uid);
+    setIsWishlisted(added);
+  };
 
   // Dynamic On-Page SEO metadata calculation with admin override priority
   const productSeo = useMemo(() => {
@@ -350,13 +372,17 @@ export const ProductDetail: React.FC = () => {
     if (!product?.id) return;
 
     setLoadingReviews(true);
-    const unsubscribe = reviewService.subscribeReviews(product.id, (loadedReviews) => {
-      setReviews(loadedReviews);
-      setLoadingReviews(false);
-    });
+    const unsubscribe = reviewService.subscribeReviews(
+      product.id,
+      (loadedReviews) => {
+        setReviews(loadedReviews);
+        setLoadingReviews(false);
+      },
+      user?.uid
+    );
 
     return () => unsubscribe();
-  }, [product?.id]);
+  }, [product?.id, user?.uid]);
 
   // Check if current user is a Verified Purchaser for this product
   useEffect(() => {
@@ -426,16 +452,17 @@ export const ProductDetail: React.FC = () => {
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    setReviewErrorMsg(null);
 
-    Array.from(files).forEach((file: File) => {
+    Array.from(files).slice(0, 3 - newPhotos.length).forEach((file: File) => {
       if (file.size > 5 * 1024 * 1024) {
-        alert('File size should not exceed 5MB');
+        setReviewErrorMsg('Each review photo must be smaller than 5MB.');
         return;
       }
       const reader = new FileReader();
       reader.onloadend = () => {
         if (reader.result) {
-          setNewPhotos(prev => [...prev, reader.result as string]);
+          setNewPhotos(prev => prev.length < 3 ? [...prev, reader.result as string] : prev);
         }
       };
       reader.readAsDataURL(file);
@@ -453,13 +480,14 @@ export const ProductDetail: React.FC = () => {
 
     setIsSubmittingReview(true);
     setReviewSuccessMsg(null);
+    setReviewErrorMsg(null);
 
     try {
-      const reviewerName = profile?.name || user?.displayName || 'K-Beauty Customer';
+      const reviewerName = profile?.name || user?.displayName || 'Customer';
       
-      await reviewService.addReview({
+      const res = await reviewService.addReview({
         productId: product.id,
-        userId: user?.uid || 'guest',
+        userId: user?.uid || '',
         userName: reviewerName,
         userEmail: user?.email || '',
         rating: newRating,
@@ -469,15 +497,15 @@ export const ProductDetail: React.FC = () => {
         isVerifiedPurchaser: isVerifiedPurchaser
       });
 
-      setReviewSuccessMsg('Thank you! Your verified review and photos have been posted successfully.');
+      setReviewSuccessMsg(res.message || 'Thank you! Your review has been submitted and is awaiting moderation.');
       setNewComment('');
       setNewTitle('');
       setNewPhotos([]);
       setShowReviewForm(false);
-      setTimeout(() => setReviewSuccessMsg(null), 5000);
-    } catch (err) {
+      setTimeout(() => setReviewSuccessMsg(null), 6500);
+    } catch (err: any) {
       console.error('Failed to post review:', err);
-      alert('Failed to submit review. Please try again.');
+      setReviewErrorMsg(err?.message || 'Failed to submit review. Please sign in and try again.');
     } finally {
       setIsSubmittingReview(false);
     }
@@ -511,13 +539,14 @@ export const ProductDetail: React.FC = () => {
     return result;
   }, [reviews, filterRating, sortBy]);
 
-  // Rating Statistics Breakdown
+  // Rating Statistics Breakdown (strictly from approved reviews — zero fabricated fallback values)
   const ratingStats = useMemo(() => {
-    if (reviews.length === 0) {
+    const approvedReviews = reviews.filter((r) => !r.status || r.status === 'approved');
+    if (approvedReviews.length === 0) {
       return {
-        avg: product?.rating || 4.8,
-        total: product?.reviewsCount || 0,
-        distribution: { 5: 85, 4: 10, 3: 5, 2: 0, 1: 0 },
+        avg: 0,
+        total: 0,
+        distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
         verifiedCount: 0,
         withPhotosCount: 0
       };
@@ -528,7 +557,7 @@ export const ProductDetail: React.FC = () => {
     let verifiedCount = 0;
     let withPhotosCount = 0;
 
-    reviews.forEach(r => {
+    approvedReviews.forEach(r => {
       const star = Math.min(5, Math.max(1, Math.round(r.rating))) as 1|2|3|4|5;
       counts[star] = (counts[star] || 0) + 1;
       totalScore += r.rating;
@@ -536,7 +565,7 @@ export const ProductDetail: React.FC = () => {
       if (r.photos && r.photos.length > 0) withPhotosCount++;
     });
 
-    const total = reviews.length;
+    const total = approvedReviews.length;
     const avg = Number((totalScore / total).toFixed(1));
 
     const distribution = {
@@ -548,7 +577,7 @@ export const ProductDetail: React.FC = () => {
     };
 
     return { avg, total, distribution, verifiedCount, withPhotosCount };
-  }, [reviews, product]);
+  }, [reviews]);
 
   if (isProductLoading) {
     return <ProductDetailSkeleton />;
@@ -865,21 +894,53 @@ export const ProductDetail: React.FC = () => {
                 </span>
               )}
             </div>
-            <h2 className="text-2xl font-black text-gray-950 tracking-tight leading-tight">
-              {language === 'en' ? product.name : product.nameBN}
-            </h2>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-2xl font-black text-gray-950 tracking-tight leading-tight">
+                {language === 'en' ? product.name : product.nameBN}
+              </h2>
+              <button
+                type="button"
+                onClick={handleToggleWishlist}
+                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                  isWishlisted
+                    ? 'bg-[#E91E8C] text-white border-[#E91E8C]'
+                    : 'bg-pink-50/60 text-slate-700 border-pink-100 hover:border-[#E91E8C] hover:text-[#E91E8C]'
+                }`}
+                aria-label={isWishlisted ? 'Remove from Wishlist' : 'Save to Wishlist'}
+              >
+                <Heart size={14} className={isWishlisted ? 'fill-current' : ''} />
+                <span className="hidden sm:inline">{isWishlisted ? 'Saved' : 'Save'}</span>
+              </button>
+            </div>
 
-            {/* Rating */}
-            <div className="flex items-center gap-2">
-              <div className="flex text-amber-400">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} size={15} fill={i < Math.floor(ratingStats.avg) ? "currentColor" : "none"} />
-                ))}
+            {/* Rating & Authenticity Link */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                {ratingStats.total > 0 ? (
+                  <>
+                    <div className="flex text-amber-400">
+                      {[...Array(5)].map((_, i) => (
+                        <Star key={i} size={15} fill={i < Math.floor(ratingStats.avg) ? "currentColor" : "none"} />
+                      ))}
+                    </div>
+                    <span className="text-xs font-bold text-gray-800">{ratingStats.avg}</span>
+                    <a href="#reviews-section" className="text-xs text-[#E91E8C] hover:underline font-bold">
+                      ({ratingStats.total} customer reviews)
+                    </a>
+                  </>
+                ) : (
+                  <a href="#reviews-section" className="text-xs text-slate-500 hover:text-[#E91E8C] font-semibold transition">
+                    No customer reviews yet · Be the first to review
+                  </a>
+                )}
               </div>
-              <span className="text-xs font-bold text-gray-800">{ratingStats.avg}</span>
-              <a href="#reviews-section" className="text-xs text-[#E91E8C] hover:underline font-bold">
-                ({ratingStats.total} customer reviews)
-              </a>
+              <Link
+                to="/authenticity"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full hover:bg-emerald-100 transition"
+              >
+                <ShieldCheck size={12} />
+                <span>Batch & Inspection Guide</span>
+              </Link>
             </div>
           </div>
 
@@ -1225,27 +1286,200 @@ export const ProductDetail: React.FC = () => {
 
           {/* Detailed Description Tabs */}
           <div className="space-y-4 pt-2">
-            <div className="flex border-b border-pink-50 text-xs font-bold">
+            <div className="flex flex-wrap border-b border-pink-100 text-xs font-bold gap-1">
               <button 
+                type="button"
                 onClick={() => setActiveTab('desc')}
                 className={`pb-2.5 px-3 border-b-2 transition cursor-pointer ${activeTab === 'desc' ? 'border-[#E91E8C] text-[#E91E8C]' : 'border-transparent text-gray-400 hover:text-gray-700'}`}
               >
-                Formula description
+                {language === 'bn' ? 'বিবরণ' : 'Formula Overview'}
               </button>
               <button 
+                type="button"
                 onClick={() => setActiveTab('ingredients')}
                 className={`pb-2.5 px-3 border-b-2 transition cursor-pointer ${activeTab === 'ingredients' ? 'border-[#E91E8C] text-[#E91E8C]' : 'border-transparent text-gray-400 hover:text-gray-700'}`}
               >
-                Key Active Ingredients
+                {language === 'bn' ? 'মূল উপাদান' : 'Key Ingredients'}
+              </button>
+              <button 
+                type="button"
+                onClick={() => setActiveTab('how-to')}
+                className={`pb-2.5 px-3 border-b-2 transition cursor-pointer ${activeTab === 'how-to' ? 'border-[#E91E8C] text-[#E91E8C]' : 'border-transparent text-gray-400 hover:text-gray-700'}`}
+              >
+                {language === 'bn' ? 'ব্যবহারবিধি' : 'How to Use'}
+              </button>
+              <button 
+                type="button"
+                onClick={() => setActiveTab('safety')}
+                className={`pb-2.5 px-3 border-b-2 transition cursor-pointer ${activeTab === 'safety' ? 'border-[#E91E8C] text-[#E91E8C]' : 'border-transparent text-gray-400 hover:text-gray-700'}`}
+              >
+                {language === 'bn' ? 'সতর্কতা ও প্রশ্ন' : 'Safety & FAQs'}
               </button>
             </div>
 
-            <div className="text-xs text-gray-600 leading-relaxed bg-pink-50/5 p-4 rounded-2xl border border-pink-100/30">
+            <div className="text-xs text-gray-700 leading-relaxed bg-pink-50/15 p-4 rounded-2xl border border-pink-100/60 space-y-3">
               {activeTab === 'desc' && (
-                <p>{language === 'en' ? product.description : product.descriptionBN}</p>
+                <>
+                  <p>{language === 'en' ? product.description : (product.descriptionBN || product.description)}</p>
+                  {product.concerns && product.concerns.length > 0 && (
+                    <div className="pt-2 border-t border-pink-100/60 space-y-1.5">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                        Targeted Skin Concerns
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {product.concerns.map((concern) => {
+                          const concernSlug = findConcernSlug(concern);
+                          return concernSlug ? (
+                            <Link
+                              key={concern}
+                              to={`/concern/${concernSlug}`}
+                              className="px-2.5 py-1 rounded-full bg-white border border-pink-200 text-[#E91E8C] font-bold text-[11px] hover:bg-pink-50 transition"
+                            >
+                              {concern}
+                            </Link>
+                          ) : (
+                            <span
+                              key={concern}
+                              className="px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-700 font-semibold text-[11px]"
+                            >
+                              {concern}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {product.benefits && product.benefits.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {product.benefits.map((b) => (
+                        <span key={b} className="px-2.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px] font-bold">
+                          {b}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
+
               {activeTab === 'ingredients' && (
-                <p>Features hyper-stabilized skincare concentrates designed specifically to calm skin cells and balance sebum hydration under tropical humidity. Free of parabens, phthalates, or synthesized mineral oils.</p>
+                <div className="space-y-3">
+                  {product.keyIngredients && product.keyIngredients.length > 0 ? (
+                    <>
+                      <p className="text-slate-600 font-medium">
+                        Select any highlighted active ingredient below to view cosmetic layering education and compatible catalog products:
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {product.keyIngredients.map((ing) => {
+                          const slug = findIngredientSlug(ing);
+                          return slug ? (
+                            <Link
+                              key={ing}
+                              to={`/ingredient/${slug}`}
+                              className="px-3 py-1 rounded-full bg-white border border-pink-200 text-[#E91E8C] font-bold text-[11px] hover:bg-pink-50 transition"
+                            >
+                              {ing}
+                            </Link>
+                          ) : (
+                            <Link
+                              key={ing}
+                              to="/ingredients"
+                              className="px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-700 font-semibold text-[11px] hover:border-pink-200 transition"
+                            >
+                              {ing}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-slate-600">
+                      Ingredient highlights are being updated for this SKU. Please check the packaging INCI list upon delivery or explore our{' '}
+                      <Link to="/ingredients" className="text-[#E91E8C] font-bold hover:underline">
+                        Korean Skincare Ingredient Library
+                      </Link>.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'how-to' && (
+                <div className="space-y-3">
+                  <p>
+                    {language === 'bn' && product.howToUseBN
+                      ? product.howToUseBN
+                      : product.howToUse ||
+                        `Apply an appropriate amount after ${product.routineStep || 'cleansing and toning'}, gently patting into the skin until absorbed. Follow with moisturizer and broad-spectrum SPF during morning routines.`}
+                  </p>
+                  {(product.textureAndFinish || product.textureAndFinishBN || product.routineStep) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-pink-100/60">
+                      {product.routineStep && (
+                        <div className="bg-white p-2.5 rounded-xl border border-pink-100">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 block">Routine Step</span>
+                          <span className="font-bold text-slate-800">{product.routineStep}</span>
+                        </div>
+                      )}
+                      {(product.textureAndFinish || product.textureAndFinishBN) && (
+                        <div className="bg-white p-2.5 rounded-xl border border-pink-100">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 block">Texture & Finish</span>
+                          <span className="font-bold text-slate-800">
+                            {language === 'bn' && product.textureAndFinishBN ? product.textureAndFinishBN : product.textureAndFinish}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'safety' && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-amber-900 flex items-start gap-2">
+                    <ShieldAlert size={15} className="text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block text-[11px]">24-Hour Patch Test Reminder</strong>
+                      <p className="text-[11px] mt-0.5">
+                        {language === 'bn' && product.precautionsBN
+                          ? product.precautionsBN
+                          : product.precautions ||
+                            'For external cosmetic use only. Perform a 24-hour patch test on the inner forearm or jawline before full application, especially on sensitive skin. Discontinue use if persistent irritation occurs.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between flex-wrap gap-2 bg-white p-3 rounded-xl border border-pink-100">
+                    <span className="text-[11px] font-semibold text-slate-700">
+                      Want to check packaging seals, batch codes, and our 48-hour reporting policy?
+                    </span>
+                    <Link to="/authenticity" className="text-[11px] font-bold text-[#E91E8C] hover:underline shrink-0">
+                      Authenticity & Inspection Guide →
+                    </Link>
+                  </div>
+
+                  {Array.isArray(product.faqs) && product.faqs.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                        Frequently Asked Questions
+                      </span>
+                      {product.faqs.map((faq, fIdx) => (
+                        <div key={fIdx} className="bg-white border border-pink-100 rounded-xl overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setOpenFaqIdx(openFaqIdx === fIdx ? null : fIdx)}
+                            className="w-full px-3 py-2.5 text-left font-bold text-slate-900 flex items-center justify-between gap-2 cursor-pointer"
+                          >
+                            <span>{faq.question}</span>
+                            <ChevronDown size={14} className={`transition-transform ${openFaqIdx === fIdx ? 'rotate-180 text-[#E91E8C]' : 'text-slate-400'}`} />
+                          </button>
+                          {openFaqIdx === fIdx && (
+                            <div className="px-3 pb-2.5 text-slate-600 border-t border-pink-50 pt-2">
+                              {faq.answer}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1596,7 +1830,7 @@ export const ProductDetail: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-extrabold rounded-full uppercase tracking-wider flex items-center gap-1">
-                <CheckCircle size={11} /> 100% Verified Buyer Feedback
+                <CheckCircle size={11} /> Customer Reviews & Feedback
               </span>
             </div>
             <h3 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2 mt-1">
@@ -1604,7 +1838,7 @@ export const ProductDetail: React.FC = () => {
               <span>{pageTheme.reviewsHeading}</span>
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Read authentic feedback and skin transformation photos submitted by verified buyers in Bangladesh.
+              Read moderated customer feedback and texture photos submitted by skincare shoppers in Bangladesh.
             </p>
           </div>
 
@@ -1612,11 +1846,14 @@ export const ProductDetail: React.FC = () => {
           <div>
             {user ? (
               <button
-                onClick={() => setShowReviewForm(!showReviewForm)}
+                onClick={() => {
+                  setReviewErrorMsg(null);
+                  setShowReviewForm(!showReviewForm);
+                }}
                 className="px-5 py-2.5 bg-[#E91E8C] hover:bg-[#d0177c] text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center gap-2 cursor-pointer"
               >
                 <Camera size={15} />
-                <span>{showReviewForm ? 'Cancel Review' : 'Write a Verified Review'}</span>
+                <span>{showReviewForm ? 'Cancel Review' : 'Write a Product Review'}</span>
               </button>
             ) : (
               <button
@@ -1635,6 +1872,19 @@ export const ProductDetail: React.FC = () => {
           <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-bold flex items-center gap-2">
             <CheckCircle size={16} className="text-emerald-600" />
             <span>{reviewSuccessMsg}</span>
+          </div>
+        )}
+
+        {/* Inline Error Message */}
+        {reviewErrorMsg && (
+          <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs font-bold flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-rose-600 shrink-0" />
+              <span>{reviewErrorMsg}</span>
+            </div>
+            <button type="button" onClick={() => setReviewErrorMsg(null)} className="text-rose-500 hover:text-rose-700 cursor-pointer">
+              <X size={14} />
+            </button>
           </div>
         )}
 
@@ -1797,18 +2047,26 @@ export const ProductDetail: React.FC = () => {
           <div className="md:col-span-1 text-center md:text-left flex flex-col justify-center space-y-2 border-b md:border-b-0 md:border-r border-pink-100/80 pb-6 md:pb-0 md:pr-6">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Average Rating</span>
             <div className="flex items-baseline justify-center md:justify-start gap-2">
-              <span className="text-4xl font-black text-gray-900 font-mono">{ratingStats.avg}</span>
+              <span className="text-4xl font-black text-gray-900 font-mono">
+                {ratingStats.total > 0 ? ratingStats.avg.toFixed(1) : '—'}
+              </span>
               <span className="text-sm font-bold text-gray-400">/ 5.0</span>
             </div>
             
             <div className="flex text-amber-400 justify-center md:justify-start">
               {[...Array(5)].map((_, i) => (
-                <Star key={i} size={18} fill={i < Math.floor(ratingStats.avg) ? "currentColor" : "none"} />
+                <Star key={i} size={18} fill={ratingStats.total > 0 && i < Math.floor(ratingStats.avg) ? "currentColor" : "none"} />
               ))}
             </div>
 
             <p className="text-xs text-gray-500 pt-1">
-              Based on <strong className="text-gray-800">{ratingStats.total}</strong> authentic customer reviews ({ratingStats.verifiedCount} verified buyers)
+              {ratingStats.total > 0 ? (
+                <>
+                  Based on <strong className="text-gray-800">{ratingStats.total}</strong> published reviews ({ratingStats.verifiedCount} verified buyers)
+                </>
+              ) : (
+                'No moderated customer reviews published for this product yet.'
+              )}
             </p>
           </div>
 
@@ -1928,11 +2186,21 @@ export const ProductDetail: React.FC = () => {
                           {rev.userName.slice(0, 2).toUpperCase()}
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-extrabold text-xs text-gray-900">{rev.userName}</span>
                             {rev.isVerifiedPurchaser && (
                               <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[9px] font-extrabold rounded-full flex items-center gap-1">
                                 <CheckCircle size={10} /> Verified Purchaser
+                              </span>
+                            )}
+                            {rev.status === 'pending' && (
+                              <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-extrabold rounded-full">
+                                Pending Moderation (Visible to You)
+                              </span>
+                            )}
+                            {rev.status === 'rejected' && (
+                              <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-extrabold rounded-full">
+                                Not Published
                               </span>
                             )}
                           </div>
@@ -1951,7 +2219,8 @@ export const ProductDetail: React.FC = () => {
 
                       {/* Helpful Button */}
                       <button
-                        onClick={() => reviewService.toggleHelpful(rev.id, user?.uid || user?.email || 'anon-visitor')}
+                        type="button"
+                        onClick={() => reviewService.toggleHelpful(rev.id)}
                         className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition flex items-center gap-1.5 cursor-pointer ${
                           userVoted 
                             ? 'bg-pink-100 border-[#E91E8C] text-[#E91E8C]' 

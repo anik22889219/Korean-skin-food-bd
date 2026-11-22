@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  BarChart3, PieChart, TrendingUp, Download, Printer, Calendar, 
-  DollarSign, Package, Users, Sparkles, CheckCircle2, Clock, 
-  AlertTriangle, ShoppingBag, ArrowUpRight, ArrowDownRight, Filter, RefreshCw, FileText, FileDown,
-  Minimize2, Maximize2, Award
+  BarChart3, TrendingUp, Download, Printer, Calendar, 
+  DollarSign, Package, Sparkles, 
+  ShoppingBag, ArrowUpRight, RefreshCw,
+  Minimize2, Maximize2, Award, FileDown
 } from 'lucide-react';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, LineChart, Line 
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid 
 } from 'recharts';
+import { collection, getDocs } from 'firebase/firestore';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { db } from '../services/firebase';
 import { orderService } from '../services/orderService';
 import { productService } from '../services/productService';
+import { evaluateProductCompleteness } from '../utils/productCompleteness';
 import { Order, Product } from '../types';
 
 export const AdminReportsPage: React.FC = () => {
@@ -23,11 +26,24 @@ export const AdminReportsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'sales' | 'inventory' | 'creators' | 'ai'>('sales');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCompactMode, setIsCompactMode] = useState<boolean>(false);
+  const [creatorRecords, setCreatorRecords] = useState<any[]>([]);
+
+  const loadCreatorStats = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'public_creators'));
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setCreatorRecords(list);
+    } catch {
+      setCreatorRecords([]);
+    }
+  };
 
   useEffect(() => {
     // Load initial data
     setOrders(orderService.getOrders());
     setProducts(productService.getProducts());
+    loadCreatorStats();
 
     // Subscribe to orders real-time update
     const unsub = orderService.subscribe((updatedOrders) => {
@@ -38,6 +54,7 @@ export const AdminReportsPage: React.FC = () => {
 
   const handleRefresh = () => {
     setIsRefreshing(true);
+    loadCreatorStats();
     setTimeout(() => {
       setOrders(orderService.getOrders());
       setProducts(productService.getProducts());
@@ -86,49 +103,100 @@ export const AdminReportsPage: React.FC = () => {
   }, [filteredOrders]);
 
   const totalOrdersCount = filteredOrders.length;
+  const activeOrders = filteredOrders.filter(o => o.status !== 'cancelled');
   const completedOrdersCount = filteredOrders.filter(o => o.status === 'delivered' || o.status === 'shipped').length;
   const cancelledOrdersCount = filteredOrders.filter(o => o.status === 'cancelled').length;
-  const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / Math.max(1, totalOrdersCount - cancelledOrdersCount)) : 0;
-  
-  // Simulated Store Visitor Conversion Rate
-  const estimatedVisits = Math.max(totalOrdersCount * 22, 120);
-  const conversionRate = Number(((totalOrdersCount / estimatedVisits) * 100).toFixed(1));
+  const avgOrderValue = activeOrders.length > 0 ? Math.round(totalRevenue / activeOrders.length) : 0;
 
-  // Order Sources breakdown
-  const websiteOrdersCount = filteredOrders.filter(o => o.order_source === 'WEBSITE' || o.sessionType === 'Online').length;
+  // Real Repeat Customer Rate from actual order customer identifiers
+  const repeatCustomerStats = useMemo(() => {
+    const countsByCustomer = new Map<string, number>();
+    activeOrders.forEach((o) => {
+      const key =
+        (o.customerPhone || '').replace(/\D/g, '').slice(-11) ||
+        o.customer_uid ||
+        (o.customerEmail || '').trim().toLowerCase() ||
+        '';
+      if (!key) return;
+      countsByCustomer.set(key, (countsByCustomer.get(key) || 0) + 1);
+    });
+    const uniqueCustomers = countsByCustomer.size;
+    const repeatCustomers = Array.from(countsByCustomer.values()).filter((c) => c >= 2).length;
+    const repeatRate = uniqueCustomers > 0 ? Number(((repeatCustomers / uniqueCustomers) * 100).toFixed(1)) : 0;
+    return { uniqueCustomers, repeatCustomers, repeatRate };
+  }, [activeOrders]);
+
+  // Order Sources breakdown (Website, POS, Wholesale)
+  const websiteOrdersCount = filteredOrders.filter(o => (o.order_source === 'WEBSITE' || (!o.order_source && o.sessionType !== 'POS'))).length;
   const posOrdersCount = filteredOrders.filter(o => o.order_source === 'POS' || o.sessionType === 'POS').length;
+  const wholesaleOrdersCount = filteredOrders.filter(o => o.order_source === 'WHOLESALE').length;
 
-  // Inventory Metrics
+  // Inventory & PDP Completeness Metrics
   const totalCatalogItems = products.length;
   const totalStockUnits = products.reduce((sum, p) => sum + (p.stock || 0), 0);
   const lowStockProducts = products.filter(p => (p.stock || 0) <= 5 && (p.stock || 0) > 0);
   const outOfStockProducts = products.filter(p => (p.stock || 0) <= 0);
   const totalInventoryValuation = products.reduce((sum, p) => sum + ((p.retailPrice || p.price || 0) * (p.stock || 0)), 0);
 
-  // Top Performing Products based on filtered orders
-  const topPerformingProducts = useMemo(() => {
-    const productSalesMap: { [productId: string]: { name: string; brand: string; image: string; unitsSold: number; revenue: number } } = {};
-    
+  const catalogContentMetrics = useMemo(() => {
+    const seoGeneratedCount = products.filter((p) => Boolean(p.generatedSeoContent)).length;
+    const socialCopyCount = products.filter((p) => Boolean(p.generatedSocialPost)).length;
+    const completenessScores = products.map((p) => evaluateProductCompleteness(p));
+    const avgCompleteness =
+      completenessScores.length > 0
+        ? Math.round(completenessScores.reduce((s, r) => s + r.score, 0) / completenessScores.length)
+        : 0;
+    const needsWorkCount = completenessScores.filter((r) => r.level === 'needs_work').length;
+    return { seoGeneratedCount, socialCopyCount, avgCompleteness, needsWorkCount };
+  }, [products]);
+
+  // Top Performing Products, Categories & Brands based on filtered orders
+  const { topPerformingProducts, topCategories, topBrands } = useMemo(() => {
+    const productSalesMap: Record<string, { name: string; brand: string; image: string; unitsSold: number; revenue: number }> = {};
+    const categorySalesMap: Record<string, { category: string; units: number; revenue: number }> = {};
+    const brandSalesMap: Record<string, { brand: string; units: number; revenue: number }> = {};
+
     filteredOrders.forEach(o => {
       if (o.status === 'cancelled') return;
       (o.items || []).forEach(item => {
         const pId = item.productId || item.name;
+        const matchedProd = products.find(p => p.id === item.productId || p.name.toLowerCase() === item.name.toLowerCase());
+        const brandName = matchedProd?.brand || 'Uncategorized Brand';
+        const catName = matchedProd?.category || 'Skincare';
+        const qty = item.quantity || 1;
+        const rev = (item.price || 0) * qty;
+
         if (!productSalesMap[pId]) {
-          const matchedProd = products.find(p => p.id === item.productId || p.name.toLowerCase() === item.name.toLowerCase());
           productSalesMap[pId] = {
             name: item.name,
-            brand: matchedProd?.brand || 'K-Beauty',
-            image: matchedProd?.image || 'https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?auto=format&fit=crop&q=80&w=200',
+            brand: brandName,
+            image: matchedProd?.image || '',
             unitsSold: 0,
             revenue: 0,
           };
         }
-        productSalesMap[pId].unitsSold += (item.quantity || 1);
-        productSalesMap[pId].revenue += ((item.price || 0) * (item.quantity || 1));
+        productSalesMap[pId].unitsSold += qty;
+        productSalesMap[pId].revenue += rev;
+
+        if (!categorySalesMap[catName]) {
+          categorySalesMap[catName] = { category: catName, units: 0, revenue: 0 };
+        }
+        categorySalesMap[catName].units += qty;
+        categorySalesMap[catName].revenue += rev;
+
+        if (!brandSalesMap[brandName]) {
+          brandSalesMap[brandName] = { brand: brandName, units: 0, revenue: 0 };
+        }
+        brandSalesMap[brandName].units += qty;
+        brandSalesMap[brandName].revenue += rev;
       });
     });
 
-    return Object.values(productSalesMap).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+    return {
+      topPerformingProducts: Object.values(productSalesMap).sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+      topCategories: Object.values(categorySalesMap).sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+      topBrands: Object.values(brandSalesMap).sort((a, b) => b.revenue - a.revenue).slice(0, 5),
+    };
   }, [filteredOrders, products]);
 
   // Growth Trends Calculation (Real Period-over-Period)
@@ -162,9 +230,7 @@ export const AdminReportsPage: React.FC = () => {
       ? Number((((avgOrderValue - prevAov) / prevAov) * 100).toFixed(1))
       : avgOrderValue > 0 ? 100 : 0;
 
-    const conversionGrowth = Number((revenueGrowth * 0.05).toFixed(1));
-
-    return { revenueGrowth, orderGrowth, aovGrowth, conversionGrowth };
+    return { revenueGrowth, orderGrowth, aovGrowth };
   }, [orders, totalRevenue, completedOrdersCount, avgOrderValue, dateRange]);
 
   // Daily Revenue Chart Data preparation for Recharts
@@ -244,7 +310,7 @@ export const AdminReportsPage: React.FC = () => {
     doc.text(`Net Revenue: BDT ${totalRevenue.toLocaleString()}`, 18, 43);
     doc.text(`Total Orders: ${totalOrdersCount}`, 75, 43);
     doc.text(`AOV: BDT ${avgOrderValue.toLocaleString()}`, 120, 43);
-    doc.text(`Conversion: ${conversionRate}%`, 162, 43);
+    doc.text(`Repeat Buyers: ${repeatCustomerStats.repeatRate}%`, 158, 43);
 
     // Transactions Table
     doc.setFontSize(12);
@@ -431,10 +497,10 @@ export const AdminReportsPage: React.FC = () => {
 
         <div className={`bg-white ${isCompactMode ? 'p-3' : 'p-5'} rounded-2xl border border-pink-100 shadow-xs flex items-center justify-between`}>
           <div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Conversion Rate</span>
-            <h3 className={`${isCompactMode ? 'text-lg' : 'text-2xl'} font-black text-slate-900 mt-0.5`}>{conversionRate}%</h3>
-            <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1 mt-0.5">
-              <ArrowUpRight size={14} /> +{growthMetrics.conversionGrowth}% visitor rate
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Repeat Customer Rate</span>
+            <h3 className={`${isCompactMode ? 'text-lg' : 'text-2xl'} font-black text-slate-900 mt-0.5`}>{repeatCustomerStats.repeatRate}%</h3>
+            <span className="text-[11px] font-bold text-slate-600 mt-0.5 block">
+              {repeatCustomerStats.repeatCustomers} of {repeatCustomerStats.uniqueCustomers} tracked buyers
             </span>
           </div>
           <div className={`w-${isCompactMode ? '10' : '12'} h-${isCompactMode ? '10' : '12'} rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100`}>
@@ -617,6 +683,16 @@ export const AdminReportsPage: React.FC = () => {
                       <div className="bg-purple-600 h-full rounded-full" style={{ width: `${Math.round((posOrdersCount / Math.max(1, filteredOrders.length)) * 100)}%` }}></div>
                     </div>
                   </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span className="text-slate-700 flex items-center gap-1.5"><Package size={14} className="text-amber-600" /> Wholesale B2B Orders</span>
+                      <span className="text-slate-900">{wholesaleOrdersCount} orders ({Math.round((wholesaleOrdersCount / Math.max(1, filteredOrders.length)) * 100)}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+                      <div className="bg-amber-500 h-full rounded-full" style={{ width: `${Math.round((wholesaleOrdersCount / Math.max(1, filteredOrders.length)) * 100)}%` }}></div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -648,6 +724,45 @@ export const AdminReportsPage: React.FC = () => {
                     </p>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Category & Brand Revenue Breakdown */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Top Categories by Revenue</h4>
+                {topCategories.length === 0 ? (
+                  <p className="text-xs text-slate-400">No category revenue in selected timeframe.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {topCategories.map((cat) => (
+                      <div key={cat.category} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-slate-200">
+                        <span className="font-bold text-slate-800">{cat.category}</span>
+                        <span className="font-mono font-black text-slate-900">
+                          ৳{cat.revenue.toLocaleString()} ({cat.units} u)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Top Brands by Revenue</h4>
+                {topBrands.length === 0 ? (
+                  <p className="text-xs text-slate-400">No brand revenue in selected timeframe.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {topBrands.map((b) => (
+                      <div key={b.brand} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-slate-200">
+                        <span className="font-bold text-slate-800">{b.brand}</span>
+                        <span className="font-mono font-black text-slate-900">
+                          ৳{b.revenue.toLocaleString()} ({b.units} u)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -788,42 +903,48 @@ export const AdminReportsPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-black text-slate-900">Creator & Commission Reports</h3>
-                <p className="text-xs text-slate-500">Track creator tier distribution, points earned, and influencer marketing performance.</p>
+                <h3 className="text-base font-black text-slate-900">Creator & Referral Attribution Reports</h3>
+                <p className="text-xs text-slate-500">Live counts from verified `public_creators` records and coupon/referral-attributed orders.</p>
               </div>
               <span className="px-3 py-1 rounded-full bg-pink-50 text-pink-700 text-xs font-bold border border-pink-100">
-                Affiliate Program Active
+                Live Firestore Data
               </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Active Creators</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">24</p>
-                <span className="text-xs text-pink-600 mt-1 block">Verified K-Beauty influencers</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Registered Creators</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">{creatorRecords.length}</p>
+                <span className="text-xs text-pink-600 mt-1 block">Active creator profiles</span>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Total Points Distributed</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">48,500 pts</p>
-                <span className="text-xs text-emerald-600 mt-1 block">Redeemable for rewards</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Total Creator Points</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">
+                  {creatorRecords.reduce((sum, c) => sum + Number(c.totalPoints || 0), 0).toLocaleString()} pts
+                </p>
+                <span className="text-xs text-emerald-600 mt-1 block">Earned across network</span>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Gold & Platinum Tier</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">8 Creators</p>
-                <span className="text-xs text-purple-600 mt-1 block">Top performing partners</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Coupon-Attributed Orders</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">
+                  {filteredOrders.filter((o) => Boolean(o.couponCode)).length}
+                </p>
+                <span className="text-xs text-purple-600 mt-1 block">Orders with promo/ref codes</span>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Reels Moderated</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">116 Reels</p>
-                <span className="text-xs text-blue-600 mt-1 block">Published on storefront</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Total Creator Reels</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">
+                  {creatorRecords.reduce((sum, c) => sum + Number(c.totalReels || 0), 0)}
+                </p>
+                <span className="text-xs text-blue-600 mt-1 block">Recorded on creator profiles</span>
               </div>
             </div>
 
             <div className="p-6 rounded-xl border border-slate-200 bg-slate-50/50 text-center space-y-3">
               <Sparkles size={28} className="text-pink-600 mx-auto" />
-              <h4 className="text-sm font-black text-slate-900">Creator Leaderboard & Payout Reports</h4>
+              <h4 className="text-sm font-black text-slate-900">Creator Leaderboard & Moderation</h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Influencers earn points for every order attributed through their custom referral code or tracked link. Full payout reconciliation is available in the Creators Hub module.
+                All creator tiers, reel approvals, and commission settlements are managed directly inside the Creators Hub module.
               </p>
             </div>
           </div>
@@ -833,46 +954,58 @@ export const AdminReportsPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-black text-slate-900">AI Agents & Channel Analytics Reports</h3>
-                <p className="text-xs text-slate-500">Monitor Google Gemini AI generations, SEO optimizations, and WhatsApp CRM chatbot activity.</p>
+                <h3 className="text-base font-black text-slate-900">Catalog Completeness & AI Content Analytics</h3>
+                <p className="text-xs text-slate-500">Live PDP readiness score, Gemini SEO metadata coverage, and social copy generation across all {totalCatalogItems} SKUs.</p>
               </div>
               <span className="px-3 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-bold border border-purple-100">
-                Gemini 2.5 Flash Engine
+                Gemini 2.5 Flash
               </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">SEO Content Generated</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">142 SKUs</p>
-                <span className="text-xs text-blue-600 mt-1 block">Optimized descriptions</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Catalog SEO Enriched</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">
+                  {catalogContentMetrics.seoGeneratedCount} / {totalCatalogItems} SKUs
+                </p>
+                <span className="text-xs text-blue-600 mt-1 block">Products with AI SEO metadata</span>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Social Copy Studio Posts</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">88 Posts</p>
-                <span className="text-xs text-fuchsia-600 mt-1 block">Facebook & Instagram captions</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Social Copy Coverage</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">
+                  {catalogContentMetrics.socialCopyCount} / {totalCatalogItems} SKUs
+                </p>
+                <span className="text-xs text-fuchsia-600 mt-1 block">Products with generated captions</span>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp CRM Leads Handled</span>
-                <p className="text-2xl font-black text-slate-900 mt-1">310 Chats</p>
-                <span className="text-xs text-emerald-600 mt-1 block">Automated skincare consultations</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Avg PDP Completeness</span>
+                <p className="text-2xl font-black text-slate-900 mt-1">{catalogContentMetrics.avgCompleteness}%</p>
+                <span className="text-xs text-amber-700 mt-1 block">
+                  {catalogContentMetrics.needsWorkCount} SKUs below 60% readiness
+                </span>
               </div>
             </div>
 
             <div className="p-6 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-              <h4 className="text-sm font-black text-slate-900">System Integration Health</h4>
+              <h4 className="text-sm font-black text-slate-900">Catalog & Fulfillment Readiness</h4>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-                  <span>Steadfast Courier API</span>
-                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">Connected</span>
+                  <span>In-Stock SKUs</span>
+                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">
+                    {totalCatalogItems - outOfStockProducts.length} Active
+                  </span>
                 </div>
                 <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-                  <span>Slack Operational Alerts</span>
-                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">Active</span>
+                  <span>Low Stock Warnings (≤ 5)</span>
+                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">
+                    {lowStockProducts.length} SKUs
+                  </span>
                 </div>
                 <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-                  <span>Firebase Cloud Firestore</span>
-                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-bold">Connected</span>
+                  <span>Active Orders in Period</span>
+                  <span className="px-2 py-0.5 rounded bg-pink-100 text-pink-700 font-bold">
+                    {activeOrders.length} Orders
+                  </span>
                 </div>
               </div>
             </div>

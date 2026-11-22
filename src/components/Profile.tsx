@@ -2,16 +2,26 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, where } from 'firebase/firestore';
-import { Order, Product, UserRole } from '../types';
+import { Order, Product, ProductReview, UserRole } from '../types';
 import { posService } from '../services/posService';
 import { productService } from '../services/productService';
+import { useProducts } from '../hooks/queries/products';
 import { useCart } from '../context/CartContext';
-import { 
-  ShoppingBag, Phone, MapPin, User, Save, CheckCircle, Clock, Package, 
-  HelpCircle, Search, Filter, Copy, Check, ChevronDown, ChevronUp, 
-  RefreshCw, DollarSign, Mail, ArrowRight, Wand2, Tag, ShieldCheck, Truck, XCircle,
-  Gift, Award, Crown, Coins, Percent, Sparkles, ExternalLink, Video, Flame,
-  Share2, ChevronRight, Zap, Settings, ShieldAlert, Heart, Star, Compass, Building2
+import { getRetailPrice } from '../utils/pricing';
+import {
+  CustomerSupportTicket,
+  LoyaltyLedgerEntry,
+  SavedAddress,
+  SavedRoutineRecord,
+  SkinProfileRecord,
+  userPortalService,
+} from '../services/userPortalService';
+import {
+  ShoppingBag, Phone, MapPin, User, Save, CheckCircle, Clock, Package,
+  HelpCircle, Search, Copy, Check, ChevronDown, ChevronUp,
+  RefreshCw, Mail, ArrowRight, Tag, ShieldCheck, Truck, XCircle,
+  Gift, Award, Crown, Coins, Percent, Sparkles, Video, Flame,
+  ChevronRight, Zap, Heart, Star, Building2, Trash2, MessageSquare, Droplets, Eye, AlertCircle, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -193,9 +203,12 @@ export const Profile: React.FC = () => {
   const { user, profile, signOut, isAdmin, creatorProfile } = useAuth();
   const navigate = useNavigate();
   const { addToCart, setIsCartOpen } = useCart();
+  const { data: liveProducts = [] } = useProducts();
 
-  // Active Tab: 'orders' | 'rewards' | 'settings' | 'role_hub'
-  const [activeTab, setActiveTab] = useState<'orders' | 'rewards' | 'settings' | 'role_hub'>('orders');
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<
+    'orders' | 'wishlist' | 'addresses' | 'skin_routine' | 'rewards' | 'reviews' | 'support' | 'settings' | 'role_hub'
+  >('orders');
 
   // Editable Form states
   const [phone, setPhone] = useState(profile?.phone || '');
@@ -207,6 +220,32 @@ export const Profile: React.FC = () => {
   // Orders state
   const [userOrders, setUserOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+
+  // Portal Tabs Data
+  const [wishlistIds, setWishlistIds] = useState<string[]>([]);
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [addrLabel, setAddrLabel] = useState('Home');
+  const [addrRecipient, setAddrRecipient] = useState('');
+  const [addrPhone, setAddrPhone] = useState('');
+  const [addrArea, setAddrArea] = useState<'dhaka' | 'outside'>('dhaka');
+  const [addrLine, setAddrLine] = useState('');
+  const [addrDefault, setAddrDefault] = useState(true);
+  const [savingAddr, setSavingAddr] = useState(false);
+  const [addrFeedback, setAddrFeedback] = useState<string | null>(null);
+
+  const [skinProfile, setSkinProfile] = useState<SkinProfileRecord | null>(null);
+  const [savedRoutines, setSavedRoutines] = useState<SavedRoutineRecord[]>([]);
+  const [loyaltyLedger, setLoyaltyLedger] = useState<LoyaltyLedgerEntry[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [myReviews, setMyReviews] = useState<ProductReview[]>([]);
+  const [supportTickets, setSupportTickets] = useState<CustomerSupportTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketSubject, setTicketSubject] = useState('');
+  const [ticketOrderId, setTicketOrderId] = useState('');
+  const [ticketDesc, setTicketDesc] = useState('');
+  const [ticketSubmitting, setTicketSubmitting] = useState(false);
+  const [ticketNotice, setTicketNotice] = useState<string | null>(null);
 
   // Search & Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -221,8 +260,57 @@ export const Profile: React.FC = () => {
       setPhone(profile.phone || '');
       setAddress((profile as any).address || '');
       setName(profile.name || user?.displayName || '');
+      setAddrRecipient((prev) => prev || profile.name || user?.displayName || '');
+      setAddrPhone((prev) => prev || profile.phone || '');
     }
   }, [profile, user]);
+
+  // Subscribe wishlist, recent views, skin profile, routines, addresses, ledger, support & reviews
+  useEffect(() => {
+    const unsubWish = userPortalService.subscribeWishlist(user?.uid, setWishlistIds);
+    setRecentIds(userPortalService.getRecentlyViewedIds());
+
+    if (!user?.uid) {
+      return () => {
+        unsubWish();
+      };
+    }
+
+    userPortalService.getSavedAddresses(user.uid).then(setSavedAddresses);
+    userPortalService.getSkinProfile(user.uid).then(setSkinProfile);
+    userPortalService.getSavedRoutines(user.uid).then(setSavedRoutines);
+
+    setLedgerLoading(true);
+    userPortalService
+      .getMyLoyaltyLedger(user.uid)
+      .then(setLoyaltyLedger)
+      .catch(() => setLoyaltyLedger([]))
+      .finally(() => setLedgerLoading(false));
+
+    setTicketsLoading(true);
+    userPortalService
+      .getMySupportTickets()
+      .then(setSupportTickets)
+      .catch(() => setSupportTickets([]))
+      .finally(() => setTicketsLoading(false));
+
+    const revQ = query(collection(db, 'product_reviews'), where('userId', '==', user.uid));
+    const unsubRevs = onSnapshot(
+      revQ,
+      (snap) => {
+        const list: ProductReview[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProductReview));
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setMyReviews(list);
+      },
+      () => setMyReviews([])
+    );
+
+    return () => {
+      unsubWish();
+      unsubRevs();
+    };
+  }, [user?.uid]);
 
   // Query user's past transactions linked to user's email, UID, or phone
   useEffect(() => {
@@ -312,40 +400,105 @@ export const Profile: React.FC = () => {
     setTimeout(() => setCopiedOrderId(null), 2000);
   };
 
-  const handleReorder = (order: Order) => {
-    const allProducts = productService.getProducts();
-    let reorderedCount = 0;
+  const catalogProducts = useMemo(() => {
+    return liveProducts.length > 0 ? liveProducts : productService.getProducts();
+  }, [liveProducts]);
 
-    order.items.forEach(item => {
-      let prod = allProducts.find(p => p.id === item.productId || p.name.toLowerCase() === item.name.toLowerCase());
-      if (!prod) {
-        prod = {
-          id: item.productId || 'custom-item',
-          name: item.name,
-          nameBN: item.name,
-          brand: 'K-Beauty',
-          category: 'Skincare',
-          skinTypes: ['All Skin Types'],
-          price: item.price,
-          stock: 10,
-          image: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=600&auto=format&fit=crop&q=60',
-          description: item.name,
-          descriptionBN: item.name,
-          rating: 4.8,
-          reviewsCount: 12,
-          barcode: '8800000000000',
-          qrCodeUrl: ''
-        };
+  const wishlistProducts = useMemo(() => {
+    const map = new Map(catalogProducts.map((p) => [p.id, p]));
+    return wishlistIds.map((id) => map.get(id)).filter((p): p is Product => Boolean(p));
+  }, [catalogProducts, wishlistIds]);
+
+  const recentProducts = useMemo(() => {
+    const map = new Map(catalogProducts.map((p) => [p.id, p]));
+    return recentIds.map((id) => map.get(id)).filter((p): p is Product => Boolean(p));
+  }, [catalogProducts, recentIds]);
+
+  const handleReorder = (order: Order) => {
+    let reorderedCount = 0;
+    const unavailableNames: string[] = [];
+
+    order.items.forEach((item) => {
+      const prod = catalogProducts.find(
+        (p) => p.id === item.productId || p.name.toLowerCase() === item.name.toLowerCase()
+      );
+      if (!prod || (prod.stock ?? 0) <= 0) {
+        unavailableNames.push(item.name);
+        return;
       }
-      for (let i = 0; i < item.quantity; i++) {
-        addToCart(prod);
-      }
-      reorderedCount += item.quantity;
+
+      const qtyToAdd = Math.min(Math.max(1, item.quantity), prod.stock || 1);
+      addToCart(prod, qtyToAdd, item.comboComponents, { openDrawer: false });
+      reorderedCount += qtyToAdd;
     });
 
-    setReorderMessage(`Added ${reorderedCount} item(s) from Order #${order.id} to your cart!`);
-    setIsCartOpen(true);
-    setTimeout(() => setReorderMessage(null), 4000);
+    if (reorderedCount > 0) {
+      setIsCartOpen(true);
+      setReorderMessage(
+        unavailableNames.length > 0
+          ? `Added ${reorderedCount} in-stock item(s) to cart. Unavailable / out of stock: ${unavailableNames.join(', ')}`
+          : `Added ${reorderedCount} item(s) from Order #${order.id} to your cart!`
+      );
+    } else {
+      setReorderMessage(`None of the items in Order #${order.id} are currently in stock.`);
+    }
+    setTimeout(() => setReorderMessage(null), 5000);
+  };
+
+  const handleSaveNewAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.uid || !addrRecipient.trim() || !addrPhone.trim() || !addrLine.trim()) return;
+    setSavingAddr(true);
+    setAddrFeedback(null);
+    try {
+      await userPortalService.saveAddress(user.uid, {
+        label: addrLabel,
+        recipientName: addrRecipient,
+        phone: addrPhone,
+        area: addrArea,
+        addressLine: addrLine,
+        isDefault: addrDefault,
+      });
+      const updated = await userPortalService.getSavedAddresses(user.uid);
+      setSavedAddresses(updated);
+      setAddrLine('');
+      setAddrFeedback('Delivery address saved.');
+      setTimeout(() => setAddrFeedback(null), 3000);
+    } finally {
+      setSavingAddr(false);
+    }
+  };
+
+  const handleDeleteSavedAddress = async (id: string) => {
+    if (!user?.uid) return;
+    await userPortalService.deleteAddress(user.uid, id);
+    setSavedAddresses((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleCreateSupportTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketSubject.trim() || !ticketDesc.trim()) return;
+    setTicketSubmitting(true);
+    setTicketNotice(null);
+    try {
+      const created = await userPortalService.createSupportTicket({
+        customerName: name || profile?.name || user?.displayName || 'Customer',
+        customerPhone: phone || profile?.phone || '',
+        customerEmail: user?.email || '',
+        orderId: ticketOrderId || undefined,
+        subject: ticketSubject.trim(),
+        description: ticketDesc.trim(),
+      });
+      setSupportTickets((prev) => [created, ...prev]);
+      setTicketSubject('');
+      setTicketOrderId('');
+      setTicketDesc('');
+      setTicketNotice(`Ticket ${created.ticketNumber || created.id} submitted to support.`);
+    } catch (err: any) {
+      setTicketNotice(err?.message || 'Could not submit support ticket.');
+    } finally {
+      setTicketSubmitting(false);
+    }
   };
 
   // Metrics
@@ -361,20 +514,17 @@ export const Profile: React.FC = () => {
     return userOrders.filter(ord => ord.status?.toLowerCase() === 'delivered').length;
   }, [userOrders]);
 
-  // Loyalty Points (1 point earned per ৳100 spent)
+  // Verified server-synced Loyalty Points (earned at 1 point per ৳10 on delivered orders)
   const loyaltyPoints = useMemo(() => {
-    if (typeof profile?.loyaltyPoints === 'number') {
-      return profile.loyaltyPoints;
-    }
-    return Math.floor(totalSpent / 100);
-  }, [profile?.loyaltyPoints, totalSpent]);
+    return typeof profile?.loyaltyPoints === 'number' ? profile.loyaltyPoints : 0;
+  }, [profile?.loyaltyPoints]);
 
   // Tier Status
   const loyaltyTier = useMemo(() => {
-    if (loyaltyPoints >= 1000) return { name: 'Platinum Glass Skin Elite', color: 'from-purple-600 via-pink-600 to-amber-500', nextTier: null, nextGoal: 1000, progress: 100, perk: '15% Off All Orders + Free Seoul Discovery Box' };
-    if (loyaltyPoints >= 500) return { name: 'Gold K-Beauty VIP', color: 'from-amber-500 to-[#E91E8C]', nextTier: 'Platinum Glass Skin Elite', nextGoal: 1000, progress: Math.min(100, Math.round(((loyaltyPoints - 500) / 500) * 100)), perk: '10% Off Orders + Free Express Shipping' };
-    if (loyaltyPoints >= 200) return { name: 'Silver Radiance Member', color: 'from-pink-500 to-purple-500', nextTier: 'Gold K-Beauty VIP', nextGoal: 500, progress: Math.min(100, Math.round(((loyaltyPoints - 200) / 300) * 100)), perk: '5% Off Orders + Birthday Special Gift' };
-    return { name: 'Bronze Glow Member', color: 'from-[#E91E8C] to-pink-400', nextTier: 'Silver Radiance Member', nextGoal: 200, progress: Math.min(100, Math.round((loyaltyPoints / 200) * 100)), perk: 'Earn 1 point per ৳100 spent' };
+    if (loyaltyPoints >= 1000) return { name: 'Platinum Glow Tier', color: 'from-purple-600 via-pink-600 to-amber-500', nextTier: null, nextGoal: 1000, progress: 100, perk: 'Redeem points at 1 pt = ৳1 BDT on checkout' };
+    if (loyaltyPoints >= 500) return { name: 'Gold Glow Tier', color: 'from-amber-500 to-[#E91E8C]', nextTier: 'Platinum Glow Tier', nextGoal: 1000, progress: Math.min(100, Math.round(((loyaltyPoints - 500) / 500) * 100)), perk: 'Redeem points at 1 pt = ৳1 BDT on checkout' };
+    if (loyaltyPoints >= 200) return { name: 'Silver Glow Tier', color: 'from-pink-500 to-purple-500', nextTier: 'Gold Glow Tier', nextGoal: 500, progress: Math.min(100, Math.round(((loyaltyPoints - 200) / 300) * 100)), perk: 'Redeem points at 1 pt = ৳1 BDT on checkout' };
+    return { name: 'Bronze Glow Tier', color: 'from-[#E91E8C] to-pink-400', nextTier: 'Silver Glow Tier', nextGoal: 200, progress: Math.min(100, Math.round((loyaltyPoints / 200) * 100)), perk: 'Earn 1 point per ৳10 spent on delivered orders' };
   }, [loyaltyPoints]);
 
   // Filtered orders
@@ -636,12 +786,48 @@ export const Profile: React.FC = () => {
             }`}
           >
             <ShoppingBag size={14} />
-            <span>My Orders & Tracking</span>
+            <span>Orders</span>
             <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
               activeTab === 'orders' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'
             }`}>
               {userOrders.length}
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('wishlist')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 shrink-0 border ${
+              activeTab === 'wishlist'
+                ? 'bg-[#E91E8C] text-white border-[#E91E8C] shadow-md shadow-pink-500/20'
+                : 'bg-gray-50 hover:bg-pink-50/60 text-gray-700 border-gray-200/80'
+            }`}
+          >
+            <Heart size={14} />
+            <span>Wishlist ({wishlistProducts.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('addresses')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 shrink-0 border ${
+              activeTab === 'addresses'
+                ? 'bg-[#E91E8C] text-white border-[#E91E8C] shadow-md shadow-pink-500/20'
+                : 'bg-gray-50 hover:bg-pink-50/60 text-gray-700 border-gray-200/80'
+            }`}
+          >
+            <MapPin size={14} />
+            <span>Addresses ({savedAddresses.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('skin_routine')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 shrink-0 border ${
+              activeTab === 'skin_routine'
+                ? 'bg-[#E91E8C] text-white border-[#E91E8C] shadow-md shadow-pink-500/20'
+                : 'bg-gray-50 hover:bg-pink-50/60 text-gray-700 border-gray-200/80'
+            }`}
+          >
+            <Droplets size={14} />
+            <span>Skin & Routine</span>
           </button>
 
           <button
@@ -653,8 +839,31 @@ export const Profile: React.FC = () => {
             }`}
           >
             <Award size={14} />
-            <span>Glow Club & Points</span>
-            <span className="text-amber-500 font-black">★ {loyaltyPoints}</span>
+            <span>Loyalty ({loyaltyPoints})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('reviews')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 shrink-0 border ${
+              activeTab === 'reviews'
+                ? 'bg-[#E91E8C] text-white border-[#E91E8C] shadow-md shadow-pink-500/20'
+                : 'bg-gray-50 hover:bg-pink-50/60 text-gray-700 border-gray-200/80'
+            }`}
+          >
+            <Star size={14} />
+            <span>My Reviews ({myReviews.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('support')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 shrink-0 border ${
+              activeTab === 'support'
+                ? 'bg-[#E91E8C] text-white border-[#E91E8C] shadow-md shadow-pink-500/20'
+                : 'bg-gray-50 hover:bg-pink-50/60 text-gray-700 border-gray-200/80'
+            }`}
+          >
+            <MessageSquare size={14} />
+            <span>Support ({supportTickets.length})</span>
           </button>
 
           <button
@@ -665,11 +874,10 @@ export const Profile: React.FC = () => {
                 : 'bg-gray-50 hover:bg-pink-50/60 text-gray-700 border-gray-200/80'
             }`}
           >
-            <MapPin size={14} />
-            <span>Delivery & Profile Info</span>
+            <User size={14} />
+            <span>Account Info</span>
           </button>
 
-          {/* If Creator or Admin, show dedicated Role Hub tab */}
           {(creatorProfile || isAdmin) && (
             <button
               onClick={() => setActiveTab('role_hub')}
@@ -918,11 +1126,221 @@ export const Profile: React.FC = () => {
         </div>
       )}
 
+      {/* TAB: WISHLIST & RECENTLY VIEWED */}
+      {activeTab === 'wishlist' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-black text-gray-900">Saved Wishlist ({wishlistProducts.length})</h2>
+              <Link to="/shop" className="text-xs font-bold text-[#E91E8C] hover:underline">
+                Browse Catalog →
+              </Link>
+            </div>
+            {wishlistProducts.length === 0 ? (
+              <p className="text-xs text-gray-500 py-6 text-center">
+                No wishlist items yet. Tap the heart icon on any product to save it here.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {wishlistProducts.map((p) => (
+                  <div key={p.id} className="p-4 rounded-2xl border border-pink-100 flex items-center justify-between gap-3">
+                    <Link to={`/product/${p.id}`} className="flex items-center gap-3 min-w-0">
+                      <img src={p.image} alt={p.name} className="w-14 h-14 rounded-xl object-cover border border-pink-100 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-900 truncate">{p.name}</p>
+                        <p className="text-[11px] text-gray-500">{p.brand}</p>
+                        <p className="text-xs font-black text-[#E91E8C] font-mono">৳{getRetailPrice(p).toLocaleString()}</p>
+                      </div>
+                    </Link>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={(p.stock || 0) <= 0}
+                        onClick={() => addToCart(p, 1)}
+                        className="px-3 py-1.5 rounded-lg bg-[#E91E8C] disabled:bg-gray-300 text-white text-[11px] font-bold cursor-pointer"
+                      >
+                        {(p.stock || 0) > 0 ? 'Add' : 'Out'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => userPortalService.toggleWishlist(p.id, user?.uid)}
+                        className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 text-gray-600 hover:text-rose-600 text-[11px] font-bold cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {recentProducts.length > 0 && (
+            <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+              <div className="flex items-center gap-2">
+                <Eye size={16} className="text-[#E91E8C]" />
+                <h2 className="text-base font-black text-gray-900">Recently Viewed</h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {recentProducts.slice(0, 8).map((p) => (
+                  <Link key={p.id} to={`/product/${p.id}`} className="p-3 rounded-2xl border border-slate-200 hover:border-pink-200 transition space-y-2">
+                    <img src={p.image} alt={p.name} className="w-full h-28 object-cover rounded-xl bg-pink-50/40" />
+                    <p className="text-xs font-bold text-gray-900 truncate">{p.name}</p>
+                    <p className="text-xs font-black text-[#E91E8C] font-mono">৳{getRetailPrice(p).toLocaleString()}</p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: SAVED ADDRESS BOOK */}
+      {activeTab === 'addresses' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <h2 className="text-lg font-black text-gray-900">Saved Delivery Addresses</h2>
+            {savedAddresses.length === 0 ? (
+              <p className="text-xs text-gray-500 py-6">No saved addresses yet. Add your primary delivery address on the right for 1-click checkout.</p>
+            ) : (
+              <div className="space-y-3">
+                {savedAddresses.map((addr) => (
+                  <div key={addr.id} className="p-4 rounded-2xl border border-pink-100 bg-pink-50/20 flex items-start justify-between gap-4">
+                    <div className="space-y-1 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-gray-900">{addr.label}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
+                          {addr.area === 'dhaka' ? 'Inside Dhaka (৳80)' : 'Outside Dhaka (৳150)'}
+                        </span>
+                        {addr.isDefault && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-semibold text-gray-800">{addr.recipientName} · <span className="font-mono">{addr.phone}</span></p>
+                      <p className="text-gray-600">{addr.addressLine}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSavedAddress(addr.id)}
+                      className="p-2 text-gray-400 hover:text-rose-600 cursor-pointer"
+                      aria-label="Delete address"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={handleSaveNewAddress} className="lg:col-span-5 bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
+              <Plus size={16} className="text-[#E91E8C]" />
+              <span>Add Delivery Address</span>
+            </h3>
+            {addrFeedback && <p className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">{addrFeedback}</p>}
+            <input type="text" required value={addrLabel} onChange={(e) => setAddrLabel(e.target.value)} placeholder="Label (e.g. Home, Office)" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C]" />
+            <input type="text" required value={addrRecipient} onChange={(e) => setAddrRecipient(e.target.value)} placeholder="Recipient Full Name" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C]" />
+            <input type="tel" required value={addrPhone} onChange={(e) => setAddrPhone(e.target.value)} placeholder="BD Mobile (017XXXXXXXX)" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-mono font-semibold outline-none focus:border-[#E91E8C]" />
+            <select value={addrArea} onChange={(e) => setAddrArea(e.target.value as 'dhaka' | 'outside')} className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C]">
+              <option value="dhaka">Inside Dhaka City (৳80)</option>
+              <option value="outside">Outside Dhaka Nationwide (৳150)</option>
+            </select>
+            <textarea rows={3} required value={addrLine} onChange={(e) => setAddrLine(e.target.value)} placeholder="House, Road, Area, Thana, District..." className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C] resize-none" />
+            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={addrDefault} onChange={(e) => setAddrDefault(e.target.checked)} className="accent-[#E91E8C]" />
+              <span>Set as default checkout address</span>
+            </label>
+            <button type="submit" disabled={savingAddr} className="w-full py-3 rounded-xl bg-[#E91E8C] hover:bg-pink-700 text-white text-xs font-black cursor-pointer">
+              {savingAddr ? 'Saving...' : 'Save Address'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* TAB: SKIN PROFILE & SAVED ROUTINES */}
+      {activeTab === 'skin_routine' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-black text-gray-900">Your Skin Profile</h2>
+              <Link to="/skin-quiz" className="px-3.5 py-2 rounded-xl bg-pink-50 text-[#E91E8C] text-xs font-bold hover:bg-pink-100">
+                {skinProfile ? 'Retake Quiz' : 'Take Quiz'}
+              </Link>
+            </div>
+            {skinProfile ? (
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-xl bg-pink-50/40 border border-pink-100">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase block">Skin Type</span>
+                    <span className="font-black text-gray-900 text-sm">{skinProfile.skinType}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-pink-50/40 border border-pink-100">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase block">Sensitivity</span>
+                    <span className="font-black text-gray-900 text-sm capitalize">{skinProfile.sensitivity}</span>
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase block mb-1.5">Saved Concerns</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skinProfile.concerns.map((c) => (
+                      <span key={c} className="px-2.5 py-1 rounded-lg bg-white border border-pink-200 text-[#E91E8C] font-bold capitalize">
+                        {c.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">Complete the 1-minute Skin Profile Quiz to personalize product shortlists.</p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-black text-gray-900">Saved Routines ({savedRoutines.length})</h2>
+              <Link to="/routine-builder" className="px-3.5 py-2 rounded-xl bg-[#E91E8C] text-white text-xs font-bold hover:bg-pink-700">
+                Open Routine Builder
+              </Link>
+            </div>
+            {savedRoutines.length === 0 ? (
+              <p className="text-xs text-gray-500">No saved routines yet. Pair your AM/PM products in the Routine Builder.</p>
+            ) : (
+              <div className="space-y-3">
+                {savedRoutines.map((r) => (
+                  <div key={r.id} className="p-4 rounded-2xl border border-pink-100 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black text-gray-900">{r.name}</p>
+                      <p className="text-[11px] text-gray-500">{r.amSteps.length} AM steps · {r.pmSteps.length} PM steps</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Link to="/routine-builder" className="px-3 py-1.5 rounded-lg bg-pink-50 text-[#E91E8C] text-xs font-bold">
+                        Edit
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await userPortalService.deleteRoutine(r.id, user?.uid);
+                          setSavedRoutines((prev) => prev.filter((item) => item.id !== r.id));
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-rose-600 cursor-pointer"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* TAB 2: GLOW REWARDS & LOYALTY POINTS */}
       {activeTab === 'rewards' && (
         <div className="space-y-6">
-          
-          {/* Main Tier Card */}
           <div className={`rounded-3xl p-6 sm:p-8 text-white shadow-xl bg-gradient-to-r ${loyaltyTier.color} relative overflow-hidden`}>
             <div className="absolute right-0 top-0 w-80 h-80 bg-white/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -930,12 +1348,10 @@ export const Profile: React.FC = () => {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-black uppercase tracking-wider inline-flex items-center gap-1.5 mb-2">
-                    <Crown size={14} /> Official Glow Club Tier
+                    <Crown size={14} /> Glow Rewards Club
                   </span>
                   <h2 className="text-2xl sm:text-3xl font-black">{loyaltyTier.name}</h2>
-                  <p className="text-xs text-white/90 font-medium mt-1">
-                    {loyaltyTier.perk}
-                  </p>
+                  <p className="text-xs text-white/90 font-medium mt-1">{loyaltyTier.perk}</p>
                 </div>
 
                 <div className="bg-white/15 backdrop-blur-md p-4 rounded-2xl border border-white/20 text-center sm:text-right shrink-0">
@@ -950,7 +1366,6 @@ export const Profile: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tier Progress */}
               {loyaltyTier.nextTier && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between items-center text-xs font-bold text-white/90">
@@ -958,25 +1373,21 @@ export const Profile: React.FC = () => {
                     <span className="font-mono">{loyaltyPoints} / {loyaltyTier.nextGoal} pts ({loyaltyTier.progress}%)</span>
                   </div>
                   <div className="w-full bg-black/20 h-3 rounded-full overflow-hidden p-0.5">
-                    <div
-                      className="bg-white h-full rounded-full transition-all duration-700"
-                      style={{ width: `${loyaltyTier.progress}%` }}
-                    />
+                    <div className="bg-white h-full rounded-full transition-all duration-700" style={{ width: `${loyaltyTier.progress}%` }} />
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Earning Rules & Benefits Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-5 rounded-3xl border border-pink-100 shadow-xs space-y-2">
               <div className="w-10 h-10 rounded-xl bg-pink-50 text-[#E91E8C] flex items-center justify-center font-bold">
                 <Coins size={20} />
               </div>
-              <h4 className="text-sm font-black text-gray-900">Earn On Every Order</h4>
+              <h4 className="text-sm font-black text-gray-900">Earn On Delivered Orders</h4>
               <p className="text-xs text-gray-600 leading-relaxed font-medium">
-                Receive 1 Glow Loyalty Point for every ৳100 you spend on verified imported cosmeceuticals.
+                Receive 1 Glow Loyalty Point for every ৳10 spent once an order is marked delivered.
               </p>
             </div>
 
@@ -986,7 +1397,7 @@ export const Profile: React.FC = () => {
               </div>
               <h4 className="text-sm font-black text-gray-900">Instant Checkout Discount</h4>
               <p className="text-xs text-gray-600 leading-relaxed font-medium">
-                Apply your loyalty points directly in the shopping cart drawer to get instant BDT cash discounts (1 pt = ৳1 BDT).
+                Apply your verified point balance at checkout for direct BDT savings (1 pt = ৳1 BDT).
               </p>
             </div>
 
@@ -994,13 +1405,170 @@ export const Profile: React.FC = () => {
               <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
                 <Gift size={20} />
               </div>
-              <h4 className="text-sm font-black text-gray-900">VIP Seoul Hampers</h4>
+              <h4 className="text-sm font-black text-gray-900">Transparent Audit Ledger</h4>
               <p className="text-xs text-gray-600 leading-relaxed font-medium">
-                Gold & Platinum members receive complimentary seasonal PR skincare gifts imported directly from Seoul.
+                Every point earned or redeemed is recorded in your server-verified loyalty ledger below.
               </p>
             </div>
           </div>
 
+          <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <h3 className="text-base font-black text-gray-900">Points Transaction History</h3>
+            {ledgerLoading ? (
+              <p className="text-xs text-gray-500">Loading loyalty history...</p>
+            ) : loyaltyLedger.length === 0 ? (
+              <p className="text-xs text-gray-500">No loyalty point transactions recorded yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-pink-100 text-[10px] uppercase text-gray-400 font-black">
+                    <tr>
+                      <th className="py-2 pr-3">Date</th>
+                      <th className="py-2 pr-3">Type</th>
+                      <th className="py-2 pr-3">Description</th>
+                      <th className="py-2 pr-3 text-right">Points</th>
+                      <th className="py-2 text-right">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-pink-100/60">
+                    {loyaltyLedger.map((entry) => (
+                      <tr key={entry.id}>
+                        <td className="py-2.5 pr-3 text-gray-500 whitespace-nowrap">{new Date(entry.createdAt).toLocaleDateString()}</td>
+                        <td className="py-2.5 pr-3 font-mono font-bold text-gray-700">{entry.type}</td>
+                        <td className="py-2.5 pr-3 text-gray-700">{entry.description}</td>
+                        <td className={`py-2.5 pr-3 text-right font-mono font-black ${entry.pointsDelta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {entry.pointsDelta >= 0 ? `+${entry.pointsDelta}` : entry.pointsDelta}
+                        </td>
+                        <td className="py-2.5 text-right font-mono font-bold text-gray-900">{entry.balanceAfter} pts</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: MY SUBMITTED REVIEWS */}
+      {activeTab === 'reviews' && (
+        <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+          <h2 className="text-lg font-black text-gray-900">My Product Reviews ({myReviews.length})</h2>
+          {myReviews.length === 0 ? (
+            <p className="text-xs text-gray-500 py-6">
+              You have not submitted any product reviews yet. Visit a product page after shopping to share your experience.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {myReviews.map((rev) => (
+                <div key={rev.id} className="p-4 rounded-2xl border border-pink-100 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-black text-amber-500">{'★'.repeat(rev.rating)}</span>
+                      <Link to={`/product/${rev.productId}`} className="text-xs font-bold text-[#E91E8C] hover:underline">
+                        Product #{rev.productId}
+                      </Link>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                      rev.status === 'approved'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : rev.status === 'rejected'
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                          : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}>
+                      {rev.status || 'approved'}
+                    </span>
+                  </div>
+                  {rev.title && <p className="text-xs font-bold text-gray-900">{rev.title}</p>}
+                  <p className="text-xs text-gray-600">{rev.comment}</p>
+                  {rev.moderationNote && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+                      Moderation note: {rev.moderationNote}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: CUSTOMER SUPPORT TICKETS */}
+      {activeTab === 'support' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <h2 className="text-lg font-black text-gray-900">Your Support Requests</h2>
+            {ticketsLoading ? (
+              <p className="text-xs text-gray-500">Loading support tickets...</p>
+            ) : supportTickets.length === 0 ? (
+              <p className="text-xs text-gray-500 py-6">No support requests submitted yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {supportTickets.map((t) => (
+                  <div key={t.id} className="p-4 rounded-2xl border border-pink-100 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-black text-[#E91E8C]">{t.ticketNumber || t.id}</span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold uppercase">
+                        {t.status}
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-gray-900">{t.subject}</p>
+                    <p className="text-xs text-gray-600">{t.description}</p>
+                    {t.orderId && <p className="text-[11px] font-mono text-gray-500">Order Ref: #{t.orderId}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={handleCreateSupportTicket} className="lg:col-span-5 bg-white rounded-3xl p-6 border border-pink-100 shadow-sm space-y-4">
+            <h3 className="text-base font-black text-gray-900 flex items-center gap-2">
+              <AlertCircle size={16} className="text-[#E91E8C]" />
+              <span>Open a Support Ticket</span>
+            </h3>
+            {ticketNotice && (
+              <p className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 p-3 rounded-xl">
+                {ticketNotice}
+              </p>
+            )}
+            <input
+              type="text"
+              required
+              value={ticketSubject}
+              onChange={(e) => setTicketSubject(e.target.value)}
+              placeholder="Subject (e.g. Damaged seal, Address change)"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C]"
+            />
+            {userOrders.length > 0 && (
+              <select
+                value={ticketOrderId}
+                onChange={(e) => setTicketOrderId(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C]"
+              >
+                <option value="">-- Related Order (Optional) --</option>
+                {userOrders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    #{o.id} — ৳{o.totalAmount.toLocaleString()} ({o.status})
+                  </option>
+                ))}
+              </select>
+            )}
+            <textarea
+              rows={4}
+              required
+              value={ticketDesc}
+              onChange={(e) => setTicketDesc(e.target.value)}
+              placeholder="Describe how our team can help..."
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold outline-none focus:border-[#E91E8C] resize-none"
+            />
+            <button
+              type="submit"
+              disabled={ticketSubmitting}
+              className="w-full py-3 rounded-xl bg-[#E91E8C] hover:bg-pink-700 text-white text-xs font-black cursor-pointer"
+            >
+              {ticketSubmitting ? 'Submitting...' : 'Submit Request'}
+            </button>
+          </form>
         </div>
       )}
 

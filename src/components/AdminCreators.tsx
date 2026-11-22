@@ -2,8 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
 import { collection, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { CreatorProfile, CreatorStatus, CreatorReel, CreatorReelStatus, CreatorPointSettings, ReelMetricAuditLog } from '../types';
+import { CreatorProfile, CreatorStatus, CreatorReel, CreatorReelStatus, CreatorPointSettings, ReelMetricAuditLog, YouTubeShortItem, YouTubeShortsDisplaySettings } from '../types';
+import { useProducts } from '../hooks/queries/products';
 import { subscribeToAllReelsForAdmin, updateReelStatusByAdmin, deleteCreatorReel } from '../services/creatorReelService';
+import {
+  DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS,
+  subscribeAllYouTubeShortsForAdmin,
+  subscribeYouTubeShortsDisplaySettings,
+  saveYouTubeShortsDisplaySettings,
+  updateYouTubeShortAdminFields,
+  reorderYouTubeShortsList,
+  deleteYouTubeShortRecord,
+  syncYouTubeChannelShortsApi,
+  triggerAutoSyncIfDue,
+} from '../services/youtubeShortsService';
 import { updateAdminVerifiedMetrics, refreshFacebookApiMetricsApi } from '../services/facebookMetricsService';
 import { 
   getCreatorPointSettings, 
@@ -47,6 +59,7 @@ import { LeaderboardView } from './LeaderboardView';
 import { CreatorDetailsModal } from './CreatorDetailsModal';
 import { AdminCreatorsTab } from './creatorAdmin/AdminCreatorsTab';
 import { AdminReelsTab } from './creatorAdmin/AdminReelsTab';
+import { AdminYouTubeShortsTab } from './creatorAdmin/AdminYouTubeShortsTab';
 import { AdminSettingsTab } from './creatorAdmin/AdminSettingsTab';
 import { AdminAuditLogsTab } from './creatorAdmin/AdminAuditLogsTab';
 import { AdminManualMetricsModal } from './creatorAdmin/AdminManualMetricsModal';
@@ -55,9 +68,10 @@ import { AdminVideoPlayerModal } from './creatorAdmin/AdminVideoPlayerModal';
 
 export const AdminCreators: React.FC = () => {
   const { profile } = useAuth();
-  
-  // Tab state: 'creators' | 'reels' | 'leaderboard' | 'settings' | 'audits'
-  const [activeTab, setActiveTab] = useState<'creators' | 'reels' | 'leaderboard' | 'settings' | 'audits'>('creators');
+  const { data: catalogProducts = [] } = useProducts();
+
+  // Tab state: 'creators' | 'reels' | 'youtube_shorts' | 'leaderboard' | 'settings' | 'audits'
+  const [activeTab, setActiveTab] = useState<'creators' | 'reels' | 'youtube_shorts' | 'leaderboard' | 'settings' | 'audits'>('creators');
 
   // Creators State
   const [creators, setCreators] = useState<CreatorProfile[]>([]);
@@ -109,6 +123,14 @@ export const AdminCreators: React.FC = () => {
   const [apiKeyInput, setApiKeyInput] = useState<string>('');
   const [lastOAuthRefreshToken, setLastOAuthRefreshToken] = useState<string | null>(null);
 
+  // YouTube Channel Shorts State
+  const [youtubeShorts, setYoutubeShorts] = useState<YouTubeShortItem[]>([]);
+  const [loadingYoutubeShorts, setLoadingYoutubeShorts] = useState<boolean>(true);
+  const [syncingYoutubeShorts, setSyncingYoutubeShorts] = useState<boolean>(false);
+  const [youtubeShortsSettings, setYoutubeShortsSettings] = useState<YouTubeShortsDisplaySettings>(
+    DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS
+  );
+
   // Toast
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -139,6 +161,9 @@ export const AdminCreators: React.FC = () => {
     getYouTubeAdminStatus(forceVerify)
       .then((status) => {
         setYtStatus(status);
+        if (status.channelId && !channelInput) {
+          setChannelInput(status.channelId);
+        }
         if (showResultToast) {
           if (status.connected) {
             showToast('success', `YouTube connection verified: ${status.channelTitle || status.channelId || 'Connected'}`);
@@ -333,6 +358,98 @@ export const AdminCreators: React.FC = () => {
 
     return () => unsubscribe();
   }, [isAuthorized]);
+
+  // Subscribe to synced YouTube Channel Shorts & display settings
+  useEffect(() => {
+    if (!isAuthorized) {
+      setLoadingYoutubeShorts(false);
+      return;
+    }
+
+    setLoadingYoutubeShorts(true);
+    const unsubShorts = subscribeAllYouTubeShortsForAdmin(
+      (data) => {
+        setYoutubeShorts(data);
+        setLoadingYoutubeShorts(false);
+      },
+      () => setLoadingYoutubeShorts(false)
+    );
+    const unsubSettings = subscribeYouTubeShortsDisplaySettings((settings) => {
+      setYoutubeShortsSettings(settings);
+      if (settings.autoSyncEnabled) {
+        triggerAutoSyncIfDue().catch(() => {});
+      }
+    });
+
+    return () => {
+      unsubShorts();
+      unsubSettings();
+    };
+  }, [isAuthorized]);
+
+  const handleSyncYouTubeShortsNow = async () => {
+    setSyncingYoutubeShorts(true);
+    try {
+      const result = await syncYouTubeChannelShortsApi({
+        maxDurationSeconds: youtubeShortsSettings.maxShortDurationSeconds || 180,
+      });
+      showToast(
+        'success',
+        `Synced ${result.fetchedCount} Shorts from ${result.channelTitle} (${result.createdCount} new, ${result.updatedCount} updated).`
+      );
+      loadYouTubeStatus(false);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Failed to sync YouTube Channel Shorts.');
+    } finally {
+      setSyncingYoutubeShorts(false);
+    }
+  };
+
+  const handleSaveYouTubeShortsSettings = async (nextSettings: YouTubeShortsDisplaySettings) => {
+    try {
+      await saveYouTubeShortsDisplaySettings(nextSettings);
+      showToast('success', 'Homepage Community Live & Auto-Sync settings saved.');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Failed to save YouTube Shorts display settings.');
+    }
+  };
+
+  const handleUpdateYouTubeShort = async (
+    videoId: string,
+    patch: Partial<Pick<YouTubeShortItem, 'isVisible' | 'isPinned' | 'displayOrder' | 'customTitle' | 'taggedProductIds'>>
+  ) => {
+    try {
+      await updateYouTubeShortAdminFields(videoId, patch);
+      if (patch.taggedProductIds !== undefined) {
+        showToast('success', `Saved ${patch.taggedProductIds.length} tagged store product(s).`);
+      } else if (patch.isVisible !== undefined) {
+        showToast('success', patch.isVisible ? 'Short is now live on homepage.' : 'Short hidden from homepage.');
+      } else if (patch.isPinned !== undefined) {
+        showToast('success', patch.isPinned ? 'Short pinned to top.' : 'Short unpinned.');
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Failed to update YouTube Short.');
+    }
+  };
+
+  const handleReorderYouTubeShorts = async (orderedVideoIds: string[]) => {
+    try {
+      await reorderYouTubeShortsList(orderedVideoIds);
+      showToast('success', 'Short display order updated.');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Failed to reorder YouTube Shorts.');
+    }
+  };
+
+  const handleDeleteYouTubeShort = async (videoId: string) => {
+    if (!window.confirm('Remove this Short from the synced list? You can re-sync it anytime from YouTube.')) return;
+    try {
+      await deleteYouTubeShortRecord(videoId);
+      showToast('success', 'Short removed from synced storefront list.');
+    } catch (err: any) {
+      showToast('error', err?.message || 'Failed to remove Short.');
+    }
+  };
 
   // Handle Creator Status Change
   const handleCreatorStatusChange = async (creatorId: string, newStatus: CreatorStatus) => {
@@ -549,11 +666,15 @@ export const AdminCreators: React.FC = () => {
         <div className="flex items-center gap-3 relative z-10 shrink-0">
           <div className="bg-white/10 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 text-center">
             <span className="text-[10px] font-black text-pink-300 uppercase block">Pending Creators</span>
-            <span className="text-xl font-black text-white">{pendingCreatorsCount}</span>
+            <span className="text-xl font-black text-white tabular-nums">{pendingCreatorsCount}</span>
           </div>
           <div className="bg-white/10 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 text-center">
             <span className="text-[10px] font-black text-pink-300 uppercase block">Pending Reels</span>
-            <span className="text-xl font-black text-white">{pendingReelsCount}</span>
+            <span className="text-xl font-black text-white tabular-nums">{pendingReelsCount}</span>
+          </div>
+          <div className="bg-white/10 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 text-center">
+            <span className="text-[10px] font-black text-pink-300 uppercase block">Channel Shorts</span>
+            <span className="text-xl font-black text-white tabular-nums">{youtubeShorts.length}</span>
           </div>
         </div>
       </div>
@@ -840,6 +961,29 @@ export const AdminCreators: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab('youtube_shorts')}
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black transition cursor-pointer flex items-center gap-2 border whitespace-nowrap shrink-0 ${
+            activeTab === 'youtube_shorts'
+              ? 'bg-pink-600 text-white border-pink-600 shadow-sm'
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <Youtube size={16} />
+          <span>YouTube Shorts</span>
+          {youtubeShorts.length > 0 && (
+            <span
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-black tabular-nums ${
+                activeTab === 'youtube_shorts'
+                  ? 'bg-white text-pink-600'
+                  : 'bg-pink-50 text-pink-700'
+              }`}
+            >
+              {youtubeShorts.filter((s) => s.isVisible).length}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('leaderboard')}
           className={`px-4 py-2.5 rounded-2xl text-xs font-black transition cursor-pointer flex items-center gap-2 border whitespace-nowrap ${
             activeTab === 'leaderboard'
@@ -900,6 +1044,26 @@ export const AdminCreators: React.FC = () => {
           onOpenManualMetricsModal={(reel) => setManualMetricsReel(reel)}
           onDeleteReel={handleDeleteReel}
           onPreviewVideo={(url) => setPreviewVideoUrl(url)}
+        />
+      )}
+
+      {activeTab === 'youtube_shorts' && (
+        <AdminYouTubeShortsTab
+          shorts={youtubeShorts}
+          loading={loadingYoutubeShorts}
+          syncing={syncingYoutubeShorts}
+          ytStatus={ytStatus}
+          displaySettings={youtubeShortsSettings}
+          products={catalogProducts}
+          onSyncNow={handleSyncYouTubeShortsNow}
+          onSaveDisplaySettings={handleSaveYouTubeShortsSettings}
+          onUpdateShort={handleUpdateYouTubeShort}
+          onReorderShorts={handleReorderYouTubeShorts}
+          onDeleteShort={handleDeleteYouTubeShort}
+          onOpenChannelConfig={() => {
+            setShowChannelConfig(true);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
         />
       )}
 

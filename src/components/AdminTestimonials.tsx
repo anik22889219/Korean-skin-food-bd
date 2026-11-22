@@ -23,11 +23,14 @@ import {
   GoogleBusinessLocationOption,
   GoogleBusinessProfileData,
   GoogleBusinessReview,
+  ProductReview,
 } from '../types';
 import {
   EMPTY_GOOGLE_BUSINESS_DATA,
   googleBusinessService,
 } from '../services/googleBusinessService';
+import { reviewService } from '../services/reviewService';
+import { useProducts } from '../hooks/queries/products';
 
 export const AdminTestimonials: React.FC = () => {
   const [profileData, setProfileData] = useState<GoogleBusinessProfileData>(() =>
@@ -72,14 +75,65 @@ export const AdminTestimonials: React.FC = () => {
   } | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Admin Section Tab: Google Business Profile vs Storefront Product Reviews Moderation
+  const [sectionTab, setSectionTab] = useState<'gmb' | 'product_reviews'>('gmb');
+  const { data: catalogProducts = [] } = useProducts();
+  const [productReviews, setProductReviews] = useState<ProductReview[]>([]);
+  const [loadingProductReviews, setLoadingProductReviews] = useState(false);
+  const [productReviewStatusFilter, setProductReviewStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [productReviewSearch, setProductReviewSearch] = useState('');
+  const [moderationNotes, setModerationNotes] = useState<Record<string, string>>({});
+  const [moderatingId, setModeratingId] = useState<string | null>(null);
+
+  const loadProductReviewsForModeration = async () => {
+    setLoadingProductReviews(true);
+    try {
+      const list = await reviewService.getAdminReviews();
+      setProductReviews(list);
+    } catch (err: any) {
+      showToast(err?.message || 'Could not load product reviews.', 'error');
+    } finally {
+      setLoadingProductReviews(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sectionTab === 'product_reviews') {
+      loadProductReviewsForModeration();
+    }
+  }, [sectionTab]);
+
+  const handleModerateReview = async (rev: ProductReview, nextStatus: 'approved' | 'rejected' | 'pending') => {
+    setModeratingId(rev.id);
+    try {
+      const note = moderationNotes[rev.id] ?? rev.moderationNote ?? '';
+      const res = await reviewService.moderateReview(rev.id, nextStatus, note);
+      setProductReviews((prev) => prev.map((r) => (r.id === rev.id ? { ...r, ...res.review } : r)));
+      showToast(
+        `Review by ${rev.userName} marked as ${nextStatus}. Product rating updated to ${res.aggregate?.rating ?? 0} (${res.aggregate?.reviewsCount ?? 0} reviews).`,
+        'success'
+      );
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to update moderation status.', 'error');
+    } finally {
+      setModeratingId(null);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
-    googleBusinessService
-      .getProfile()
-      .then((data) => {
-        if (isMounted && data) {
+    Promise.all([
+      googleBusinessService.getProfile(),
+      googleBusinessService.checkOAuthSession(),
+    ])
+      .then(([data, sessionInfo]) => {
+        if (!isMounted) return;
+        if (data) {
           setProfileData(data);
+        }
+        if (sessionInfo?.connectedEmail || data?.connectedEmail) {
+          setConnectedGoogleEmail(sessionInfo?.connectedEmail || data?.connectedEmail || null);
         }
       })
       .catch((err) => {
@@ -90,6 +144,15 @@ export const AdminTestimonials: React.FC = () => {
       });
     const handleOAuthMessage = (event: MessageEvent) => {
       if (event.data?.type === 'GOOGLE_BUSINESS_OAUTH_SUCCESS') {
+        if (event.data?.accessToken) {
+          googleBusinessService.setOAuthAccessToken(
+            event.data.accessToken,
+            event.data.email || null
+          );
+          if (event.data.email) {
+            setConnectedGoogleEmail(event.data.email);
+          }
+        }
         showToast('Google Business Profile authorized! Syncing reviews...', 'info');
         googleBusinessService
           .fetchOAuthLocations()
@@ -198,7 +261,29 @@ export const AdminTestimonials: React.FC = () => {
   const handleSyncReviews = async () => {
     setIsSyncing(true);
     try {
-      if (!googleBusinessService.hasOAuthToken() && profileData.connectionMethod !== 'google_places_api') {
+      const hasValidPlacesState =
+        profileData.connectionMethod === 'google_places_api' &&
+        (profileData.reviews.length > 0 || Boolean(profileData.placeId?.startsWith('ChIJ')));
+
+      if (!googleBusinessService.hasOAuthToken() && !hasValidPlacesState) {
+        if (profileData.connectedAccountName && profileData.connectedLocationName) {
+          const authRes = await googleBusinessService.obtainOAuthToken();
+          setConnectedGoogleEmail(authRes.email || null);
+          const syncRes = await googleBusinessService.syncOAuthLocationReviews({
+            accountName: profileData.connectedAccountName,
+            accountDisplayName: profileData.businessName,
+            locationName: profileData.connectedLocationName,
+            title: profileData.businessName,
+            address: profileData.address,
+            placeId: profileData.placeId,
+            mapsUri: profileData.googleMapsUrl,
+            newReviewUri: profileData.writeReviewUrl,
+            phoneNumber: profileData.phoneNumber,
+          });
+          setProfileData(syncRes.data);
+          showToast(syncRes.message || 'Google Business Profile reviews synced successfully!');
+          return;
+        }
         await handleConnectGoogleBusiness();
         return;
       }
@@ -209,7 +294,10 @@ export const AdminTestimonials: React.FC = () => {
       if (res.success) {
         showToast(res.message || 'Google Business Profile reviews synced successfully!');
       } else {
-        showToast(res.message || 'Please connect your Google Business Profile first.', 'info');
+        showToast(
+          res.message || 'Could not sync Google Business reviews.',
+          res.needsReconnect ? 'info' : 'error'
+        );
       }
     } catch (err: any) {
       showToast(err?.message || 'Failed to sync Google Business reviews.', 'error');
@@ -275,7 +363,8 @@ export const AdminTestimonials: React.FC = () => {
     setIsSubmittingReply(true);
     try {
       if (!googleBusinessService.hasOAuthToken()) {
-        await googleBusinessService.connectWithGoogleOAuth();
+        const authRes = await googleBusinessService.obtainOAuthToken();
+        setConnectedGoogleEmail(authRes.email || null);
       }
       const res = await googleBusinessService.replyToGmbReview(
         reviewToReply.reviewName,
@@ -299,7 +388,8 @@ export const AdminTestimonials: React.FC = () => {
     setIsSubmittingReply(true);
     try {
       if (!googleBusinessService.hasOAuthToken()) {
-        await googleBusinessService.connectWithGoogleOAuth();
+        const authRes = await googleBusinessService.obtainOAuthToken();
+        setConnectedGoogleEmail(authRes.email || null);
       }
       const res = await googleBusinessService.deleteGmbReply(
         pendingDeleteReplyReview.reviewName
@@ -355,8 +445,257 @@ export const AdminTestimonials: React.FC = () => {
     profileData.ratingBreakdown?.fiveStar ||
     reviews.filter((r) => Math.round(r.rating) === 5).length;
 
+  const productNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of catalogProducts) {
+      map.set(p.id, p.name);
+    }
+    return map;
+  }, [catalogProducts]);
+
+  const filteredProductReviews = useMemo(() => {
+    return productReviews.filter((r) => {
+      const st = r.status || 'approved';
+      if (productReviewStatusFilter !== 'all' && st !== productReviewStatusFilter) {
+        return false;
+      }
+      if (productReviewSearch.trim()) {
+        const q = productReviewSearch.toLowerCase().trim();
+        const pName = (productNameById.get(r.productId) || r.productId).toLowerCase();
+        return (
+          r.userName.toLowerCase().includes(q) ||
+          (r.userEmail || '').toLowerCase().includes(q) ||
+          r.comment.toLowerCase().includes(q) ||
+          pName.includes(q)
+        );
+      }
+      return true;
+    });
+  }, [productReviews, productReviewStatusFilter, productReviewSearch, productNameById]);
+
+  const pendingReviewsCount = useMemo(
+    () => productReviews.filter((r) => r.status === 'pending').length,
+    [productReviews]
+  );
+
   return (
     <div className="space-y-6">
+      {/* SECTION TAB SWITCHER */}
+      <div className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-2xl border border-slate-200/80 shadow-xs w-fit">
+        <button
+          type="button"
+          onClick={() => setSectionTab('gmb')}
+          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
+            sectionTab === 'gmb'
+              ? 'bg-[#E91E8C] text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Google Business Reviews</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSectionTab('product_reviews')}
+          className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
+            sectionTab === 'product_reviews'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          <span>Product Reviews Moderation</span>
+          {pendingReviewsCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-slate-950">
+              {pendingReviewsCount} pending
+            </span>
+          )}
+        </button>
+      </div>
+
+      {sectionTab === 'product_reviews' ? (
+        <div className="space-y-5">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                Product Reviews Moderation Queue
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                Approve genuine customer product reviews before they appear publicly and update aggregate product ratings.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadProductReviewsForModeration}
+              disabled={loadingProductReviews}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingProductReviews ? 'animate-spin' : ''}`} />
+              <span>Refresh Queue</span>
+            </button>
+          </div>
+
+          {toast && (
+            <div
+              className={`px-4 py-3 rounded-2xl border flex items-center justify-between text-xs ${
+                toast.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                  : toast.type === 'error'
+                    ? 'bg-rose-50 border-rose-200 text-rose-800'
+                    : 'bg-blue-50 border-blue-200 text-blue-800'
+              }`}
+            >
+              <span className="font-semibold">{toast.text}</span>
+              <button type="button" onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {(['pending', 'approved', 'rejected', 'all'] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setProductReviewStatusFilter(status)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize transition cursor-pointer ${
+                    productReviewStatusFilter === status
+                      ? 'bg-[#E91E8C] text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={productReviewSearch}
+                onChange={(e) => setProductReviewSearch(e.target.value)}
+                placeholder="Search customer, email, or product..."
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-[#E91E8C]"
+              />
+            </div>
+          </div>
+
+          {loadingProductReviews ? (
+            <div className="bg-white p-10 rounded-3xl border border-slate-200 text-center text-xs text-slate-500">
+              Loading product reviews queue...
+            </div>
+          ) : filteredProductReviews.length === 0 ? (
+            <div className="bg-white p-10 rounded-3xl border border-slate-200 text-center text-xs text-slate-500 space-y-2">
+              <p className="font-bold text-slate-800 text-sm">No reviews found for this filter</p>
+              <p>Switch status tabs or check back when customers submit new reviews.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {filteredProductReviews.map((rev) => {
+                const status = rev.status || 'approved';
+                const prodTitle = productNameById.get(rev.productId) || rev.productId;
+                return (
+                  <div key={rev.id} className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-slate-900">{rev.userName}</span>
+                          {rev.isVerifiedPurchaser && (
+                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[10px] font-extrabold">
+                              Verified Buyer
+                            </span>
+                          )}
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                              status === 'approved'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : status === 'rejected'
+                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}
+                          >
+                            {status}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                          Product: <strong className="text-slate-800">{prodTitle}</strong>
+                        </p>
+                      </div>
+                      <div className="flex text-amber-400 shrink-0">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={`w-3.5 h-3.5 ${s <= rev.rating ? 'fill-amber-400 text-amber-400' : 'text-slate-200'}`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {rev.title && <p className="text-xs font-bold text-slate-900">{rev.title}</p>}
+                    <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
+                      {rev.comment}
+                    </p>
+
+                    {rev.photos && rev.photos.length > 0 && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {rev.photos.map((photo, idx) => (
+                          <img
+                            key={idx}
+                            src={photo}
+                            alt={`Review ${idx + 1}`}
+                            className="w-14 h-14 object-cover rounded-xl border border-slate-200"
+                            referrerPolicy="no-referrer"
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="pt-2 border-t border-slate-100 space-y-2">
+                      <input
+                        type="text"
+                        value={moderationNotes[rev.id] ?? rev.moderationNote ?? ''}
+                        onChange={(e) => setModerationNotes((prev) => ({ ...prev, [rev.id]: e.target.value }))}
+                        placeholder="Optional internal moderation note..."
+                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                      />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          disabled={moderatingId === rev.id || status === 'approved'}
+                          onClick={() => handleModerateReview(rev, 'approved')}
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-bold cursor-pointer transition"
+                        >
+                          Approve & Publish
+                        </button>
+                        <button
+                          type="button"
+                          disabled={moderatingId === rev.id || status === 'rejected'}
+                          onClick={() => handleModerateReview(rev, 'rejected')}
+                          className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-xs font-bold cursor-pointer transition"
+                        >
+                          Reject
+                        </button>
+                        {status !== 'pending' && (
+                          <button
+                            type="button"
+                            disabled={moderatingId === rev.id}
+                            onClick={() => handleModerateReview(rev, 'pending')}
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer transition"
+                          >
+                            Move to Pending
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
       {/* TOP HERO OVERVIEW CARD */}
       <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/80 shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-amber-100/40 via-pink-50/30 to-transparent rounded-full blur-3xl pointer-events-none" />
@@ -1089,6 +1428,8 @@ export const AdminTestimonials: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

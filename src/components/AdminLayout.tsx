@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
 import { AdminNotificationBell } from './AdminNotificationBell';
+import { AdminMobileNav } from './AdminMobileNav';
 import { posService } from '../services/posService';
 
 export const AdminLayout: React.FC = () => {
@@ -96,6 +97,7 @@ export const AdminLayout: React.FC = () => {
   }, []);
 
   const location = useLocation();
+  const isPosRoute = location.pathname === '/admin/pos' || location.pathname.startsWith('/admin/pos/');
   const isInventoryManager = profile?.role === 'inventory_manager';
   const isCustomerSupport = profile?.role === 'customer_support';
   const isHr = profile?.role === 'hr';
@@ -529,11 +531,19 @@ export const AdminLayout: React.FC = () => {
           })}
         </div>
 
-        {/* Main Content Outlet with full stretch and no bottom clipping */}
-        <main className="flex-1 p-4 md:p-6 lg:p-8 w-full min-w-0">
+        {/* Main Content Outlet with full stretch and bottom clearance for mobile sticky nav */}
+        <main className={`flex-1 p-4 md:p-6 lg:p-8 w-full min-w-0 ${isPosRoute ? '' : 'pb-24 lg:pb-8'}`}>
           <Outlet />
         </main>
       </div>
+
+      {/* Persistent Mobile Sticky Bottom Navigation across Admin Pages (hidden on POS route) */}
+      <AdminMobileNav
+        visibleNavItems={visibleNavItems}
+        activePosCount={isAdminOrSuperAdmin ? activePosCount : 0}
+        onOpenMore={() => setMobileDrawerOpen(true)}
+        isDrawerOpen={mobileDrawerOpen}
+      />
 
       {/* Floating WhatsApp / AI Chatbot Widget */}
       <WhatsAppChatBot />

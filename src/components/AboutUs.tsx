@@ -1,151 +1,15 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Check, Sparkles, ShieldCheck, ArrowRight, Globe, Truck, Award, Heart } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import { useProducts } from '../hooks/queries/products';
 import { Product } from '../types';
 import { SeoHead } from './SeoHead';
 import { buildStaticPageSeo } from '../services/seoService';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { AboutPageThemeSettings } from '../types/theme';
-
-interface ShowcaseItem {
-  id: string;
-  name: string;
-  priceUSD: number;
-  priceBDT: number;
-  category: string;
-  image: string;
-  subtitle?: string;
-}
-
-const HERITAGE_ESSENTIALS: ShowcaseItem[] = [
-  {
-    id: 'heritage-1',
-    name: 'Ginseng Cleansing Oil',
-    priceUSD: 48.0,
-    priceBDT: 5800,
-    category: 'Cleanser',
-    subtitle: 'Nourishing & Purifying',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDygV0BUx3FRHwpnDvTSsMsiG1TsjcGBgKWE8vEsaUi5TRYTM-pzc4wgYwMs1-n-Zhv04YeC1al6FBGnOFf_6_JQacp8mUx8Ulk8cq0QFnA00nmiBUQLfC9i-UHYH8n1G4DJHoiA_X068q3nfC_i0QcK_uvJUfOM9DwxqtR7yczoZ1zTqwlvm5NeEUFPH0wHNqWT_LD9F3Xhgc2VREFAublAEJzOmy0z83LwvQ2vyOXHKxK4YZ77Q_Me3PJ_GIUl8BRSicxciMdpqM'
-  },
-  {
-    id: 'heritage-2',
-    name: 'Fermented Rice Serum',
-    priceUSD: 62.0,
-    priceBDT: 7450,
-    category: 'Serum',
-    subtitle: 'Luminosity & Elasticity',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCgpqTQgZYXgKUkN6o1SsWplJBH8NvtdkkURiY9HqR2Dp5EzELgoBYJeirZB8yvJ-lzvKkPFLLXax2xGGO0XD_AeOqMkt3c6xp5i06Coe_7rWAfOHKSnL8Ou7YHVjqPicBnKcSPai1_9540Lo-bunSgSMODzzWoXsImvjKuGYRshM4Px7Z46MZx_56iNMm8Ge96CTluUtHdm28rog9DZOtedYJp43WZuvFVeB1y6119UVdU2-E9ymYgKCAm8TMAkAYvy7bpGYoT46I'
-  },
-  {
-    id: 'heritage-3',
-    name: 'Camellia Sleeping Mask',
-    priceUSD: 55.0,
-    priceBDT: 6600,
-    category: 'Mask',
-    subtitle: 'Overnight Barrier Renewal',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDgTQaRbZixVhXln6so0dlGREA6GdOxL6yXvgemYepAqppVLtsFcT0lRhGmgb8mpDma_IiHb7ErIK9YUuAZXa8U9kNLaekLj18qSdqCKTaCfeAVxfPF-05iV1Nu3l90UqgsNet-NpGGNXu5KPSvsedYRNoJRT9k5Stmh0y2DcctzfMcWIo9blVPY-pwRvwpbXnAWL3OLX1kyUSTF6AdswBgZ8Dmczc8DTQh0mhesKKKhqlRUpNG8Vz86KG0i9btEXetVjx8yVx1mUo'
-  },
-  {
-    id: 'heritage-4',
-    name: 'Green Tea Tincture',
-    priceUSD: 42.0,
-    priceBDT: 5050,
-    category: 'Toner',
-    subtitle: 'Antioxidant Calming Elixir',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD6vSS8IAHvxnL_OZ3sEB7rTece_ypiqy2nRqWiqV-Rw8V-fYFH4c-ByE7fQ9KD5Nhw_0jAJfYWD_CSMaoEu22IIKLRKVdf0_CfP_9sEbKJGYEyd5BfAsbMnHgj8kzbStrV7p3mgKhNEQ_WArQV5ud1YEqdj7GioWGS3JoUo-Py4ubbB5YXNKGC5GYFEXBuxc52KRyK13TM083bsn1UXb_WRr5Frdwr3Ya4XYaGwoTaSmUsuTBYk7fMWLU-l8EgMJu6sCVMdfGotNI'
-  }
-];
-
-const VALIDATED_FORMULATIONS: ShowcaseItem[] = [
-  {
-    id: 'val-1',
-    name: 'Centella Repair Cream',
-    priceUSD: 74.0,
-    priceBDT: 8900,
-    category: 'Moisturizer',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVySvNsYG6RFEynasCzuPyDD8rusS84mfYyPW56DnvMJsK--qRK4mgCs1Ngdw8h0YhR_Da7rZtXEx-bap68883mcCWSb4KozrXbopvo4T3FZMmqEE4LGjxyY6shubMeXYRhMdShwfUUQ1RGld2ONlirKF8Sgp7bjO2pY70JCGASzerVSsFq-9Ve2DkraqsQZh7nG9JGsRrnwr-DPjT9d51pTJC2Bz2RHggqsfL7gPQryBAqHgI94-dsSexnpOnYTQPTo9dPPSZdpY'
-  },
-  {
-    id: 'val-2',
-    name: 'Deep Hydration Mist',
-    priceUSD: 36.0,
-    priceBDT: 4300,
-    category: 'Mist',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCsU_XTcOydrioCuy6mHIZedJtGV3TCRDrVSlwVPpsfYOfQloKy1qznJZTKH3Xq6R-ugsETs8yKfKmPyOgAtCPMwWmDzeGGbEGQp9sQ6xmKKDH8qTWq8omZth-pATb0Bil74mpy055B_LoLYxLZLzTduYUi-fRwwOsCuDTVmmnn2meqqsZ4noBissSJB9AJlGbe_0a6Fo-OCmmXIEadhOXzO9gy2SEZvowvnKOoqO6hr4uC4kA7MNUwzFHqGHa6o1OUi3JLlgCnFiY'
-  },
-  {
-    id: 'val-3',
-    name: 'Bamboo Peeling Gel',
-    priceUSD: 52.0,
-    priceBDT: 6250,
-    category: 'Exfoliator',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDmn3wly8UL5fVifoYvSQUmPLv2SdMjpqgJ_mhO5gAjK14IcNcKDAO-YfKLi-lCKZ8Afo6mhLQa69Jzb60PR6TT4BdBC_K5b4VC2uKlahiFIGCwkj5YESsxgz3PAfnCis1vWPqwagFwXH1aKFv3WCtUSFBpd0TYyeSw8PDMM6tJdtyEDT2LcmggftIygChvbDGpR98mArQKFT--Zo9CgurQHiVxdqlDn8hqepgA3KSH3anTPDI0HWEhqXV_HjT7nB6xIjFVllK45VQ'
-  }
-];
-
-const PARTNERSHIP_SELECTION: ShowcaseItem[] = [
-  {
-    id: 'part-1',
-    name: 'Mugwort Essence',
-    priceUSD: 45.0,
-    priceBDT: 5400,
-    category: 'Essence',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDygV0BUx3FRHwpnDvTSsMsiG1TsjcGBgKWE8vEsaUi5TRYTM-pzc4wgYwMs1-n-Zhv04YeC1al6FBGnOFf_6_JQacp8mUx8Ulk8cq0QFnA00nmiBUQLfC9i-UHYH8n1G4DJHoiA_X068q3nfC_i0QcK_uvJUfOM9DwxqtR7yczoZ1zTqwlvm5NeEUFPH0wHNqWT_LD9F3Xhgc2VREFAublAEJzOmy0z83LwvQ2vyOXHKxK4YZ77Q_Me3PJ_GIUl8BRSicxciMdpqM'
-  },
-  {
-    id: 'part-2',
-    name: 'Snail Mucin Toner',
-    priceUSD: 38.0,
-    priceBDT: 4550,
-    category: 'Toner',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCgpqTQgZYXgKUkN6o1SsWplJBH8NvtdkkURiY9HqR2Dp5EzELgoBYJeirZB8yvJ-lzvKkPFLLXax2xGGO0XD_AeOqMkt3c6xp5i06Coe_7rWAfOHKSnL8Ou7YHVjqPicBnKcSPai1_9540Lo-bunSgSMODzzWoXsImvjKuGYRshM4Px7Z46MZx_56iNMm8Ge96CTluUtHdm28rog9DZOtedYJp43WZuvFVeB1y6119UVdU2-E9ymYgKCAm8TMAkAYvy7bpGYoT46I'
-  },
-  {
-    id: 'part-3',
-    name: 'Honey Glow Mask',
-    priceUSD: 42.0,
-    priceBDT: 5050,
-    category: 'Mask',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCsU_XTcOydrioCuy6mHIZedJtGV3TCRDrVSlwVPpsfYOfQloKy1qznJZTKH3Xq6R-ugsETs8yKfKmPyOgAtCPMwWmDzeGGbEGQp9sQ6xmKKDH8qTWq8omZth-pATb0Bil74mpy055B_LoLYxLZLzTduYUi-fRwwOsCuDTVmmnn2meqqsZ4noBissSJB9AJlGbe_0a6Fo-OCmmXIEadhOXzO9gy2SEZvowvnKOoqO6hr4uC4kA7MNUwzFHqGHa6o1OUi3JLlgCnFiY'
-  },
-  {
-    id: 'part-4',
-    name: 'Ginger Eye Cream',
-    priceUSD: 58.0,
-    priceBDT: 6950,
-    category: 'Eye Care',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDmn3wly8UL5fVifoYvSQUmPLv2SdMjpqgJ_mhO5gAjK14IcNcKDAO-YfKLi-lCKZ8Afo6mhLQa69Jzb60PR6TT4BdBC_K5b4VC2uKlahiFIGCwkj5YESsxgz3PAfnCis1vWPqwagFwXH1aKFv3WCtUSFBpd0TYyeSw8PDMM6tJdtyEDT2LcmggftIygChvbDGpR98mArQKFT--Zo9CgurQHiVxdqlDn8hqepgA3KSH3anTPDI0HWEhqXV_HjT7nB6xIjFVllK45VQ'
-  }
-];
-
-const BESTSELLING_RITUALS: ShowcaseItem[] = [
-  {
-    id: 'best-1',
-    name: 'Jeju Orchid Serum',
-    priceUSD: 88.0,
-    priceBDT: 10500,
-    category: 'Serum',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDygV0BUx3FRHwpnDvTSsMsiG1TsjcGBgKWE8vEsaUi5TRYTM-pzc4wgYwMs1-n-Zhv04YeC1al6FBGnOFf_6_JQacp8mUx8Ulk8cq0QFnA00nmiBUQLfC9i-UHYH8n1G4DJHoiA_X068q3nfC_i0QcK_uvJUfOM9DwxqtR7yczoZ1zTqwlvm5NeEUFPH0wHNqWT_LD9F3Xhgc2VREFAublAEJzOmy0z83LwvQ2vyOXHKxK4YZ77Q_Me3PJ_GIUl8BRSicxciMdpqM'
-  },
-  {
-    id: 'best-2',
-    name: 'Royal Propolis Cream',
-    priceUSD: 95.0,
-    priceBDT: 11400,
-    category: 'Cream',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCDoVlcveeL6BbwjoPCSbobXaTJNM7TReLGuvKIDqAww26XR9QQRoxioriDwqJX-rz_iYd6RzLU9fpSkmouWRdPs-RxzDBx9KXq6Gw9RaJClhEdfrjxUnbLcn4Leh86-VBAoMo0HU-cXhstTVHf6u9upQQp-6oLgFYn3DBG5gIM__U_j5Tpv4Ro9OlsdMQal2xN_G9_nR1CxbvMd3ImUogiiXR2czFJYcmFDC5DOVa81SzcVALZk7Ow2iCzsJsc_M3UNRjEUNYhZhA'
-  },
-  {
-    id: 'best-3',
-    name: 'Gold Volcanic Scrub',
-    priceUSD: 64.0,
-    priceBDT: 7700,
-    category: 'Scrub',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD6vSS8IAHvxnL_OZ3sEB7rTece_ypiqy2nRqWiqV-Rw8V-fYFH4c-ByE7fQ9KD5Nhw_0jAJfYWD_CSMaoEu22IIKLRKVdf0_CfP_9sEbKJGYEyd5BfAsbMnHgj8kzbStrV7p3mgKhNEQ_WArQV5ud1YEqdj7GioWGS3JoUo-Py4ubbB5YXNKGC5GYFEXBuxc52KRyK13TM083bsn1UXb_WRr5Frdwr3Ya4XYaGwoTaSmUsuTBYk7fMWLU-l8EgMJu6sCVMdfGotNI'
-  }
-];
+import { getProductUnitPrice } from '../utils/pricing';
 
 // Subtle editorial animation variants
 const fadeInUp = {
@@ -186,7 +50,8 @@ const staggerContainer = {
 
 export const AboutUs: React.FC = () => {
   const navigate = useNavigate();
-  const { addToCart, setIsCartOpen } = useCart();
+  const { addToCart } = useCart();
+  const { data: liveProducts = [] } = useProducts();
   const carouselRef = useRef<HTMLDivElement>(null);
   const foundersStoryRef = useRef<HTMLDivElement>(null);
   const [addedItem, setAddedItem] = useState<string | null>(null);
@@ -199,6 +64,12 @@ export const AboutUs: React.FC = () => {
     return () => unsub();
   }, []);
 
+  const inStockCatalog = useMemo(() => liveProducts.filter((p) => (p.stock ?? 0) > 0), [liveProducts]);
+  const heritageEssentials = useMemo(() => inStockCatalog.slice(0, 4), [inStockCatalog]);
+  const validatedFormulations = useMemo(() => inStockCatalog.slice(4, 7).length > 0 ? inStockCatalog.slice(4, 7) : inStockCatalog.slice(0, 3), [inStockCatalog]);
+  const partnershipSelection = useMemo(() => inStockCatalog.slice(7, 11).length > 0 ? inStockCatalog.slice(7, 11) : inStockCatalog.slice(0, 4), [inStockCatalog]);
+  const bestsellingRituals = useMemo(() => inStockCatalog.slice(0, 3), [inStockCatalog]);
+
   const scrollCarousel = (direction: 'left' | 'right') => {
     if (carouselRef.current) {
       const scrollAmount = direction === 'left' ? -340 : 340;
@@ -210,38 +81,20 @@ export const AboutUs: React.FC = () => {
     foundersStoryRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleQuickAdd = (item: ShowcaseItem, e: React.MouseEvent) => {
+  const handleQuickAdd = (product: Product, e: React.MouseEvent) => {
     e.stopPropagation();
-    const productAdapter: Product = {
-      id: item.id,
-      name: item.name,
-      nameBN: item.name,
-      brand: 'Korean Skin Food',
-      category: item.category,
-      skinTypes: ['All Skin Types'],
-      price: item.priceBDT,
-      image: item.image,
-      stock: 50,
-      description: `${item.name} - Botanical Heritage formulation sourced directly from Seoul.`,
-      descriptionBN: `${item.name} - সিউল থেকে সরাসরি সংগৃহীত প্রিমিয়াম ফর্মুলেশন।`,
-      rating: 0,
-      reviewsCount: 0,
-      barcode: `KSF-${item.id.toUpperCase()}`,
-      qrCodeUrl: ''
-    };
-    
-    addToCart(productAdapter);
-    setAddedItem(item.id);
+    addToCart(product);
+    setAddedItem(product.id);
     setTimeout(() => {
       setAddedItem(null);
     }, 1800);
   };
 
   const aboutUsSeo = React.useMemo(() => buildStaticPageSeo(
-    'About Us - Our Story & Authentic Seoul Heritage',
-    'Discover Korean Skin Food Bangladesh. Est. 2014, importing 100% genuine cosmeceuticals directly from Seoul with verified origin and dermatologist-tested standards.',
+    'About Korean Skin Food BD | Skincare & Customer Care',
+    'Learn how Korean Skin Food BD curates Korean skincare for Bangladesh with batch and expiry inspection, transparent Cash on Delivery, and a 48-hour issue support policy.',
     '/about-us',
-    ['About Korean Skin Food', 'Authentic K-Beauty Bangladesh', 'Seoul cosmetics importer Dhaka']
+    ['About Korean Skin Food BD', 'Korean Skincare Bangladesh', 'K-Beauty Dhaka']
   ), []);
 
   return (
@@ -461,18 +314,18 @@ export const AboutUs: React.FC = () => {
             variants={staggerContainer}
             className="flex gap-6 overflow-x-auto scrollbar-none pb-6 scroll-smooth snap-x"
           >
-            {HERITAGE_ESSENTIALS.map((prod, index) => (
+            {heritageEssentials.map((prod, index) => (
               <motion.div
                 key={prod.id}
                 variants={fadeInUp}
                 custom={index}
-                onClick={() => navigate('/shop')}
+                onClick={() => navigate(`/product/${prod.id}`)}
                 className="min-w-[280px] sm:min-w-[320px] flex-1 group cursor-pointer snap-start"
               >
                 <div className="aspect-[3/4] bg-[#f5ece7] mb-5 overflow-hidden relative border border-[#c5c7c1]/20">
                   <img
-                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
-                    alt={prod.name}
+                    src={prod.image || '/og-banner.jpg'}
+                    alt={prod.imageAltText || prod.altText || prod.name}
                     className="w-full h-full object-cover mix-blend-multiply opacity-90 group-hover:scale-105 transition-transform duration-700"
                     referrerPolicy="no-referrer"
                   />
@@ -493,7 +346,7 @@ export const AboutUs: React.FC = () => {
                 </h3>
                 <div className="flex items-center justify-between">
                   <p className="text-xs tracking-wider uppercase text-[#5e5f5c] font-medium">
-                    ${prod.priceUSD.toFixed(2)} <span className="text-[11px] text-[#454843]/60">/ ৳ {prod.priceBDT.toLocaleString()}</span>
+                    ৳ {getProductUnitPrice(prod).toLocaleString()}
                   </p>
                   <span className="text-[10px] uppercase tracking-widest text-[#5b6056] bg-[#e0e4d7] px-2 py-0.5">
                     {prod.category}
@@ -657,18 +510,18 @@ export const AboutUs: React.FC = () => {
             variants={staggerContainer}
             className="grid grid-cols-1 md:grid-cols-3 gap-8 lg:gap-12"
           >
-            {VALIDATED_FORMULATIONS.map((prod, index) => (
+            {validatedFormulations.map((prod, index) => (
               <motion.div
                 key={prod.id}
                 variants={fadeInUp}
                 custom={index}
                 className="group cursor-pointer text-center"
-                onClick={() => navigate('/shop')}
+                onClick={() => navigate(`/product/${prod.id}`)}
               >
                 <div className="aspect-square bg-[#fff8f5] mb-6 overflow-hidden relative shadow-sm border border-[#c5c7c1]/20">
                   <img
-                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
-                    alt={prod.name}
+                    src={prod.image || '/og-banner.jpg'}
+                    alt={prod.imageAltText || prod.altText || prod.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                     referrerPolicy="no-referrer"
                   />
@@ -687,7 +540,7 @@ export const AboutUs: React.FC = () => {
                   {prod.name}
                 </h3>
                 <p className="text-xs font-semibold uppercase tracking-widest text-[#5e5f5c]">
-                  ${prod.priceUSD.toFixed(2)} <span className="text-[11px] text-[#454843]/60 font-normal">/ ৳ {prod.priceBDT.toLocaleString()}</span>
+                  ৳ {getProductUnitPrice(prod).toLocaleString()}
                 </p>
               </motion.div>
             ))}
@@ -780,30 +633,32 @@ export const AboutUs: React.FC = () => {
             variants={staggerContainer}
             className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8"
           >
-            {PARTNERSHIP_SELECTION.map((prod, index) => (
+            {partnershipSelection.map((prod, index) => (
               <motion.div
                 key={prod.id}
                 variants={fadeInUp}
                 custom={index}
                 className="group cursor-pointer"
-                onClick={() => navigate('/shop')}
+                onClick={() => navigate(`/product/${prod.id}`)}
               >
                 <div className="aspect-[4/5] bg-[#efe6e2] mb-4 overflow-hidden relative border border-[#c5c7c1]/30">
                   <img
-                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
-                    alt={prod.name}
+                    src={prod.image || '/og-banner.jpg'}
+                    alt={prod.imageAltText || prod.altText || prod.name}
                     className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
                     referrerPolicy="no-referrer"
                   />
                   <div className="absolute bottom-3 left-3 right-3 p-2.5 bg-[#fff8f5]/95 border border-[#757873] text-[#1e1b18] text-center text-[11px] font-semibold uppercase tracking-widest opacity-0 group-hover:opacity-100 transform translate-y-2 group-hover:translate-y-0 transition-all duration-300">
-                    {addedItem === prod.id ? 'Added!' : 'Shop Now'}
+                    <span onClick={(e) => handleQuickAdd(prod, e)}>
+                      {addedItem === prod.id ? 'Added!' : 'Add to Bag'}
+                    </span>
                   </div>
                 </div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e1b18] mb-1 truncate">
                   {prod.name}
                 </h3>
                 <p className="text-xs text-[#5e5f5c] font-medium">
-                  ${prod.priceUSD.toFixed(2)} <span className="text-[10px] text-[#454843]/60">/ ৳ {prod.priceBDT.toLocaleString()}</span>
+                  ৳ {getProductUnitPrice(prod).toLocaleString()}
                 </p>
               </motion.div>
             ))}
@@ -921,17 +776,20 @@ export const AboutUs: React.FC = () => {
               >
                 <div className="border border-[#c5c7c1] bg-[#fff8f5]/80 p-5">
                   <h4 className="text-[11px] font-bold uppercase tracking-wider text-[#1e1b18] mb-1">
-                    Transit
+                    Delivery
                   </h4>
-                  <p className="font-serif-luxury text-2xl text-[#5e5f5c] font-normal">Secure</p>
-                  <p className="text-[11px] text-[#454843]/70">Direct Channels</p>
+                  <p className="font-serif-luxury text-2xl text-[#5e5f5c] font-normal">64 Districts</p>
+                  <p className="text-[11px] text-[#454843]/70">Cash on Delivery Across BD</p>
                 </div>
-                <div className="border border-[#c5c7c1] bg-[#fff8f5]/80 p-5">
+                <div
+                  onClick={() => navigate('/authenticity')}
+                  className="border border-[#c5c7c1] bg-[#fff8f5]/80 p-5 cursor-pointer hover:border-[#1e1b18] transition-colors"
+                >
                   <h4 className="text-[11px] font-bold uppercase tracking-wider text-[#1e1b18] mb-1">
-                    Integrity
+                    Inspection
                   </h4>
-                  <p className="font-serif-luxury text-2xl text-[#5e5f5c] font-normal">100%</p>
-                  <p className="text-[11px] text-[#454843]/70">Verified Origins</p>
+                  <p className="font-serif-luxury text-2xl text-[#5e5f5c] font-normal">48 Hours</p>
+                  <p className="text-[11px] text-[#454843]/70">Damaged / Wrong-Item Support &rarr;</p>
                 </div>
               </motion.div>
             </motion.div>
@@ -1013,18 +871,18 @@ export const AboutUs: React.FC = () => {
             variants={staggerContainer}
             className="grid grid-cols-1 md:grid-cols-3 gap-8"
           >
-            {BESTSELLING_RITUALS.map((prod, index) => (
+            {bestsellingRituals.map((prod, index) => (
               <motion.div
                 key={prod.id}
                 variants={fadeInUp}
                 custom={index}
                 className="group cursor-pointer"
-                onClick={() => navigate('/shop')}
+                onClick={() => navigate(`/product/${prod.id}`)}
               >
                 <div className="aspect-square bg-[#fff8f5] mb-6 overflow-hidden relative shadow-sm border border-[#c5c7c1]/20">
                   <img
-                    src={prod.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=400'}
-                    alt={prod.name}
+                    src={prod.image || '/og-banner.jpg'}
+                    alt={prod.imageAltText || prod.altText || prod.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                     referrerPolicy="no-referrer"
                   />
@@ -1035,7 +893,7 @@ export const AboutUs: React.FC = () => {
                         <span>Added to Bag</span>
                       </>
                     ) : (
-                      <span onClick={(e) => handleQuickAdd(prod, e)}>Shop Ritual</span>
+                      <span onClick={(e) => handleQuickAdd(prod, e)}>Add to Bag</span>
                     )}
                   </div>
                 </div>
@@ -1043,7 +901,7 @@ export const AboutUs: React.FC = () => {
                   {prod.name}
                 </h3>
                 <p className="text-xs font-semibold uppercase tracking-widest text-[#5e5f5c] text-center">
-                  ${prod.priceUSD.toFixed(2)} <span className="text-[11px] text-[#454843]/60 font-normal">/ ৳ {prod.priceBDT.toLocaleString()}</span>
+                  ৳ {getProductUnitPrice(prod).toLocaleString()}
                 </p>
               </motion.div>
             ))}

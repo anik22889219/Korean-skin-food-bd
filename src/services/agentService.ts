@@ -1,5 +1,6 @@
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { collection, getDocs, query, orderBy, limit, doc, setDoc } from 'firebase/firestore';
+import { authFetch } from './apiClient';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 
 export interface AgentRunLog {
   id: string;
@@ -117,30 +118,8 @@ export const agentService = {
       localStorage.setItem(MOCK_RUNS_KEY, JSON.stringify(cached.slice(0, 10)));
       return newLog;
     } catch (err) {
-      console.error("runAutonomousAgent failed, falling back to simulation:", err);
-      const nextId = "run-" + Math.floor(100 + Math.random() * 900);
-      const fallbackLog: AgentRunLog = {
-        id: nextId,
-        type: "Weekly Pricing Optimizer",
-        timestamp: new Date().toISOString(),
-        summary: "Weekly Pricing Optimizer successfully simulated slow-moving skincare items.",
-        results: {
-          discountSuggestions: [
-            {
-              productId: "p1",
-              name: "COSRX Low pH Good Morning Gel Cleanser (150ml)",
-              originalPrice: 1150,
-              suggestedPrice: 1050,
-              discountPercent: 9,
-              reason: "Slow moving stock in Bangladesh. Prompts 9% markdown to drive client conversions."
-            }
-          ]
-        }
-      };
-      const cached = this.getRunLogs();
-      cached.unshift(fallbackLog);
-      localStorage.setItem(MOCK_RUNS_KEY, JSON.stringify(cached.slice(0, 10)));
-      return fallbackLog;
+      console.error("runAutonomousAgent failed:", err);
+      throw err;
     }
   },
 
@@ -174,7 +153,7 @@ export const agentService = {
    * Trigger the Inventory Watch agent backend
    */
   async triggerInventoryWatch(): Promise<AiAgentRun> {
-    const response = await fetch('/api/functions/inventoryWatch', {
+    const response = await authFetch('/api/functions/inventoryWatch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
@@ -189,7 +168,7 @@ export const agentService = {
    * Trigger the Weekly Pricing Optimizer agent backend
    */
   async triggerPricingSuggestion(): Promise<AiAgentRun> {
-    const response = await fetch('/api/functions/pricingSuggestion', {
+    const response = await authFetch('/api/functions/pricingSuggestion', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
@@ -204,7 +183,7 @@ export const agentService = {
    * Trigger the Product Marketing Copywriter agent backend
    */
   async generateProductMarketingContent(productId: string): Promise<any> {
-    const response = await fetch('/api/functions/generateProductContent', {
+    const response = await authFetch('/api/functions/generateProductContent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ productId })

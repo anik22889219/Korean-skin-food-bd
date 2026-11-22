@@ -73,10 +73,10 @@ export const MainLayout: React.FC = () => {
   }, []);
 
   const defaultAnnouncements = [
-    "✨ FREE shipping inside Dhaka for orders over ৳2,000! ✨",
-    "🛍️ 100% Genuine Imported Cosmeceuticals straight from Seoul, South Korea!",
-    "📞 Need professional skincare advice? Click WhatsApp below for a free consultation!",
-    "🌟 Cash on Delivery (COD) services available nationwide across Bangladesh!"
+    "FREE delivery nationwide on orders over ৳2,000!",
+    "Curated Korean Skincare & Daily Essentials delivered across Bangladesh.",
+    "Need routine advice? Try our Skin Profile Quiz or message us on WhatsApp!",
+    "Cash on Delivery (COD) available across all 64 districts in Bangladesh."
   ];
 
   const announcements = globalTheme.announcementText 
@@ -150,8 +150,8 @@ export const MainLayout: React.FC = () => {
             </Link>
           )}
 
-          {/* Menus: Home, Shop, About Us, Contact Us */}
-          <nav className="hidden lg:flex items-center gap-5 text-xs font-bold text-gray-650">
+          {/* Menus: Home, Shop, Concerns, Ingredients, Skin Quiz, Routine, Authenticity */}
+          <nav className="hidden lg:flex items-center gap-4 text-xs font-bold text-gray-650">
             <Link 
               to="/" 
               className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/') && location.pathname === '/' ? 'text-[#E91E8C] font-extrabold' : ''}`}
@@ -165,16 +165,46 @@ export const MainLayout: React.FC = () => {
               {activeTranslations.shop || "Shop"}
             </Link>
             <Link 
+              to="/concerns" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/concerns') || isActivePath('/concern/') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'ত্বকের ধরন ও সমস্যা' : 'Concerns'}
+            </Link>
+            <Link 
+              to="/ingredients" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/ingredients') || isActivePath('/ingredient/') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'উপাদান' : 'Ingredients'}
+            </Link>
+            <Link 
+              to="/skin-quiz" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/skin-quiz') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'স্কিন কুইজ' : 'Skin Quiz'}
+            </Link>
+            <Link 
+              to="/routine-builder" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/routine-builder') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'রুটিন বিল্ডার' : 'Routine'}
+            </Link>
+            <Link 
+              to="/authenticity" 
+              className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/authenticity') ? 'text-[#E91E8C] font-extrabold' : ''}`}
+            >
+              {language === 'bn' ? 'অথেনটিসিটি' : 'Authenticity'}
+            </Link>
+            <Link 
               to="/about-us" 
               className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/about-us') ? 'text-[#E91E8C] font-extrabold' : ''}`}
             >
-              {language === 'bn' ? 'আমাদের সম্পর্কে' : 'About Us'}
+              {language === 'bn' ? 'আমাদের সম্পর্কে' : 'About'}
             </Link>
             <Link 
               to="/contact-us" 
               className={`py-1 transition-all hover:text-[#E91E8C] ${isActivePath('/contact-us') ? 'text-[#E91E8C] font-extrabold' : ''}`}
             >
-              {language === 'bn' ? 'যোগাযোগ' : 'Contact Us'}
+              {language === 'bn' ? 'যোগাযোগ' : 'Contact'}
             </Link>
           </nav>
         </div>
@@ -463,6 +493,61 @@ export const MainLayout: React.FC = () => {
                   >
                     <Compass size={16} />
                     <span>{activeTranslations.shop || "Shop"}</span>
+                  </Link>
+
+                  <Link
+                    to="/concerns"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/concerns') || isActivePath('/concern/') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Sparkles size={16} />
+                    <span>{language === 'bn' ? 'ত্বকের সমস্যা ও সমাধান' : 'Skin Concerns'}</span>
+                  </Link>
+
+                  <Link
+                    to="/ingredients"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/ingredients') || isActivePath('/ingredient/') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Layers size={16} />
+                    <span>{language === 'bn' ? 'উপাদান লাইব্রেরি' : 'Ingredient Library'}</span>
+                  </Link>
+
+                  <Link
+                    to="/skin-quiz"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/skin-quiz') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Wand2 size={16} />
+                    <span>{language === 'bn' ? 'স্কিন প্রোফাইল কুইজ' : 'Skin Profile Quiz'}</span>
+                  </Link>
+
+                  <Link
+                    to="/routine-builder"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/routine-builder') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <Award size={16} />
+                    <span>{language === 'bn' ? 'রুটিন বিল্ডার' : 'AM/PM Routine Builder'}</span>
+                  </Link>
+
+                  <Link
+                    to="/authenticity"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-2xl transition ${
+                      isActivePath('/authenticity') ? 'bg-[#E91E8C] text-white' : 'hover:bg-pink-50'
+                    }`}
+                  >
+                    <ShieldCheck size={16} />
+                    <span>{language === 'bn' ? 'অথেনটিসিটি ও প্যাকিং গাইড' : 'Authenticity & Inspection'}</span>
                   </Link>
 
                   <Link

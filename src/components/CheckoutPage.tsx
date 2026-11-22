@@ -29,9 +29,9 @@ import { Product } from '../types';
 import { analytics } from '../services/analyticsService';
 import { getProductUnitPrice } from '../utils/pricing';
 import { getSiteUrl } from '../utils/siteUrl';
+import { authFetch } from '../services/apiClient';
+import { SavedAddress, userPortalService } from '../services/userPortalService';
 import { SeoHead } from './SeoHead';
-
-const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=240';
 
 const normalizeBdPhone = (raw: string) => {
   let clean = raw.replace(/[\s\-()]/g, '');
@@ -42,7 +42,7 @@ const normalizeBdPhone = (raw: string) => {
 
 const isValidBdPhone = (raw: string) => {
   const normalized = normalizeBdPhone(raw);
-  return /^01[3-9]\d{8}$/.test(normalized) || normalized.length >= 10;
+  return /^01[3-9]\d{8}$/.test(normalized);
 };
 
 export const CheckoutPage: React.FC = () => {
@@ -88,9 +88,23 @@ export const CheckoutPage: React.FC = () => {
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [formErrors, setFormErrors] = useState<{ name?: string; phone?: string; address?: string }>({});
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('');
 
   const hydratedQueryRef = useRef<string | null>(null);
   const trackedCheckoutRef = useRef<boolean>(false);
+  const checkoutSessionKeyRef = useRef<string>('');
+
+  if (!checkoutSessionKeyRef.current && typeof window !== 'undefined') {
+    const existingKey = window.sessionStorage.getItem('ksf_checkout_session_key');
+    if (existingKey) {
+      checkoutSessionKeyRef.current = existingKey;
+    } else {
+      const created = `chk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      window.sessionStorage.setItem('ksf_checkout_session_key', created);
+      checkoutSessionKeyRef.current = created;
+    }
+  }
 
   const isWholesaleUser = profile?.wholesaleAccess === true;
   const isBn = language === 'bn';
@@ -143,6 +157,34 @@ export const CheckoutPage: React.FC = () => {
     }
   }, [location.search, allProducts, productsLoading, addToCart]);
 
+  // Load saved delivery addresses for signed-in shoppers
+  useEffect(() => {
+    if (!user?.uid) {
+      setSavedAddresses([]);
+      setSelectedAddressId('');
+      return;
+    }
+    let active = true;
+    userPortalService.getSavedAddresses(user.uid).then((list) => {
+      if (!active) return;
+      setSavedAddresses(list);
+      const defaultAddr = list.find((a) => a.isDefault) || list[0];
+      if (defaultAddr) {
+        setSelectedAddressId(defaultAddr.id);
+        setCheckoutForm((prev) => ({
+          ...prev,
+          name: prev.name || defaultAddr.recipientName || profile?.name || user.displayName || '',
+          phone: prev.phone || defaultAddr.phone || profile?.phone || '',
+          area: prev.address ? prev.area : defaultAddr.area,
+          address: prev.address || defaultAddr.addressLine || '',
+        }));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [user?.uid]);
+
   // Track Begin Checkout once per session when cart has items
   useEffect(() => {
     if (!trackedCheckoutRef.current && cart.length > 0) {
@@ -156,6 +198,56 @@ export const CheckoutPage: React.FC = () => {
   const grandTotal = calculateGrandTotal();
   const earnedPoints = calculatePointsEarned();
   const totalItemCount = cart.reduce((sum, i) => sum + i.quantity, 0);
+
+  // Live stock checks against catalog
+  const stockIssues = useMemo(() => {
+    if (allProducts.length === 0) return [];
+    const productMap = new Map(allProducts.map((p) => [p.id, p]));
+    return cart
+      .map((item) => {
+        const live = productMap.get(item.product.id);
+        const liveStock = live ? Number(live.stock ?? 0) : Number(item.product.stock ?? 0);
+        if (liveStock < item.quantity) {
+          return {
+            productId: item.product.id,
+            name: item.product.name,
+            requested: item.quantity,
+            available: liveStock,
+          };
+        }
+        return null;
+      })
+      .filter((x): x is NonNullable<typeof x> => Boolean(x));
+  }, [cart, allProducts]);
+
+  // Debounced abandoned-checkout capture beacon
+  useEffect(() => {
+    if (cart.length === 0) return;
+    const hasContact = isValidBdPhone(checkoutForm.phone) || checkoutForm.name.trim().length >= 2;
+    if (!hasContact || !checkoutSessionKeyRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      authFetch('/api/checkout/abandoned', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionKey: checkoutSessionKeyRef.current,
+          customerName: checkoutForm.name.trim(),
+          customerPhone: normalizeBdPhone(checkoutForm.phone),
+          area: checkoutForm.area,
+          subtotal,
+          items: cart.map((c) => ({
+            productId: c.product.id,
+            name: c.product.name,
+            quantity: c.quantity,
+            price: getProductUnitPrice(c.product, 'retail', c.quantity),
+          })),
+        }),
+      }).catch(() => {});
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [cart, checkoutForm.name, checkoutForm.phone, checkoutForm.area, subtotal]);
 
   // Shareable checkout URL (includes current basket items if non-empty so recipient sees identical cart)
   const shareableCheckoutUrl = useMemo(() => {
@@ -272,8 +364,8 @@ export const CheckoutPage: React.FC = () => {
             </h1>
             <p className="text-xs text-gray-500">
               {isBn
-                ? 'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা · ১০০% আসল কোরিয়ান স্কিনকেয়ার'
-                : 'Cash on Delivery across Bangladesh · 100% Authentic K-Beauty'}
+                ? 'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা · সরাসরি ফোন কনফার্মেশন'
+                : 'Cash on Delivery across Bangladesh · Phone Confirmation Dispatch'}
             </p>
           </div>
 
@@ -469,6 +561,42 @@ export const CheckoutPage: React.FC = () => {
                   <Truck size={18} className="text-[#E91E8C] shrink-0" />
                 </div>
 
+                {savedAddresses.length > 0 && (
+                  <div className="space-y-2 pb-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500 block">
+                      {isBn ? 'সেভ করা ঠিকানা থেকে বেছে নিন' : 'Quick Fill from Saved Addresses'}
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {savedAddresses.map((addr) => (
+                        <button
+                          key={addr.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAddressId(addr.id);
+                            setCheckoutForm({
+                              name: addr.recipientName,
+                              phone: addr.phone,
+                              area: addr.area,
+                              address: addr.addressLine,
+                            });
+                            setFormErrors({});
+                          }}
+                          className={`px-3 py-2 rounded-xl border text-left text-xs transition cursor-pointer ${
+                            selectedAddressId === addr.id
+                              ? 'bg-pink-50 border-[#E91E8C] text-[#E91E8C] font-bold'
+                              : 'bg-slate-50 border-slate-200 text-gray-700 hover:border-pink-200 font-semibold'
+                          }`}
+                        >
+                          <span className="block">{addr.label}</span>
+                          <span className="block text-[10px] text-gray-500 truncate max-w-[180px]">
+                            {addr.addressLine}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Full Name */}
                   <div>
@@ -517,7 +645,13 @@ export const CheckoutPage: React.FC = () => {
                         }`}
                       />
                     </div>
-                    {formErrors.phone && <p className="text-[11px] font-semibold text-rose-600 mt-1">{formErrors.phone}</p>}
+                    {formErrors.phone ? (
+                      <p className="text-[11px] font-semibold text-rose-600 mt-1">{formErrors.phone}</p>
+                    ) : checkoutForm.phone.trim().length > 0 && !isValidBdPhone(checkoutForm.phone) ? (
+                      <p className="text-[11px] font-medium text-amber-600 mt-1">
+                        {isBn ? '১১ সংখ্যার নম্বর দিন (013–019 দিয়ে শুরু)' : 'Enter 11 digits starting with 013–019'}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -806,7 +940,7 @@ export const CheckoutPage: React.FC = () => {
                           <div className="w-14 h-14 rounded-xl border border-pink-100 bg-pink-50/30 overflow-hidden shrink-0 flex items-center justify-center">
                             {item.product.image && !imgFailed ? (
                               <img
-                                src={item.product.image || FALLBACK_IMAGE}
+                                src={item.product.image}
                                 alt={item.product.name}
                                 referrerPolicy="no-referrer"
                                 onError={() => setFailedImages((prev) => ({ ...prev, [item.product.id]: true }))}
@@ -928,6 +1062,21 @@ export const CheckoutPage: React.FC = () => {
                     </p>
                   )}
                 </div>
+
+                {/* Stock Availability Warning */}
+                {stockIssues.length > 0 && (
+                  <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-xs font-semibold space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <AlertCircle size={15} className="shrink-0" />
+                      <span>Stock Notice</span>
+                    </div>
+                    {stockIssues.map((issue) => (
+                      <p key={issue.productId} className="text-[11px]">
+                        {issue.name}: requested {issue.requested}, currently available {issue.available}.
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 {/* Inline Checkout Error Banner */}
                 {checkoutError && (
