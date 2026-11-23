@@ -19,6 +19,7 @@ import {
 } from '../utils/pricing';
 import { useProducts } from '../hooks/queries/products';
 import { userPortalService } from '../services/userPortalService';
+import { getProductPath } from '../utils/productSlug';
 
 interface ProductCardProps {
   product: Product;
@@ -71,13 +72,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     
     // For wholesale users, always direct to PDP to configure wholesale order quantity & bulk tiers
     if (hasWholesaleAccess) {
-      navigate(`/product/${product.id}`);
+      navigate(getProductPath(product));
       return;
     }
 
     // For customizable combos, always direct customer to PDP to pick their items
     if (product.isCombo && product.comboConfig?.type === 'customizable') {
-      navigate(`/product/${product.id}`);
+      navigate(getProductPath(product));
       return;
     }
 
@@ -101,7 +102,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
       id={`product-card-${product.id}`}
       onClick={() => {
         analytics.trackSelectItem(product);
-        navigate(`/product/${product.id}`);
+        navigate(getProductPath(product));
       }}
       className="group relative bg-white rounded-2xl sm:rounded-3xl border border-pink-100/90 hover:border-pink-300/80 p-2.5 sm:p-3.5 flex flex-col justify-between transition-all duration-300 hover:shadow-xl hover:shadow-pink-500/10 cursor-pointer overflow-hidden select-none"
     >
@@ -184,7 +185,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               if (onQuickView) {
                 onQuickView(product);
               } else {
-                navigate(`/product/${product.id}`);
+                navigate(getProductPath(product));
               }
             }}
             className="px-3.5 py-2 bg-white/95 backdrop-blur-md text-slate-900 hover:bg-[#E91E8C] hover:text-white rounded-xl text-xs font-black shadow-lg transition-all duration-200 flex items-center gap-1.5 cursor-pointer transform translate-y-2 group-hover:translate-y-0"

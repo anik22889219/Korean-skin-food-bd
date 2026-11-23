@@ -23,6 +23,10 @@ import { Product } from '../types';
 import { GlobalThemeSettings } from '../types/theme';
 import { analytics } from '../services/analyticsService';
 import { getProductUnitPrice } from '../utils/pricing';
+import { PageFaqSection } from './PageFaqSection';
+import { pageSeoService } from '../services/pageSeoService';
+import { PageSeoConfig } from '../types';
+import { getProductPath } from '../utils/productSlug';
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -43,6 +47,18 @@ export const MainLayout: React.FC = () => {
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [seoPages, setSeoPages] = useState<PageSeoConfig[]>(() => pageSeoService.getAll());
+
+  useEffect(() => {
+    return pageSeoService.subscribe((pages) => {
+      setSeoPages(pages);
+    });
+  }, []);
+
+  const activePageSeo = React.useMemo(() => {
+    void seoPages;
+    return pageSeoService.getForPath(`${location.pathname}${location.search || ''}`, location.pathname);
+  }, [location.pathname, location.search, seoPages]);
 
   // Track View Cart when cart drawer opens with items
   useEffect(() => {
@@ -239,7 +255,7 @@ export const MainLayout: React.FC = () => {
               onOpenImageSearch={() => setIsImageSearchOpen(true)}
               onAddToCart={(product) => {
                 if (isWholesaleUser) {
-                  navigate(`/product/${product.id}`);
+                  navigate(getProductPath(product));
                 } else {
                   addToCart(product);
                   setIsCartOpen(true);
@@ -649,6 +665,12 @@ export const MainLayout: React.FC = () => {
       {/* 3. Render Storefront Content */}
       <main className="flex-1 min-w-0">
         <Outlet />
+        {activePageSeo &&
+          activePageSeo.showFaqsOnPage !== false &&
+          Array.isArray(activePageSeo.faqs) &&
+          activePageSeo.faqs.length > 0 && (
+            <PageFaqSection faqs={activePageSeo.faqs} />
+          )}
       </main>
 
       {/* 4. Footer */}
@@ -879,7 +901,7 @@ export const MainLayout: React.FC = () => {
         catalog={allProducts}
         onAddToCart={(product) => {
           if (isWholesaleUser) {
-            navigate(`/product/${product.id}`);
+            navigate(getProductPath(product));
           } else {
             addToCart(product);
             setIsCartOpen(true);

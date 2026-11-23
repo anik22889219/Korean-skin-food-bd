@@ -268,6 +268,45 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
+    function isValidSeoPageId(pageId) {
+      return pageId.matches('^[a-zA-Z0-9_\\-]{3,160}$');
+    }
+
+    function isValidSeoPage(data, pageId) {
+      return data.keys().hasAll(['id', 'path', 'pageType', 'label', 'metaTitle', 'metaDescription']) &&
+        data.keys().hasOnly([
+          'id', 'path', 'pageType', 'label', 'metaTitle', 'metaDescription',
+          'ogImage', 'ogImageAlt', 'keywords', 'canonicalUrl', 'ogType',
+          'noindex', 'faqs', 'showFaqsOnPage', 'customJsonLd', 'updatedAt', 'updatedBy'
+        ]) &&
+        data.id == pageId &&
+        data.id is string && data.id.size() >= 3 && data.id.size() <= 160 &&
+        data.path is string && data.path.size() >= 1 && data.path.size() <= 400 &&
+        data.pageType in ['core', 'shop_filter', 'brand', 'guide', 'ingredient', 'concern', 'product', 'custom'] &&
+        data.label is string && data.label.size() <= 200 &&
+        data.metaTitle is string && data.metaTitle.size() <= 200 &&
+        data.metaDescription is string && data.metaDescription.size() <= 500 &&
+        (!('ogImage' in data) || data.ogImage == null || (data.ogImage is string && data.ogImage.size() <= 1200)) &&
+        (!('ogImageAlt' in data) || data.ogImageAlt == null || (data.ogImageAlt is string && data.ogImageAlt.size() <= 300)) &&
+        (!('keywords' in data) || (data.keywords is list && data.keywords.size() <= 30 && (data.keywords.size() == 0 || data.keywords[0] is string))) &&
+        (!('canonicalUrl' in data) || data.canonicalUrl == null || (data.canonicalUrl is string && data.canonicalUrl.size() <= 600)) &&
+        (!('ogType' in data) || data.ogType == null || data.ogType in ['website', 'product', 'article']) &&
+        (!('noindex' in data) || data.noindex is bool) &&
+        (!('faqs' in data) || (data.faqs is list && data.faqs.size() <= 25 && (data.faqs.size() == 0 || data.faqs[0] is map))) &&
+        (!('showFaqsOnPage' in data) || data.showFaqsOnPage is bool) &&
+        (!('customJsonLd' in data) || data.customJsonLd == null || (data.customJsonLd is string && data.customJsonLd.size() <= 16000)) &&
+        (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is string && data.updatedAt.size() <= 64)) &&
+        (!('updatedBy' in data) || data.updatedBy == null || (data.updatedBy is string && data.updatedBy.size() <= 200));
+    }
+
+    match /seo_pages/{pageId} {
+      allow read: if true;
+      allow create: if isStaff() && isValidSeoPageId(pageId) && isValidSeoPage(request.resource.data, pageId);
+      allow update: if isStaff() && isValidSeoPageId(pageId) && isValidSeoPage(request.resource.data, pageId) &&
+        request.resource.data.id == resource.data.id;
+      allow delete: if isStaff() && isValidSeoPageId(pageId);
+    }
+
     // ==========================================
     // ORDERS & COMMERCE TRANSACTIONS
     // ==========================================

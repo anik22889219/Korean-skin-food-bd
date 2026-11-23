@@ -31,7 +31,11 @@
         "category": { "type": "string" },
         "price": { "type": "number" },
         "stock": { "type": "number" },
-        "barcode": { "type": "string" }
+        "barcode": { "type": "string" },
+        "seoSlug": { "type": "string", "maxLength": 120, "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "ogImage": { "type": "string", "maxLength": 1200 },
+        "ogImageAlt": { "type": "string", "maxLength": 300 },
+        "faqs": { "type": "array" }
       },
       "required": ["id", "name", "price", "stock"]
     },
@@ -50,7 +54,19 @@
         "image": { "type": "string" },
         "displayOrder": { "type": "number" },
         "isActive": { "type": "boolean" },
-        "isFeatured": { "type": "boolean" }
+        "isFeatured": { "type": "boolean" },
+        "isPopular": { "type": "boolean" },
+        "keyFocusIngredients": { "type": "array", "items": { "type": "string" } },
+        "routineTips": { "type": "array", "items": { "type": "string" } },
+        "routineTipsBN": { "type": "array", "items": { "type": "string" } },
+        "matchKeywords": { "type": "array", "items": { "type": "string" } },
+        "koreanName": { "type": "string" },
+        "shortRole": { "type": "string" },
+        "shortRoleBN": { "type": "string" },
+        "bestForSkinTypes": { "type": "array", "items": { "type": "string" } },
+        "pairsWellWith": { "type": "array", "items": { "type": "string" } },
+        "layeringCautions": { "type": "array", "items": { "type": "string" } },
+        "layeringCautionsBN": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["id", "type", "name", "slug", "displayOrder", "isActive"]
     },
@@ -745,6 +761,31 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "name", "steps", "updatedAt"]
+    },
+    "SeoPage": {
+      "title": "SeoPage",
+      "description": "Per-URL SEO metadata, OpenGraph image, canonical, indexability, and FAQ schema configuration across the storefront",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 160, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "path": { "type": "string", "maxLength": 400 },
+        "pageType": { "type": "string", "enum": ["core", "shop_filter", "brand", "guide", "ingredient", "concern", "product", "custom"] },
+        "label": { "type": "string", "maxLength": 200 },
+        "metaTitle": { "type": "string", "maxLength": 200 },
+        "metaDescription": { "type": "string", "maxLength": 500 },
+        "ogImage": { "type": "string", "maxLength": 1200 },
+        "ogImageAlt": { "type": "string", "maxLength": 300 },
+        "keywords": { "type": "array" },
+        "canonicalUrl": { "type": "string", "maxLength": 600 },
+        "ogType": { "type": "string", "enum": ["website", "product", "article"] },
+        "noindex": { "type": "boolean" },
+        "faqs": { "type": "array" },
+        "showFaqsOnPage": { "type": "boolean" },
+        "customJsonLd": { "type": "string", "maxLength": 16000 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "path", "pageType", "label", "metaTitle", "metaDescription"]
     }
   },
   "firestore": {
@@ -895,6 +936,10 @@
     "/users/{userId}/routines/{routineId}": {
       "schema": "CustomerRoutine",
       "description": "Customer saved AM/PM skincare routines"
+    },
+    "/seo_pages/{pageId}": {
+      "schema": "SeoPage",
+      "description": "Full-website per-URL SEO metadata, meta images, FAQs, and canonical configurations"
     }
   }
 }

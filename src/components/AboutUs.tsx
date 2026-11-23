@@ -10,6 +10,7 @@ import { buildStaticPageSeo } from '../services/seoService';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { AboutPageThemeSettings } from '../types/theme';
 import { getProductUnitPrice } from '../utils/pricing';
+import { getProductPath } from '../utils/productSlug';
 
 // Subtle editorial animation variants
 const fadeInUp = {
@@ -319,7 +320,7 @@ export const AboutUs: React.FC = () => {
                 key={prod.id}
                 variants={fadeInUp}
                 custom={index}
-                onClick={() => navigate(`/product/${prod.id}`)}
+                onClick={() => navigate(getProductPath(prod))}
                 className="min-w-[280px] sm:min-w-[320px] flex-1 group cursor-pointer snap-start"
               >
                 <div className="aspect-[3/4] bg-[#f5ece7] mb-5 overflow-hidden relative border border-[#c5c7c1]/20">
@@ -516,7 +517,7 @@ export const AboutUs: React.FC = () => {
                 variants={fadeInUp}
                 custom={index}
                 className="group cursor-pointer text-center"
-                onClick={() => navigate(`/product/${prod.id}`)}
+                onClick={() => navigate(getProductPath(prod))}
               >
                 <div className="aspect-square bg-[#fff8f5] mb-6 overflow-hidden relative shadow-sm border border-[#c5c7c1]/20">
                   <img
@@ -639,7 +640,7 @@ export const AboutUs: React.FC = () => {
                 variants={fadeInUp}
                 custom={index}
                 className="group cursor-pointer"
-                onClick={() => navigate(`/product/${prod.id}`)}
+                onClick={() => navigate(getProductPath(prod))}
               >
                 <div className="aspect-[4/5] bg-[#efe6e2] mb-4 overflow-hidden relative border border-[#c5c7c1]/30">
                   <img
@@ -877,7 +878,7 @@ export const AboutUs: React.FC = () => {
                 variants={fadeInUp}
                 custom={index}
                 className="group cursor-pointer"
-                onClick={() => navigate(`/product/${prod.id}`)}
+                onClick={() => navigate(getProductPath(prod))}
               >
                 <div className="aspect-square bg-[#fff8f5] mb-6 overflow-hidden relative shadow-sm border border-[#c5c7c1]/20">
                   <img

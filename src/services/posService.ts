@@ -267,6 +267,7 @@ let wholesaleOrdersCache: Order[] = [];
 let ordersCache: Order[] = [...DEFAULT_ORDERS];
 // Pure in-memory cache synchronized from Firestore — NOT the source of truth, NO hardcoded singleton pos-main
 let sessionsCache: PosSession[] = [];
+const inFlightUserSessionPromises = new Map<string, Promise<PosSession>>();
 
 // Firestore real-time subscriptions
 let draftOrdersCache: Order[] = [];
@@ -557,11 +558,32 @@ export const posService = {
     userRole: string;
     operatorEmail?: string;
   }): Promise<PosSession> {
-    const { userId, userName, userRole, operatorEmail } = params;
+    const { userId } = params;
 
     if (!userId) {
       throw new Error('User ID is required to start a POS session.');
     }
+
+    // Deduplicate concurrent session init requests for the same user (e.g., StrictMode double mount)
+    const existingInFlight = inFlightUserSessionPromises.get(userId);
+    if (existingInFlight) {
+      return existingInFlight;
+    }
+
+    const promise = this._initUserPosSessionInternal(params).finally(() => {
+      inFlightUserSessionPromises.delete(userId);
+    });
+    inFlightUserSessionPromises.set(userId, promise);
+    return promise;
+  },
+
+  async _initUserPosSessionInternal(params: {
+    userId: string;
+    userName: string;
+    userRole: string;
+    operatorEmail?: string;
+  }): Promise<PosSession> {
+    const { userId, userName, userRole, operatorEmail } = params;
 
     if (!isAllowedPosRole(userRole)) {
       throw new Error(`Access denied: Role "${userRole}" is not authorized to use the POS system. Allowed roles: ${ALLOWED_POS_ROLES.join(', ')}.`);
@@ -607,7 +629,6 @@ export const posService = {
           const data = snap.data() as PosSession;
           const isActive = data.status === 'active' || data.status === 'open';
           if (data.userId === userId && isActive) {
-            // Restore and update heartbeat & device
             const updatedFields: Partial<PosSession> = {
               lastSeenAt: nowIso,
               updated_at: nowIso,
@@ -615,7 +636,8 @@ export const posService = {
               userName: userName || data.userName,
               userRole: userRole || data.userRole
             };
-            await updateDoc(sessionRef, sanitizeForFirestore(updatedFields)).catch(() => {});
+            // Non-blocking heartbeat & device refresh so session restore returns immediately
+            updateDoc(sessionRef, sanitizeForFirestore(updatedFields)).catch(() => {});
             const finalRestored = {
               ...data,
               ...updatedFields,
@@ -666,9 +688,9 @@ export const posService = {
           localStorage.setItem(userSessionStorageKey, activeSession.id);
         } catch {}
 
-        // Update heartbeat and device
+        // Non-blocking heartbeat & device refresh
         const sessionRef = doc(db, 'pos_sessions', activeSession.id);
-        await updateDoc(sessionRef, {
+        updateDoc(sessionRef, {
           lastSeenAt: nowIso,
           updated_at: nowIso,
           deviceType

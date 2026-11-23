@@ -26,6 +26,7 @@ import { analytics } from '../services/analyticsService';
 import { getRetailPrice } from '../utils/pricing';
 import { SeoHead } from './SeoHead';
 import { buildCategorySeo } from '../services/seoService';
+import { getProductPath } from '../utils/productSlug';
 
 const CATEGORIES = [
   'All',
@@ -152,7 +153,7 @@ export const ShopCategoryPage: React.FC = () => {
 
   const handleQuickViewWhatsApp = (prod: Product) => {
     const currentPrice = getRetailPrice(prod);
-    const pageUrl = `${window.location.origin}/product/${prod.id}`;
+    const pageUrl = `${window.location.origin}${getProductPath(prod)}`;
 
     const summaryText = 
       `🌸 *Order Inquiry - Korean Skin Food BD* 🌸\n` +
@@ -1073,7 +1074,7 @@ export const ShopCategoryPage: React.FC = () => {
         onClose={() => setQuickViewProduct(null)}
         onAddToCart={(p) => {
           if (profile?.wholesaleAccess) {
-            navigate(`/product/${p.id}`);
+            navigate(getProductPath(p));
           } else {
             addToCart(p);
             setIsCartOpen(true);

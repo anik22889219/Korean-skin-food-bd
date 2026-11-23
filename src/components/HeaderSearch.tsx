@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { analytics } from '../services/analyticsService';
 import { getRetailPrice, getRetailOriginalPrice, hasRetailDiscount } from '../utils/pricing';
+import { getProductPath } from '../utils/productSlug';
 
 interface HeaderSearchProps {
   products: Product[];
@@ -58,7 +59,7 @@ export const HeaderSearch: React.FC<HeaderSearchProps> = ({
     }
     setIsOpen(false);
     setSearchTerm('');
-    navigate(`/product/${product.id}`);
+    navigate(getProductPath(product));
   };
 
   const handleClear = () => {

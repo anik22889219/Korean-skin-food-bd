@@ -14,6 +14,7 @@ import {
   getRetailDiscountPercentage,
   getWholesalePrice
 } from '../utils/pricing';
+import { getProductPath } from '../utils/productSlug';
 
 interface ProductQuickViewModalProps {
   product: Product | null;
@@ -120,7 +121,7 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
   if (!isOpen || !product) return null;
 
   const handleWhatsAppOrder = () => {
-    const pageUrl = `${window.location.origin}/product/${product.id}`;
+    const pageUrl = `${window.location.origin}${getProductPath(product)}`;
     const totalAmount = activeUnitPrice * quantity;
     const summaryText =
       `🌸 *Order Inquiry - Korean Skin Food BD* 🌸\n` +
@@ -145,7 +146,7 @@ export const ProductQuickViewModal: React.FC<ProductQuickViewModalProps> = ({
 
   const handleViewFullDetails = () => {
     onClose();
-    navigate(`/product/${product.id}`);
+    navigate(getProductPath(product));
   };
 
   return (

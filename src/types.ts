@@ -40,6 +40,8 @@ export interface Product {
   isSlowMoving?: boolean;
   noindex?: boolean;
   seoSlug?: string;
+  ogImage?: string;
+  ogImageAlt?: string;
   // Combo Package Fields
   isCombo?: boolean;
   comboConfig?: ComboConfig;
@@ -85,6 +87,17 @@ export interface TaxonomyItem {
   parentCategoryId?: string;
   metaTitle?: string;
   metaDescription?: string;
+  keyFocusIngredients?: string[];
+  routineTips?: string[];
+  routineTipsBN?: string[];
+  matchKeywords?: string[];
+  koreanName?: string;
+  shortRole?: string;
+  shortRoleBN?: string;
+  bestForSkinTypes?: string[];
+  pairsWellWith?: string[];
+  layeringCautions?: string[];
+  layeringCautionsBN?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1093,5 +1106,41 @@ export interface YouTubeSyncResult {
   shorts?: YouTubeShortItem[];
   error?: string;
 }
+
+export interface PageSeoFaqItem {
+  question: string;
+  answer: string;
+}
+
+export type SeoPageCategoryType =
+  | 'core'
+  | 'shop_filter'
+  | 'brand'
+  | 'guide'
+  | 'ingredient'
+  | 'concern'
+  | 'product'
+  | 'custom';
+
+export interface PageSeoConfig {
+  id: string;
+  path: string;
+  pageType: SeoPageCategoryType;
+  label: string;
+  metaTitle: string;
+  metaDescription: string;
+  ogImage?: string;
+  ogImageAlt?: string;
+  keywords?: string[];
+  canonicalUrl?: string;
+  ogType?: 'website' | 'product' | 'article';
+  noindex?: boolean;
+  faqs?: PageSeoFaqItem[];
+  showFaqsOnPage?: boolean;
+  customJsonLd?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 
 

@@ -267,7 +267,17 @@ export type PageThemeKey =
   | 'guideDetail'
   | 'productDetail'
   | 'login'
-  | 'notFound';
+  | 'notFound'
+  | 'authenticity'
+  | 'ingredients'
+  | 'concerns'
+  | 'skinQuiz'
+  | 'routineBuilder'
+  | 'checkout'
+  | 'thankYou'
+  | 'creatorLeaderboard'
+  | 'wholesalePortal'
+  | 'profile';
 
 export interface FaqEntry {
   id: string;
@@ -542,6 +552,192 @@ export interface NotFoundPageThemeSettings {
   showQuickLinks: boolean;
 }
 
+export interface AuthenticityPageThemeSettings {
+  badgeEN: string;
+  badgeBN: string;
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  primaryCtaEN: string;
+  primaryCtaBN: string;
+  primaryCtaLink: string;
+  secondaryCtaEN: string;
+  secondaryCtaBN: string;
+  secondaryCtaLink: string;
+  showChecklist: boolean;
+  showDateCodes: boolean;
+  dateCodesHeadingEN: string;
+  dateCodesHeadingBN: string;
+  showPolicyCards: boolean;
+  showHelpBanner: boolean;
+  helpTitleEN: string;
+  helpTitleBN: string;
+  helpSubtitleEN: string;
+  helpSubtitleBN: string;
+  helpSecondaryLabelEN: string;
+  helpSecondaryLabelBN: string;
+  helpSecondaryLink: string;
+  helpPrimaryLabelEN: string;
+  helpPrimaryLabelBN: string;
+  helpPrimaryLink: string;
+}
+
+export interface IngredientsPageThemeSettings {
+  badgeText: string;
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  searchPlaceholderEN: string;
+  searchPlaceholderBN: string;
+  cardCtaLabel: string;
+  showBottomBanner: boolean;
+  bottomTitleEN: string;
+  bottomTitleBN: string;
+  bottomSubtitle: string;
+  bottomSecondaryLabel: string;
+  bottomSecondaryLink: string;
+  bottomPrimaryLabel: string;
+  bottomPrimaryLink: string;
+  detailBadgeText: string;
+  detailDisclaimer: string;
+  showDetailRelatedProducts: boolean;
+}
+
+export interface ConcernsPageThemeSettings {
+  badgeText: string;
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  cardCtaLabel: string;
+  detailBadgeFallback: string;
+  detailDisclaimer: string;
+  showDetailKeyIngredients: boolean;
+  showDetailRelatedProducts: boolean;
+}
+
+export interface SkinQuizPageThemeSettings {
+  badgeText: string;
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  resetButtonLabel: string;
+  submitButtonLabel: string;
+  resultsHeading: string;
+  resultsSubtext: string;
+  routineBuilderCtaLabel: string;
+  addTopToBagCtaLabel: string;
+  showResultsActions: boolean;
+}
+
+export interface RoutineBuilderPageThemeSettings {
+  badgeText: string;
+  titleEN: string;
+  titleBN: string;
+  subtitle: string;
+  quizCtaLabel: string;
+  glossaryCtaLabel: string;
+  amTitle: string;
+  amSubtitle: string;
+  pmTitle: string;
+  pmSubtitle: string;
+  saveRoutineLabel: string;
+  addToCartLabel: string;
+  showLayeringWarnings: boolean;
+  showSavedRoutines: boolean;
+}
+
+export interface CheckoutPageThemeSettings {
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  copyLinkLabelEN: string;
+  copyLinkLabelBN: string;
+  continueShoppingLabelEN: string;
+  continueShoppingLabelBN: string;
+  emptyTitleEN: string;
+  emptyTitleBN: string;
+  emptySubtitleEN: string;
+  emptySubtitleBN: string;
+  emptyShopBtnEN: string;
+  emptyShopBtnBN: string;
+  showQuickAdd: boolean;
+  showGuestRewardsBanner: boolean;
+  paymentTitleEN: string;
+  paymentTitleBN: string;
+  paymentCodDescEN: string;
+  paymentCodDescBN: string;
+  promoTitleEN: string;
+  promoTitleBN: string;
+  promoPlaceholderEN: string;
+  promoPlaceholderBN: string;
+  summaryTitleEN: string;
+  summaryTitleBN: string;
+  dispatchNoteEN: string;
+  dispatchNoteBN: string;
+}
+
+export interface ThankYouPageThemeSettings {
+  titleEN: string;
+  titleBN: string;
+  subtitleEN: string;
+  subtitleBN: string;
+  deliveryHeadingEN: string;
+  deliveryHeadingBN: string;
+  receiptHeadingEN: string;
+  receiptHeadingBN: string;
+  printBtnEN: string;
+  printBtnBN: string;
+  whatsappBtnEN: string;
+  whatsappBtnBN: string;
+  continueShoppingEN: string;
+  continueShoppingBN: string;
+  showGuestRewardsTip: boolean;
+  notFoundTitleEN: string;
+  notFoundTitleBN: string;
+}
+
+export interface CreatorLeaderboardPageThemeSettings {
+  badgeText: string;
+  title: string;
+  subtitle: string;
+  searchPlaceholder: string;
+  showPeriodTabs: boolean;
+  showSearchBar: boolean;
+  showCriteriaStrip: boolean;
+}
+
+export interface WholesalePortalPageThemeSettings {
+  dashboardBadge: string;
+  dashboardSubtitle: string;
+  placeOrderBtnLabel: string;
+  checkoutBreadcrumbLabel: string;
+  checkoutTitle: string;
+  checkoutTierBadge: string;
+  addProductsBtnLabel: string;
+  showAuthNotice: boolean;
+  authNoticeTitle: string;
+  authNoticeBody: string;
+}
+
+export interface ProfilePageThemeSettings {
+  fallbackDisplayName: string;
+  ordersTabLabel: string;
+  wishlistTabLabel: string;
+  addressesTabLabel: string;
+  routineTabLabel: string;
+  loyaltyTabLabel: string;
+  reviewsTabLabel: string;
+  supportTabLabel: string;
+  accountTabLabel: string;
+  showQuickMetrics: boolean;
+  showRoleBanners: boolean;
+}
+
 export interface PagesThemeSettings {
   about: AboutPageThemeSettings;
   contact: ContactPageThemeSettings;
@@ -555,6 +751,16 @@ export interface PagesThemeSettings {
   productDetail: ProductDetailPageThemeSettings;
   login: LoginPageThemeSettings;
   notFound: NotFoundPageThemeSettings;
+  authenticity: AuthenticityPageThemeSettings;
+  ingredients: IngredientsPageThemeSettings;
+  concerns: ConcernsPageThemeSettings;
+  skinQuiz: SkinQuizPageThemeSettings;
+  routineBuilder: RoutineBuilderPageThemeSettings;
+  checkout: CheckoutPageThemeSettings;
+  thankYou: ThankYouPageThemeSettings;
+  creatorLeaderboard: CreatorLeaderboardPageThemeSettings;
+  wholesalePortal: WholesalePortalPageThemeSettings;
+  profile: ProfilePageThemeSettings;
   updatedAt?: string;
 }
 

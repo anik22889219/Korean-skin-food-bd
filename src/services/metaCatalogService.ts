@@ -4,6 +4,7 @@ import { productService } from './productService';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { authFetch } from './apiClient';
 import { getRuntimeOrigin, getSiteUrl, resolveConfiguredDomainUrl } from '../utils/siteUrl';
+import { getProductPath } from '../utils/productSlug';
 
 export interface MetaCatalogItem {
   id: string;
@@ -142,7 +143,7 @@ export function formatProductsForMeta(products: any[], settings: MetaCatalogSett
     const mainImg = prod.image || (Array.isArray(prod.images) && prod.images.length > 0 ? prod.images[0] : "");
     const additionalImages = Array.isArray(prod.images) ? prod.images.filter((img: string) => img && img !== mainImg) : [];
 
-    const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+    const link = `${baseUrl}${getProductPath({ id, seoSlug: prod.seoSlug })}`;
     const barcode = prod.barcodeNormalized || prod.barcode || "";
     const sku = prod.sku || id;
 

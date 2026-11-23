@@ -94,9 +94,12 @@ export function useProduct(productId?: string | null) {
 
       // 2. Check if product exists in any cached product list query
       const cachedLists = queryClient.getQueriesData<Product[]>({ queryKey: queryKeys.products.lists() });
+      const lowerParam = productId.toLowerCase();
       for (const [, list] of cachedLists) {
         if (Array.isArray(list)) {
-          const match = list.find((p) => p.id === productId);
+          const match = list.find(
+            (p) => p.id === productId || (p.seoSlug && p.seoSlug.toLowerCase() === lowerParam)
+          );
           if (match) return match;
         }
       }

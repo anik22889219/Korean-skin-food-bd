@@ -2,6 +2,7 @@ import { Product } from '../types';
 import { SkincareGuide } from '../data/skincareGuides';
 import { BrandSeoProfile } from '../data/brandProfiles';
 import { DEFAULT_SITE_URL, getSiteUrl } from '../utils/siteUrl';
+import { getProductPath } from '../utils/productSlug';
 
 export interface SeoMetadata {
   title: string;
@@ -149,7 +150,23 @@ export const buildHomepageSeo = (): SeoMetadata => {
  * Description: Discover {Product Name} at Korean Skin Food BD. Explore product details, ingredients, skin compatibility, directions for use, and current availability in Bangladesh.
  */
 export const buildProductSeo = (product: Product): SeoMetadata => {
-  const canonicalUrl = buildCanonicalUrl(`/product/${product.id}`);
+  let customCanonicalFromJson = '';
+  if (product.generatedSeoContent) {
+    try {
+      const parsed =
+        typeof product.generatedSeoContent === 'string'
+          ? JSON.parse(product.generatedSeoContent)
+          : product.generatedSeoContent;
+      if (parsed?.customCanonical && typeof parsed.customCanonical === 'string') {
+        customCanonicalFromJson = parsed.customCanonical.trim();
+      }
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+
+  const productPath = getProductPath(product);
+  const canonicalUrl = buildCanonicalUrl(customCanonicalFromJson || productPath);
 
   // Compose exact title according to prompt guidelines
   const sizeSuffix = product.ml && product.ml.trim() ? ` ${product.ml.trim()}` : '';
@@ -169,8 +186,8 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
 
   const isAvailable = (product.stock ?? 0) > 0;
   const brandName = product.brand || 'Korean Skin Food BD';
-  const ogImage = product.image || (product.images && product.images[0]) || DEFAULT_OG_IMAGE;
-  const ogImageAlt = product.imageAltText || product.altText || `${product.name} ${brandName} authentic Korean skincare in Bangladesh`;
+  const ogImage = product.ogImage || product.image || (product.images && product.images[0]) || DEFAULT_OG_IMAGE;
+  const ogImageAlt = product.ogImageAlt || product.imageAltText || product.altText || `${product.name} ${brandName} authentic Korean skincare in Bangladesh`;
 
   // Product Schema.org JSON-LD
   const productSchema: Record<string, any> = {
@@ -247,6 +264,26 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
     keywords.push(...product.keyIngredients);
   }
 
+  const schemas: Array<Record<string, any>> = [productSchema, breadcrumbSchema];
+
+  if (Array.isArray(product.faqs) && product.faqs.length > 0) {
+    const validFaqs = product.faqs.filter((f) => f.question?.trim() && f.answer?.trim());
+    if (validFaqs.length > 0) {
+      schemas.push({
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: validFaqs.map((faq) => ({
+          '@type': 'Question',
+          name: faq.question.trim(),
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: faq.answer.trim(),
+          },
+        })),
+      });
+    }
+  }
+
   return {
     title,
     description,
@@ -256,7 +293,8 @@ export const buildProductSeo = (product: Product): SeoMetadata => {
     ogImage,
     ogImageAlt,
     twitterCard: 'summary_large_image',
-    jsonLd: [productSchema, breadcrumbSchema]
+    jsonLd: schemas,
+    noindex: Boolean(product.noindex),
   };
 };
 
@@ -588,9 +626,14 @@ export const buildIngredientSeo = (ingredient?: {
       ['Korean skincare ingredients', 'Niacinamide skincare BD', 'Centella Asiatica Bangladesh']
     );
   }
+  const rolePart = ingredient.shortRole ? `${ingredient.shortRole}. ` : '';
+  const summaryPart = sanitizeMetaText(ingredient.summary).slice(0, 140);
+  const description =
+    `${rolePart}${summaryPart}`.trim() ||
+    `Explore ${ingredient.name} cosmetic ingredient benefits, skin type suitability, layering tips, and K-Beauty products at Korean Skin Food BD.`;
   return buildStaticPageSeo(
     `${ingredient.name} in Korean Skincare`,
-    `${ingredient.shortRole}. ${sanitizeMetaText(ingredient.summary).slice(0, 140)}`,
+    description,
     `/ingredient/${ingredient.slug}`,
     [ingredient.name, `${ingredient.name} skincare Bangladesh`, 'Korean skincare ingredients']
   );

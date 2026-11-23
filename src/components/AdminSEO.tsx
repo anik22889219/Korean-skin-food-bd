@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { productService } from '../services/productService';
 import { agentService } from '../services/agentService';
 import { articleService } from '../services/articleService';
@@ -22,6 +23,7 @@ import {
   buildCanonicalUrl
 } from '../services/seoService';
 import { getSiteHostname, getSiteUrl } from '../utils/siteUrl';
+import { getProductPath } from '../utils/productSlug';
 
 export const AdminSEO: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'guides' | 'global'>('overview');
@@ -120,7 +122,7 @@ export const AdminSEO: React.FC = () => {
       },
       "offers": {
         "@type": "Offer",
-        "url": buildCanonicalUrl(`/product/${p.id}`),
+        "url": buildCanonicalUrl(getProductPath(p)),
         "priceCurrency": "BDT",
         "price": p.discountPrice || p.price,
         "availability": (p.stock ?? 0) > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
@@ -132,8 +134,8 @@ export const AdminSEO: React.FC = () => {
     setMetaDescription(customDesc || defaultDesc);
     setKeywords(customKeys || defaultKeys);
     setImageAltText(p.imageAltText || p.altText || `${p.name} ${p.brand} - Authentic Korean Skincare in Bangladesh`);
-    setCustomCanonical(buildCanonicalUrl(`/product/${p.id}`));
-    setCustomOgImage(p.image || '');
+    setCustomCanonical(buildCanonicalUrl(getProductPath(p)));
+    setCustomOgImage(p.ogImage || p.image || '');
     setIsNoIndex(!!p.noindex);
     setJsonLdSchema(customSchemaStr || defaultSchema);
   };
@@ -468,48 +470,59 @@ export const AdminSEO: React.FC = () => {
           </p>
         </div>
 
-        {/* Tab Buttons */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-pink-50/50 p-1.5 rounded-2xl border border-pink-100 self-start md:self-center">
-          <button
-            type="button"
-            onClick={() => setActiveTab('overview')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'overview' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
-            }`}
+        {/* Tab Buttons + Website Pages & Link Studio Link */}
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
+          <Link
+            to="/admin/seo/pages"
+            className="px-4 py-2 bg-[#E91E8C] hover:bg-[#d0177c] text-white rounded-2xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs whitespace-nowrap"
           >
-            <ShieldCheck size={14} />
-            <span>SEO Overview</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('products')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'products' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <FileText size={14} />
-            <span>Product SEO</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('guides')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'guides' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <BookOpen size={14} />
-            <span>Skincare Guides CMS</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('global')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-              activeTab === 'global' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            <Layers size={14} />
-            <span>Sitemap &amp; Brand Hubs</span>
-          </button>
+            <LinkIcon size={14} />
+            <span>Website Pages &amp; Link Studio</span>
+            <ChevronRight size={13} />
+          </Link>
+
+          <div className="flex flex-wrap items-center gap-1.5 bg-pink-50/50 p-1.5 rounded-2xl border border-pink-100">
+            <button
+              type="button"
+              onClick={() => setActiveTab('overview')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'overview' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <ShieldCheck size={14} />
+              <span>SEO Overview</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('products')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'products' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <FileText size={14} />
+              <span>Product SEO</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('guides')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'guides' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <BookOpen size={14} />
+              <span>Skincare Guides CMS</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('global')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'global' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Layers size={14} />
+              <span>Sitemap &amp; Brand Hubs</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -723,7 +736,7 @@ export const AdminSEO: React.FC = () => {
 
             {selectedProduct && (
               <a
-                href={`/product/${selectedProduct.id}`}
+                href={getProductPath(selectedProduct)}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-bold text-[#E91E8C] bg-pink-50 hover:bg-pink-100 rounded-xl transition border border-pink-200"
@@ -949,7 +962,7 @@ export const AdminSEO: React.FC = () => {
                       <div className="flex flex-col">
                         <span className="text-[11px] font-semibold text-gray-900 leading-none">Korean Skin Food BD</span>
                         <span className="text-[10px] text-gray-500 leading-none mt-0.5 truncate max-w-xs font-mono">
-                          {getSiteUrl()}/product/{selectedProduct?.id || 'sample-id'}
+                          {getSiteUrl()}{selectedProduct ? getProductPath(selectedProduct) : '/product/sample-id'}
                         </span>
                       </div>
                     </div>
@@ -986,7 +999,7 @@ export const AdminSEO: React.FC = () => {
                       </div>
                       <div>
                         <span className="text-[11px] font-bold text-gray-900 block leading-tight">{getSiteHostname()}</span>
-                        <span className="text-[9px] text-gray-400 block leading-tight">{getSiteUrl()}/product/{selectedProduct?.id}</span>
+                        <span className="text-[9px] text-gray-400 block leading-tight">{getSiteUrl()}{selectedProduct ? getProductPath(selectedProduct) : '/product/sample-id'}</span>
                       </div>
                     </div>
 

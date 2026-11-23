@@ -32,7 +32,6 @@ import {
   ShoppingBag, 
   Volume2, 
   VolumeX, 
-  Loader2, 
   Eye,
   EyeOff,
   Sparkles,
@@ -44,8 +43,15 @@ import {
 } from 'lucide-react';
 import { posOfflineStorage, OfflineScanRecord } from '../services/posOfflineStorage';
 import { PosProductQuickViewModal } from './pos/PosProductQuickViewModal';
+import { logPosPerf, markPosPerfAnchor } from '../utils/posPerf';
 
 export { type ScannerContext };
+
+export interface PosScanSharedCartItem {
+  product: Product;
+  quantity: number;
+  docIds: string[];
+}
 
 interface PosScanProps {
   sessionId?: string;
@@ -58,6 +64,11 @@ interface PosScanProps {
   onRemoveFromStockIn?: (productId: string) => void;
   onUpdateStockInQty?: (productId: string, quantity: number) => void;
   onAddToCart?: (product: Product, quantity?: number) => void;
+  isRegisterManaged?: boolean;
+  isSessionLoading?: boolean;
+  sharedCartItems?: PosScanSharedCartItem[];
+  onDecrementCartItem?: (productId: string, docIds: string[]) => void;
+  onRemoveCartItem?: (productId: string, docIds: string[]) => void;
 }
 
 // Resilient Web Audio API synthesizer for retail barcode scanning chime
@@ -170,16 +181,35 @@ export const PosScan = React.memo(function PosScan({
   stockInQueue = [],
   onRemoveFromStockIn,
   onUpdateStockInQty,
-  onAddToCart
+  onAddToCart,
+  isRegisterManaged = false,
+  isSessionLoading = false,
+  sharedCartItems,
+  onDecrementCartItem,
+  onRemoveCartItem
 }: PosScanProps) {
   // Check if current user is authorized staff
   const isUserStaff = Boolean(currentUser && isAllowedPosRole(currentUser.role));
 
-  // Active user-based session state
+  useEffect(() => {
+    markPosPerfAnchor('scanner_mount');
+    logPosPerf('scanner_mount', {
+      context,
+      isRegisterManaged,
+      hasPropSessionId: Boolean(propSessionId)
+    });
+  }, []);
+
+  // Active user-based session state (non-blocking: video mounts immediately)
   const [activeSession, setActiveSession] = useState<PosSession | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string>(propSessionId || '');
-  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(context === 'SALE');
+  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(
+    !isRegisterManaged && !propSessionId && context === 'SALE'
+  );
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const standaloneSessionPromiseRef = useRef<Promise<PosSession | null> | null>(null);
+  const activeSessionIdRef = useRef<string>(propSessionId || '');
+  activeSessionIdRef.current = activeSessionId;
 
   // Optimistic cart state for instant (<2ms) UI feedback
   interface OptimisticCartItem {
@@ -315,21 +345,37 @@ export const PosScan = React.memo(function PosScan({
     };
   }, []);
 
-  // ================= 1. AUTOMATIC USER POS SESSION START / RESTORE =================
+  // ================= 1. SESSION OWNERSHIP & STANDALONE INIT =================
+  // Keep activeSessionId synced when owned by PosRegister or URL :sessionId param
   useEffect(() => {
+    if (propSessionId) {
+      setActiveSessionId(propSessionId);
+      setIsLoadingSession(false);
+    }
+  }, [propSessionId]);
+
+  // Only initialize a standalone session when NOT managed by PosRegister and NO propSessionId was provided
+  useEffect(() => {
+    if (isRegisterManaged || propSessionId) {
+      setIsLoadingSession(false);
+      return;
+    }
+
+    if (!isUserStaff || !currentUser?.uid) {
+      setIsLoadingSession(false);
+      return;
+    }
+
+    if (context === 'STOCK_IN') {
+      setIsLoadingSession(false);
+      return;
+    }
+
     let isMounted = true;
 
-    const initUserSession = async () => {
-      if (!isUserStaff || !currentUser?.uid) {
-        setIsLoadingSession(false);
-        return;
-      }
-
-      if (context === 'STOCK_IN' && !propSessionId) {
-        setIsLoadingSession(false);
-        return;
-      }
-
+    const initStandaloneSession = async (): Promise<PosSession | null> => {
+      const initStartMs = performance.now();
+      logPosPerf('session_init_start', { owner: 'PosScan-standalone' });
       setIsLoadingSession(true);
       setSessionError(null);
 
@@ -341,14 +387,20 @@ export const PosScan = React.memo(function PosScan({
           operatorEmail: currentUser.email
         });
 
+        logPosPerf('session_init_complete', {
+          owner: 'PosScan-standalone',
+          durationMs: performance.now() - initStartMs,
+          offlineFallback: false
+        });
+
         if (isMounted) {
           setActiveSession(session);
           setActiveSessionId(session.id || session.sessionId || '');
           setIsLoadingSession(false);
         }
+        return session;
       } catch (err: any) {
         console.warn('[PosScan] Live session initialization notice, falling back to persistent offline cache:', err);
-        // Resilient fallback to cached session or offline session
         const cached = await posOfflineStorage.getCachedActiveSession(currentUser.uid);
         const fallbackSid = cached?.sessionId || `pos-offline-${currentUser.uid.slice(0, 6)}-${Date.now()}`;
         const fallbackSession: PosSession = {
@@ -365,6 +417,11 @@ export const PosScan = React.memo(function PosScan({
           items: []
         };
         posOfflineStorage.cacheActiveSession(fallbackSession).catch(() => {});
+        logPosPerf('session_init_complete', {
+          owner: 'PosScan-standalone',
+          durationMs: performance.now() - initStartMs,
+          offlineFallback: true
+        });
         if (isMounted) {
           setActiveSession(fallbackSession);
           setActiveSessionId(fallbackSid);
@@ -374,19 +431,21 @@ export const PosScan = React.memo(function PosScan({
             text: '⚡ Offline Mode Active: Products can be scanned seamlessly.'
           });
         }
+        return fallbackSession;
       }
     };
 
-    initUserSession();
+    const p = initStandaloneSession();
+    standaloneSessionPromiseRef.current = p;
 
     return () => {
       isMounted = false;
     };
-  }, [currentUser?.uid, currentUser?.role, currentUser?.name, currentUser?.email, isUserStaff, propSessionId, context]);
+  }, [isRegisterManaged, propSessionId, currentUser?.uid, currentUser?.role, currentUser?.name, currentUser?.email, isUserStaff, context]);
 
-  // ================= 2. ACTIVE SESSION HEARTBEAT & REAL-TIME SYNC =================
+  // ================= 2. ACTIVE SESSION HEARTBEAT & REAL-TIME SYNC (STANDALONE ONLY) =================
   useEffect(() => {
-    if (!activeSessionId || activeSessionId.startsWith('pos-offline-')) return;
+    if (isRegisterManaged || !activeSessionId || activeSessionId.startsWith('pos-offline-')) return;
 
     const nowIso = new Date().toISOString();
     const sessionRef = doc(db, 'pos_sessions', activeSessionId);
@@ -436,11 +495,11 @@ export const PosScan = React.memo(function PosScan({
       clearInterval(heartbeatTimer);
       unsub();
     };
-  }, [activeSessionId, context]);
+  }, [isRegisterManaged, activeSessionId, context]);
 
-  // ================= 3. SCANS REAL-TIME LISTENER (CART ITEMS) =================
+  // ================= 3. SCANS REAL-TIME LISTENER (STANDALONE ONLY) =================
   useEffect(() => {
-    if (!activeSessionId || context === 'STOCK_IN') {
+    if (isRegisterManaged || !activeSessionId || context === 'STOCK_IN') {
       return;
     }
     const q = query(collection(db, 'pos_sessions', activeSessionId, 'scans'));
@@ -497,7 +556,7 @@ export const PosScan = React.memo(function PosScan({
     });
 
     return () => unsubscribe();
-  }, [activeSessionId, context]);
+  }, [isRegisterManaged, activeSessionId, context]);
 
   // ================= 4. REAL-TIME FAST SCAN DISPATCHER =================
   const handleScanDetected = useCallback(async (rawText: string) => {
@@ -591,52 +650,63 @@ export const PosScan = React.memo(function PosScan({
       // Do NOT call both onAddToCart AND addProductToSession to prevent double-inserting records.
       if (onAddToCart) {
         onAddToCart(product, qtyToAdd);
-      } else if (activeSessionId) {
-        // Standalone mode without parent handler
-        addProductToSession(activeSessionId, product.id, currentCartQty, qtyToAdd)
-          .then((res: any) => {
-            if (res.isOffline) {
+      } else {
+        let targetSid = activeSessionIdRef.current;
+        if (!targetSid && standaloneSessionPromiseRef.current) {
+          const resolved = await standaloneSessionPromiseRef.current;
+          targetSid = resolved?.id || resolved?.sessionId || activeSessionIdRef.current;
+        }
+        if (targetSid) {
+          // Standalone mode without parent handler
+          addProductToSession(targetSid, product.id, currentCartQty, qtyToAdd)
+            .then((res: any) => {
+              if (res.isOffline) {
+                setScanStatusMsg({
+                  type: 'success',
+                  text: `✓ Added "${product.name}" (Stored in offline queue - will auto-sync)`
+                });
+              } else if (!res.success) {
+                // Rollback only on actual business error (out of stock, invalid)
+                setOptimisticCart((prev) => {
+                  const item = prev.find((it) => it.product.id === product.id);
+                  if (!item) return prev;
+                  if (item.quantity <= qtyToAdd) {
+                    return prev.filter((it) => it.product.id !== product.id);
+                  }
+                  return prev.map((it) =>
+                    it.product.id === product.id ? { ...it, quantity: it.quantity - qtyToAdd } : it
+                  );
+                });
+                if (soundEnabled) playErrorBeep();
+                setScanStatusMsg({
+                  type: 'error',
+                  text: res.message
+                });
+              }
+            })
+            .catch((err) => {
+              console.warn('[PosScan] Background session sync notice, saving to offline storage:', err);
+              posOfflineStorage.recordOfflineScan({
+                sessionId: targetSid,
+                productId: product.id,
+                productName: product.name,
+                barcode: product.barcode,
+                price: product.discountPrice || product.price,
+                quantity: qtyToAdd
+              }).catch(() => {});
               setScanStatusMsg({
                 type: 'success',
-                text: `✓ Added "${product.name}" (Stored in offline queue - will auto-sync)`
+                text: `✓ Added "${product.name}" (Stored in offline queue)`
               });
-            } else if (!res.success) {
-              // Rollback only on actual business error (out of stock, invalid)
-              setOptimisticCart((prev) => {
-                const item = prev.find((it) => it.product.id === product.id);
-                if (!item) return prev;
-                if (item.quantity <= qtyToAdd) {
-                  return prev.filter((it) => it.product.id !== product.id);
-                }
-                return prev.map((it) =>
-                  it.product.id === product.id ? { ...it, quantity: it.quantity - qtyToAdd } : it
-                );
-              });
-              if (soundEnabled) playErrorBeep();
-              setScanStatusMsg({
-                type: 'error',
-                text: res.message
-              });
-            }
-          })
-          .catch((err) => {
-            console.warn('[PosScan] Background session sync notice, saving to offline storage:', err);
-            posOfflineStorage.recordOfflineScan({
-              sessionId: activeSessionId,
-              productId: product.id,
-              productName: product.name,
-              barcode: product.barcode,
-              price: product.discountPrice || product.price,
-              quantity: qtyToAdd
-            }).catch(() => {});
-            setScanStatusMsg({
-              type: 'success',
-              text: `✓ Added "${product.name}" (Stored in offline queue)`
             });
-          });
+        }
       }
     }
-  }, [barcodeIndex, context, soundEnabled, quickViewEnabled, onAddToStockIn, onAddToCart, activeSessionId, scanBatchQty]);
+  }, [barcodeIndex, context, soundEnabled, quickViewEnabled, onAddToStockIn, onAddToCart, scanBatchQty]);
+
+  // Ref keeps latest handleScanDetected accessible without re-initializing camera or key listeners
+  const handleScanDetectedRef = useRef(handleScanDetected);
+  handleScanDetectedRef.current = handleScanDetected;
 
   // Physical USB/Bluetooth Barcode Scanner Keyboard-wedge Listener without triggering mobile virtual keyboard
   useEffect(() => {
@@ -661,7 +731,7 @@ export const PosScan = React.memo(function PosScan({
         const code = keyBuffer.trim();
         if (code.length >= 3) {
           e.preventDefault();
-          handleScanDetected(code);
+          handleScanDetectedRef.current(code);
         }
         keyBuffer = '';
       } else if (e.key.length === 1) {
@@ -671,11 +741,13 @@ export const PosScan = React.memo(function PosScan({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleScanDetected]);
+  }, []);
 
-  // ================= 5. CAMERA CONTROLLER LIFECYCLE =================
+  // ================= 5. DECOUPLED CAMERA CONTROLLER LIFECYCLE =================
+  // Video element mounts immediately; camera only starts/restarts on active toggle, camera flip, auth, or session error.
+  const hasSessionError = Boolean(sessionError);
   useEffect(() => {
-    if (!isCameraActive) {
+    if (!isCameraActive || !isUserStaff || hasSessionError) {
       if (scannerControllerRef.current) {
         scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
@@ -683,26 +755,29 @@ export const PosScan = React.memo(function PosScan({
       return;
     }
 
-    let active = true;
+    let isCancelled = false;
 
     const initScanner = async () => {
       setCameraError(null);
+      setPosCameraZoom(1.0);
       if (scannerControllerRef.current) {
         await scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
       }
 
-      if (!videoRef.current || !active) return;
+      if (!videoRef.current || isCancelled) return;
 
       try {
         const controller = await startUnifiedCameraScanner({
           videoElement: videoRef.current,
           useFrontCamera,
           onScanSuccess: (rawCode) => {
-            if (active) handleScanDetected(rawCode);
+            if (!isCancelled) {
+              handleScanDetectedRef.current(rawCode);
+            }
           },
           onError: (errMsg) => {
-            if (active) {
+            if (!isCancelled) {
               setCameraError(errMsg);
               setIsCameraActive(false);
             }
@@ -710,32 +785,30 @@ export const PosScan = React.memo(function PosScan({
           debounceMs: 1500
         });
 
-        if (active) {
-          scannerControllerRef.current = controller;
+        if (isCancelled) {
+          await controller.stop();
         } else {
-          controller.stop();
+          scannerControllerRef.current = controller;
         }
       } catch (err: any) {
         console.error("Camera startup error:", err);
-        if (active) {
+        if (!isCancelled) {
           setCameraError(err.message || "Camera access blocked or unavailable.");
           setIsCameraActive(false);
         }
       }
     };
 
-    // Small delay to ensure React ref has attached to video element
-    const timer = setTimeout(initScanner, 60);
+    initScanner();
 
     return () => {
-      active = false;
-      clearTimeout(timer);
+      isCancelled = true;
       if (scannerControllerRef.current) {
         scannerControllerRef.current.stop();
         scannerControllerRef.current = null;
       }
     };
-  }, [isCameraActive, useFrontCamera, handleScanDetected]);
+  }, [isCameraActive, useFrontCamera, isUserStaff, hasSessionError]);
 
   const stopScanner = () => {
     if (scannerControllerRef.current) {
@@ -836,13 +909,21 @@ export const PosScan = React.memo(function PosScan({
     }
   };
 
+  // Active cart items (shared from PosRegister when embedded, local optimistic state when standalone)
+  const displayedCartItems = useMemo(() => {
+    if (isRegisterManaged && sharedCartItems) {
+      return sharedCartItems;
+    }
+    return optimisticCart;
+  }, [isRegisterManaged, sharedCartItems, optimisticCart]);
+
   // Total cart count
   const totalCount = useMemo(() => {
     if (context === 'STOCK_IN') {
       return stockInQueue.reduce((acc, it) => acc + (it.quantity || 0), 0);
     }
-    return optimisticCart.reduce((acc, it) => acc + it.quantity, 0);
-  }, [context, stockInQueue, optimisticCart]);
+    return displayedCartItems.reduce((acc, it) => acc + it.quantity, 0);
+  }, [context, stockInQueue, displayedCartItems]);
 
   // Cart quantity adjustment inside scanner drawer
   const handleIncrement = async (product: Product) => {
@@ -859,6 +940,15 @@ export const PosScan = React.memo(function PosScan({
         onUpdateStockInQty(item.product.id, item.quantity - 1);
       } else if (onRemoveFromStockIn) {
         onRemoveFromStockIn(item.product.id);
+      }
+      return;
+    }
+
+    if (isRegisterManaged && onDecrementCartItem) {
+      if (item.quantity <= 1 && onRemoveCartItem) {
+        onRemoveCartItem(item.product.id, item.docIds);
+      } else {
+        onDecrementCartItem(item.product.id, item.docIds);
       }
       return;
     }
@@ -884,6 +974,11 @@ export const PosScan = React.memo(function PosScan({
   const handleRemoveItem = async (item: OptimisticCartItem) => {
     if (context === 'STOCK_IN') {
       if (onRemoveFromStockIn) onRemoveFromStockIn(item.product.id);
+      return;
+    }
+
+    if (isRegisterManaged && onRemoveCartItem) {
+      onRemoveCartItem(item.product.id, item.docIds);
       return;
     }
 
@@ -971,22 +1066,7 @@ export const PosScan = React.memo(function PosScan({
     );
   }
 
-  // ================= RENDER B: LOADING SESSION =================
-  if (isLoadingSession) {
-    return (
-      <div className="max-w-md mx-auto min-h-[60vh] flex flex-col items-center justify-center space-y-4 p-6 text-center">
-        <div className="w-14 h-14 bg-pink-50 border border-pink-200 text-[#E91E8C] rounded-full flex items-center justify-center animate-bounce shadow-md shadow-pink-100">
-          <Loader2 className="animate-spin" size={26} />
-        </div>
-        <div className="space-y-1">
-          <h3 className="text-base font-extrabold text-gray-900">Starting POS Session</h3>
-          <p className="text-xs text-pink-600 font-medium font-mono animate-pulse">
-            Connecting session for {currentUser?.name || 'Staff'}...
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // ================= RENDER B: NON-BLOCKING SESSION (VIDEO MOUNTS IMMEDIATELY) =================
 
   // ================= RENDER C: SESSION ERROR =================
   if (sessionError) {
@@ -1051,7 +1131,11 @@ export const PosScan = React.memo(function PosScan({
               </span>
             </span>
             <p className="text-[10px] text-gray-500 font-mono mt-0.5">
-              {activeSessionId ? `Session: #${activeSessionId.slice(-6).toUpperCase()}` : 'Ready to scan'}
+              {activeSessionId
+                ? `Session: #${activeSessionId.slice(-6).toUpperCase()}`
+                : (isLoadingSession || isSessionLoading)
+                  ? 'Connecting session...'
+                  : 'Ready to scan'}
             </p>
           </div>
 
@@ -1455,10 +1539,10 @@ export const PosScan = React.memo(function PosScan({
                   ))
                 )
               ) : (
-                optimisticCart.length === 0 ? (
+                displayedCartItems.length === 0 ? (
                   <p className="text-center text-gray-400 text-xs py-4">No cart items yet.</p>
                 ) : (
-                  optimisticCart.map((item) => (
+                  displayedCartItems.map((item) => (
                     <div key={item.product.id} className="flex items-center justify-between p-2.5 bg-pink-50/40 rounded-xl border border-pink-100 text-xs">
                       <div className="min-w-0 flex-1">
                         <h5 className="font-bold text-gray-900 truncate">{item.product.name}</h5>

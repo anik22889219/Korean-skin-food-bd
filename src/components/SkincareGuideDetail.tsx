@@ -6,6 +6,7 @@ import { isSameBrand } from '../data/brands';
 import { ProductCard } from './ProductCard';
 import { SeoHead } from './SeoHead';
 import { buildGuideSeo } from '../services/seoService';
+import { pageSeoService } from '../services/pageSeoService';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { GuideDetailPageThemeSettings } from '../types/theme';
 import { Clock, Calendar, User, ChevronRight, HelpCircle, ChevronDown, BookOpen, AlertCircle, Sparkles, Share2 } from 'lucide-react';
@@ -19,12 +20,26 @@ export const SkincareGuideDetail: React.FC = () => {
   const [language, setLanguage] = useState<'en' | 'bn'>('en');
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [pageTheme, setPageTheme] = useState<GuideDetailPageThemeSettings>(DEFAULT_PAGES_THEME.guideDetail);
+  const [seoPagesTick, setSeoPagesTick] = useState(0);
 
   useEffect(() => {
-    return themeService.subscribePages((p) => {
+    const unsubTheme = themeService.subscribePages((p) => {
       if (p?.guideDetail) setPageTheme(p.guideDetail);
     });
+    const unsubSeo = pageSeoService.subscribe(() => {
+      setSeoPagesTick((t) => t + 1);
+    });
+    return () => {
+      unsubTheme();
+      unsubSeo();
+    };
   }, []);
+
+  const hasCustomPageFaqs = useMemo(() => {
+    void seoPagesTick;
+    const override = pageSeoService.getForPath(`/guide/${slug}`);
+    return Boolean(override && override.showFaqsOnPage !== false && Array.isArray(override.faqs) && override.faqs.length > 0);
+  }, [slug, seoPagesTick]);
 
   // SEO metadata
   const seoMeta = useMemo(() => {
@@ -203,8 +218,8 @@ export const SkincareGuideDetail: React.FC = () => {
         )}
       </section>
 
-      {/* Frequently Asked Questions */}
-      {pageTheme.showFaqs && guide.faqs && guide.faqs.length > 0 && (
+      {/* Frequently Asked Questions (suppressed if custom Page SEO FAQs are rendered by layout) */}
+      {!hasCustomPageFaqs && pageTheme.showFaqs && guide.faqs && guide.faqs.length > 0 && (
         <section className="bg-white border border-pink-100 rounded-[32px] p-6 sm:p-10 space-y-6 shadow-sm">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">

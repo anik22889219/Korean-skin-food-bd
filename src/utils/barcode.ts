@@ -1,7 +1,8 @@
 import { Product } from '../types';
 import { authFetch } from '../services/apiClient';
-import { BrowserMultiFormatReader, BarcodeFormat, IScannerControls } from '@zxing/browser';
-import { DecodeHintType } from '@zxing/library';
+import type { IScannerControls } from '@zxing/browser';
+import type { DecodeHintType } from '@zxing/library';
+import { getPosPerfElapsed, logPosPerf, markPosPerfAnchor } from './posPerf';
 
 export interface BarcodeDebugInfo {
   rawValue: string;
@@ -32,6 +33,9 @@ export interface ScannerStartOptions {
   onScanSuccess: (scannedText: string) => void;
   onError?: (errorMessage: string) => void;
   debounceMs?: number;
+  idealWidth?: number;
+  idealHeight?: number;
+  scanIntervalMs?: number;
 }
 
 export interface ScannerController {
@@ -337,10 +341,46 @@ export function auditProductsBarcodes(products: Product[]): BarcodeAuditReport {
   };
 }
 
+const SUPPORTED_NATIVE_BARCODE_FORMATS = [
+  'ean_13',
+  'ean_8',
+  'upc_a',
+  'upc_e',
+  'code_128',
+  'qr_code'
+] as const;
+
+let zxingModulePromise: Promise<{
+  BrowserMultiFormatReader: typeof import('@zxing/browser').BrowserMultiFormatReader;
+  BarcodeFormat: typeof import('@zxing/browser').BarcodeFormat;
+  DecodeHintType: typeof import('@zxing/library').DecodeHintType;
+}> | null = null;
+
 /**
- * Helper to create ZXing MultiFormat hints focusing on 1D barcodes and 2D QR codes
+ * Lazy-load ZXing only when native BarcodeDetector is unavailable or photo fallback is invoked.
  */
-function createZXingHints(): Map<DecodeHintType, any> {
+async function loadZXingModules() {
+  if (!zxingModulePromise) {
+    zxingModulePromise = Promise.all([
+      import('@zxing/browser'),
+      import('@zxing/library')
+    ]).then(([browserMod, libMod]) => ({
+      BrowserMultiFormatReader: browserMod.BrowserMultiFormatReader,
+      BarcodeFormat: browserMod.BarcodeFormat,
+      DecodeHintType: libMod.DecodeHintType
+    }));
+  }
+  return zxingModulePromise;
+}
+
+/**
+ * Helper to create ZXing MultiFormat hints restricted to inventory-supported retail 1D & QR formats.
+ */
+function createZXingHints(
+  BarcodeFormat: typeof import('@zxing/browser').BarcodeFormat,
+  DecodeHintType: typeof import('@zxing/library').DecodeHintType,
+  options?: { tryHarder?: boolean }
+): Map<DecodeHintType, any> {
   const hints = new Map<DecodeHintType, any>();
   const possibleFormats = [
     BarcodeFormat.EAN_13,
@@ -348,19 +388,17 @@ function createZXingHints(): Map<DecodeHintType, any> {
     BarcodeFormat.UPC_A,
     BarcodeFormat.UPC_E,
     BarcodeFormat.CODE_128,
-    BarcodeFormat.CODE_39,
     BarcodeFormat.QR_CODE,
-    BarcodeFormat.DATA_MATRIX,
-    BarcodeFormat.ITF,
-    BarcodeFormat.CODABAR,
   ];
   hints.set(DecodeHintType.POSSIBLE_FORMATS, possibleFormats);
-  hints.set(DecodeHintType.TRY_HARDER, true);
+  if (options?.tryHarder) {
+    hints.set(DecodeHintType.TRY_HARDER, true);
+  }
   return hints;
 }
 
 /**
- * Photo image file barcode scanner powered by ZXing and native BarcodeDetector.
+ * Photo image file barcode scanner powered by native BarcodeDetector and lazy-loaded ZXing fallback.
  */
 export async function scanBarcodeFromImageFile(file: File): Promise<string | null> {
   if (!file) return null;
@@ -369,7 +407,7 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
   if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
     try {
       const barcodeDetector = new (window as any).BarcodeDetector({
-        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
+        formats: [...SUPPORTED_NATIVE_BARCODE_FORMATS]
       });
       const img = new Image();
       const objectUrl = URL.createObjectURL(file);
@@ -390,9 +428,10 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
     }
   }
 
-  // 2. ZXing BrowserMultiFormatReader decode via Blob Object URL
+  // 2. Lazy-loaded ZXing BrowserMultiFormatReader decode via Blob Object URL
   try {
-    const hints = createZXingHints();
+    const { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } = await loadZXingModules();
+    const hints = createZXingHints(BarcodeFormat, DecodeHintType, { tryHarder: true });
     const reader = new BrowserMultiFormatReader(hints);
     const objectUrl = URL.createObjectURL(file);
     const result = await reader.decodeFromImageUrl(objectUrl);
@@ -406,9 +445,10 @@ export async function scanBarcodeFromImageFile(file: File): Promise<string | nul
     console.warn("ZXing decodeFromImageUrl error:", err);
   }
 
-  // 3. Fallback: Draw on high-contrast canvas & decode via ZXing
+  // 3. Fallback: Draw on high-contrast canvas & decode via lazy-loaded ZXing
   try {
-    const hints = createZXingHints();
+    const { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } = await loadZXingModules();
+    const hints = createZXingHints(BarcodeFormat, DecodeHintType, { tryHarder: true });
     const reader = new BrowserMultiFormatReader(hints);
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
@@ -594,7 +634,7 @@ export async function scanBarcodeFromLiveVideoSnapshot(target: string | HTMLVide
     if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
       try {
         const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
+          formats: [...SUPPORTED_NATIVE_BARCODE_FORMATS]
         });
         const detected = await barcodeDetector.detect(videoEl);
         if (detected && detected.length > 0 && detected[0].rawValue) {
@@ -607,7 +647,7 @@ export async function scanBarcodeFromLiveVideoSnapshot(target: string | HTMLVide
       }
     }
 
-    // 2. Draw canvas frame at full resolution & decode via scanBarcodeFromImageFile
+    // 2. Draw canvas frame at current video resolution & decode via scanBarcodeFromImageFile
     const canvas = document.createElement("canvas");
     canvas.width = videoWidth;
     canvas.height = videoHeight;
@@ -630,13 +670,23 @@ export async function scanBarcodeFromLiveVideoSnapshot(target: string | HTMLVide
 /**
  * Start Unified Real-time Camera Barcode Scanner.
  * - Supports direct videoElement ref or containerId lookup.
- * - Mobile-friendly camera resolution (1280x720).
- * - SINGLE-ENGINE execution: Uses native BarcodeDetector throttled to ~120ms with overlapping-detection guard.
- *   Only starts ZXing if native BarcodeDetector is completely unavailable. Never runs both simultaneously.
- * - Responsive 800ms duplicate debounce window with instant reaction to different barcodes.
+ * - Fast adaptive 640x480 resolution with 1.0x initial zoom & continuous autofocus when supported.
+ * - SINGLE-ENGINE execution: Prefers native BarcodeDetector; lazy-loads ZXing only as fallback.
+ * - Controlled scanning interval (~150ms) with strict in-flight decode guard to prevent CPU overload.
+ * - Responsive duplicate debounce window with instant reaction to different barcodes.
  */
 export async function startUnifiedCameraScanner(options: ScannerStartOptions): Promise<ScannerController> {
-  const { containerId, videoElement, useFrontCamera = false, onScanSuccess, onError, debounceMs = 800 } = options;
+  const {
+    containerId,
+    videoElement,
+    useFrontCamera = false,
+    onScanSuccess,
+    onError,
+    debounceMs = 800,
+    idealWidth = 640,
+    idealHeight = 480,
+    scanIntervalMs = 150
+  } = options;
 
   let videoEl: HTMLVideoElement;
   let createdVideoElement = false;
@@ -676,33 +726,34 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
 
   let mediaStream: MediaStream | null = null;
   let isStopped = false;
-  let animationFrameId: number | null = null;
+  let scanTimeoutId: number | null = null;
   let nativeDetector: any = null;
   let lastScannedCode = '';
   let lastScanTime = 0;
+  let firstDetectionLogged = false;
+  let activeEngine: 'native' | 'zxing-lazy' = 'native';
 
-  // Initialize Native BarcodeDetector if available
-  if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-    try {
-      nativeDetector = new (window as any).BarcodeDetector({
-        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix', 'itf', 'codabar']
-      });
-    } catch (e) {
-      console.warn("BarcodeDetector init note:", e);
-      nativeDetector = null;
-    }
-  }
+  const zxingControls: IScannerControls | null = null;
 
-  let zxingControls: IScannerControls | null = null;
-
-  // Request Camera Stream with mobile-optimized resolution (1280x720)
+  // Request Camera Stream with fast adaptive resolution (640x480 default)
   try {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      throw new Error('Camera API is unavailable in this browser context.');
+    }
+
     const targetFacingMode = useFrontCamera ? "user" : "environment";
     const videoConstraints: MediaTrackConstraints = {
       facingMode: { ideal: targetFacingMode },
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
+      width: { ideal: idealWidth },
+      height: { ideal: idealHeight }
     };
+
+    const gumStartMs = markPosPerfAnchor('get_user_media_start');
+    logPosPerf('get_user_media_start', {
+      facingMode: targetFacingMode,
+      idealWidth,
+      idealHeight
+    });
 
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
@@ -710,6 +761,11 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
       console.warn("Target camera getUserMedia fallback to basic facingMode:", firstErr);
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: targetFacingMode }, audio: false });
     }
+
+    logPosPerf('get_user_media_complete', {
+      durationMs: performance.now() - gumStartMs,
+      aborted: isStopped
+    });
 
     if (isStopped) {
       if (mediaStream) {
@@ -724,20 +780,63 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
 
     videoEl.srcObject = mediaStream;
 
-    // Handle loadedmetadata and safe direct play for cross-browser mobile reliability
-    videoEl.onloadedmetadata = () => {
-      videoEl.play().catch(e => console.warn("Video play on loadedmetadata:", e));
-    };
-    await videoEl.play().catch(e => console.warn("Initial video play warning:", e));
-
-    // Non-blocking auto-focus / zoom optimization
-    setTimeout(() => {
-      if (!isStopped && videoEl) {
-        applyCameraTrackConstraints(videoEl, { zoom: 1.5, triggerFocus: true });
+    // Wait for playback readiness safely
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        videoEl.removeEventListener('loadedmetadata', onReady);
+        videoEl.removeEventListener('canplay', onReady);
+        resolve();
+      };
+      const onReady = () => {
+        videoEl.play().catch(e => console.warn("Video play warning:", e)).finally(done);
+      };
+      if (videoEl.readyState >= 2) {
+        onReady();
+      } else {
+        videoEl.addEventListener('loadedmetadata', onReady, { once: true });
+        videoEl.addEventListener('canplay', onReady, { once: true });
+        videoEl.play().catch(() => {});
+        // Safety fallback so UI never hangs if metadata event already fired
+        window.setTimeout(done, 350);
       }
-    }, 400);
+    });
 
-    // Smart debounced scanner result processor (0ms debounce for different codes, 800ms for duplicate)
+    if (isStopped) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      videoEl.srcObject = null;
+      return {
+        stop: async () => {},
+        applyZoom: async () => false,
+        triggerRefocus: async () => false
+      };
+    }
+
+    logPosPerf('video_playback_ready', {
+      sinceGumMs: performance.now() - gumStartMs,
+      sinceScannerMountMs: getPosPerfElapsed('scanner_mount'),
+      videoWidth: videoEl.videoWidth || 0,
+      videoHeight: videoEl.videoHeight || 0
+    });
+
+    // Apply continuous autofocus only if supported (keeps initial zoom at 1.0x)
+    const videoTrack = mediaStream.getVideoTracks()[0];
+    if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
+      try {
+        const caps = videoTrack.getCapabilities() as any;
+        if (Array.isArray(caps?.focusMode) && caps.focusMode.includes('continuous')) {
+          videoTrack.applyConstraints({
+            advanced: [{ focusMode: 'continuous' }]
+          } as any).catch(() => {});
+        }
+      } catch {
+        // ignore unsupported focus constraint
+      }
+    }
+
+    // Smart debounced scanner result processor (0ms debounce for different codes, debounceMs for duplicate)
     const processScannedResult = (rawText: string) => {
       if (!rawText || isStopped) return;
       const extracted = extractCodeFromScanText(rawText);
@@ -749,56 +848,131 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
         return; // Duplicate code within debounce window
       }
 
+      if (!firstDetectionLogged) {
+        firstDetectionLogged = true;
+        logPosPerf('first_barcode_detected', {
+          engine: activeEngine,
+          sinceScannerMountMs: getPosPerfElapsed('scanner_mount'),
+          sinceGumStartMs: performance.now() - gumStartMs
+        });
+      }
+
       lastScannedCode = norm;
       lastScanTime = now;
       onScanSuccess(norm);
     };
 
-    // Engine Selection: ONLY ONE ENGINE RUNS CONTINUOUSLY
-    if (nativeDetector) {
-      // 1. Native BarcodeDetector engine throttled to ~120ms with overlapping-detect guard
-      let detecting = false;
-      let lastDetection = 0;
-
-      const scanNativeFrame = async () => {
-        if (isStopped) return;
-        const now = performance.now();
-
-        if (now - lastDetection >= 120 && !detecting && videoEl.readyState >= 2) {
-          detecting = true;
-          lastDetection = now;
-
-          try {
-            const detected = await nativeDetector.detect(videoEl);
-            if (detected && detected.length > 0 && detected[0].rawValue) {
-              processScannedResult(detected[0].rawValue);
+    // Initialize Native BarcodeDetector if available and supports at least one target format
+    const decoderInitStartMs = performance.now();
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+        let formatsToUse: string[] = [...SUPPORTED_NATIVE_BARCODE_FORMATS];
+        if (typeof BarcodeDetectorCtor.getSupportedFormats === 'function') {
+          const supported = await BarcodeDetectorCtor.getSupportedFormats();
+          if (Array.isArray(supported)) {
+            const intersection = SUPPORTED_NATIVE_BARCODE_FORMATS.filter(f => supported.includes(f));
+            if (intersection.length > 0) {
+              formatsToUse = intersection;
             }
-          } catch (e) {
-            // ignore frame read error
-          } finally {
-            detecting = false;
           }
         }
+        nativeDetector = new BarcodeDetectorCtor({ formats: formatsToUse });
+      } catch (e) {
+        console.warn("BarcodeDetector init note:", e);
+        nativeDetector = null;
+      }
+    }
 
+    if (isStopped) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      videoEl.srcObject = null;
+      return {
+        stop: async () => {},
+        applyZoom: async () => false,
+        triggerRefocus: async () => false
+      };
+    }
+
+    // Engine Selection: ONLY ONE ENGINE RUNS CONTINUOUSLY
+    if (nativeDetector) {
+      activeEngine = 'native';
+      logPosPerf('barcode_decoder_init', {
+        engine: 'native',
+        durationMs: performance.now() - decoderInitStartMs,
+        formatsCount: SUPPORTED_NATIVE_BARCODE_FORMATS.length
+      });
+
+      let isDecoding = false;
+      const scanNativeTick = async () => {
+        if (isStopped) return;
+        if (!isDecoding && videoEl.readyState >= 2 && !videoEl.paused) {
+          isDecoding = true;
+          try {
+            const detected = await nativeDetector.detect(videoEl);
+            if (!isStopped && detected && detected.length > 0 && detected[0].rawValue) {
+              processScannedResult(detected[0].rawValue);
+            }
+          } catch {
+            // ignore transient frame read error
+          } finally {
+            isDecoding = false;
+          }
+        }
         if (!isStopped) {
-          animationFrameId = requestAnimationFrame(scanNativeFrame);
+          scanTimeoutId = window.setTimeout(scanNativeTick, scanIntervalMs);
         }
       };
 
-      animationFrameId = requestAnimationFrame(scanNativeFrame);
+      scanTimeoutId = window.setTimeout(scanNativeTick, 0);
     } else {
-      // 2. ZXing BrowserMultiFormatReader engine (ONLY when native BarcodeDetector is unsupported)
+      // Lazy-load ZXing ONLY when native BarcodeDetector is unavailable
+      activeEngine = 'zxing-lazy';
       try {
-        const hints = createZXingHints();
+        const { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } = await loadZXingModules();
+        if (isStopped) {
+          mediaStream.getTracks().forEach(t => t.stop());
+          videoEl.srcObject = null;
+          return {
+            stop: async () => {},
+            applyZoom: async () => false,
+            triggerRefocus: async () => false
+          };
+        }
+
+        const hints = createZXingHints(BarcodeFormat, DecodeHintType, { tryHarder: false });
         const reader = new BrowserMultiFormatReader(hints);
-        zxingControls = await reader.decodeFromVideoElement(videoEl, (result, error) => {
-          if (isStopped) return;
-          if (result && result.getText()) {
-            processScannedResult(result.getText());
-          }
+
+        logPosPerf('barcode_decoder_init', {
+          engine: 'zxing-lazy',
+          durationMs: performance.now() - decoderInitStartMs,
+          formatsCount: 6
         });
+
+        let isDecoding = false;
+        const scanZxingTick = () => {
+          if (isStopped) return;
+          if (!isDecoding && videoEl.readyState >= 2 && !videoEl.paused) {
+            isDecoding = true;
+            try {
+              const result = reader.decode(videoEl);
+              if (!isStopped && result && result.getText()) {
+                processScannedResult(result.getText());
+              }
+            } catch {
+              // Normal NotFoundException when frame has no barcode
+            } finally {
+              isDecoding = false;
+            }
+          }
+          if (!isStopped) {
+            scanTimeoutId = window.setTimeout(scanZxingTick, scanIntervalMs);
+          }
+        };
+
+        scanTimeoutId = window.setTimeout(scanZxingTick, 0);
       } catch (e) {
-        console.warn("ZXing decodeFromVideoElement init note:", e);
+        console.warn("ZXing lazy init note:", e);
       }
     }
 
@@ -814,6 +988,8 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
       errMsg = "Camera is currently in use by another application or tab. Please close other camera apps and try again.";
     } else if (err.name === 'OverconstrainedError') {
       errMsg = "Requested camera configuration is not supported by your device camera.";
+    } else if (err.message) {
+      errMsg = err.message;
     }
 
     if (onError) {
@@ -827,25 +1003,24 @@ export async function startUnifiedCameraScanner(options: ScannerStartOptions): P
     if (isStopped) return;
     isStopped = true;
 
-    if (animationFrameId !== null) {
-      cancelAnimationFrame(animationFrameId);
-      animationFrameId = null;
+    if (scanTimeoutId !== null) {
+      clearTimeout(scanTimeoutId);
+      scanTimeoutId = null;
     }
 
     if (zxingControls) {
       try {
-        zxingControls.stop();
-      } catch (e) {
+        (zxingControls as IScannerControls).stop();
+      } catch {
         // ignore zxing stop error
       }
-      zxingControls = null;
     }
 
     if (mediaStream) {
       mediaStream.getTracks().forEach(track => {
         try {
           track.stop();
-        } catch (e) {
+        } catch {
           // quiet fail
         }
       });

@@ -6,6 +6,7 @@ import { getCanonicalBrandName, isSameBrand } from '../data/brands';
 import { ProductCard } from './ProductCard';
 import { SeoHead } from './SeoHead';
 import { buildBrandSeo } from '../services/seoService';
+import { pageSeoService } from '../services/pageSeoService';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { BrandLandingPageThemeSettings } from '../types/theme';
 import { ShieldCheck, ChevronRight, HelpCircle, ChevronDown, Sparkles, Package, MapPin } from 'lucide-react';
@@ -16,13 +17,26 @@ export const BrandLandingPage: React.FC = () => {
   const { data: allProducts = [], isLoading } = useProducts();
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [brandTheme, setBrandTheme] = useState<BrandLandingPageThemeSettings>(() => themeService.getPagesTheme().brandLanding || DEFAULT_PAGES_THEME.brandLanding);
+  const [seoPagesTick, setSeoPagesTick] = useState(0);
 
   useEffect(() => {
-    const unsub = themeService.subscribePages((pt) => {
+    const unsubTheme = themeService.subscribePages((pt) => {
       setBrandTheme(pt.brandLanding || DEFAULT_PAGES_THEME.brandLanding);
     });
-    return () => unsub();
+    const unsubSeo = pageSeoService.subscribe(() => {
+      setSeoPagesTick((t) => t + 1);
+    });
+    return () => {
+      unsubTheme();
+      unsubSeo();
+    };
   }, []);
+
+  const hasCustomPageFaqs = useMemo(() => {
+    void seoPagesTick;
+    const override = pageSeoService.getForPath(`/brand/${brandSlug}`);
+    return Boolean(override && override.showFaqsOnPage !== false && Array.isArray(override.faqs) && override.faqs.length > 0);
+  }, [brandSlug, seoPagesTick]);
 
   // Match brand profile or compose dynamic fallback
   const brandProfile: BrandSeoProfile = useMemo(() => {
@@ -173,8 +187,8 @@ export const BrandLandingPage: React.FC = () => {
         )}
       </section>
 
-      {/* Brand FAQs Section */}
-      {brandTheme.showFaqs && brandProfile.faqs && brandProfile.faqs.length > 0 && (
+      {/* Brand FAQs Section (suppressed if custom Page SEO FAQs are rendered by layout) */}
+      {!hasCustomPageFaqs && brandTheme.showFaqs && brandProfile.faqs && brandProfile.faqs.length > 0 && (
         <section className="bg-white border border-pink-100 rounded-[32px] p-6 sm:p-10 space-y-6 shadow-sm">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">

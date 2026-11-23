@@ -19,6 +19,8 @@ import {
 } from '../hooks/queries/taxonomies';
 import { useProducts } from '../hooks/queries/products';
 import { generateTaxonomySlug } from '../services/taxonomyService';
+import { getConcernDefaultEnrichment } from '../data/skinConcerns';
+import { INGREDIENT_LIBRARY, getIngredientDefaultEnrichment } from '../data/ingredientLibrary';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { TaxonomyProductAssignmentModal } from './TaxonomyProductAssignmentModal';
 
@@ -119,6 +121,23 @@ export const AdminTaxonomyManagement: React.FC = () => {
   const [formIsActive, setFormIsActive] = useState(true);
   const [formIsFeatured, setFormIsFeatured] = useState(false);
   const [formIsPopular, setFormIsPopular] = useState(false);
+  const [formKeyFocusIngredients, setFormKeyFocusIngredients] = useState<string[]>([]);
+  const [ingredientDraftInput, setIngredientDraftInput] = useState('');
+  const [formRoutineTips, setFormRoutineTips] = useState<string[]>(['']);
+  const [formRoutineTipsBN, setFormRoutineTipsBN] = useState<string[]>([]);
+  const [formMatchKeywordsText, setFormMatchKeywordsText] = useState('');
+  const [showBnTipsEditor, setShowBnTipsEditor] = useState(false);
+  // Key Ingredient library modal fields
+  const [formKoreanName, setFormKoreanName] = useState('');
+  const [formShortRole, setFormShortRole] = useState('');
+  const [formShortRoleBN, setFormShortRoleBN] = useState('');
+  const [formBestForSkinTypes, setFormBestForSkinTypes] = useState<string[]>([]);
+  const [skinTypeDraftInput, setSkinTypeDraftInput] = useState('');
+  const [formPairsWellWith, setFormPairsWellWith] = useState<string[]>([]);
+  const [pairDraftInput, setPairDraftInput] = useState('');
+  const [formLayeringCautions, setFormLayeringCautions] = useState<string[]>(['']);
+  const [formLayeringCautionsBN, setFormLayeringCautionsBN] = useState<string[]>([]);
+  const [showBnCautionsEditor, setShowBnCautionsEditor] = useState(false);
   const [isCustomSlug, setIsCustomSlug] = useState(false);
   const [alertBanner, setAlertBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
@@ -286,6 +305,33 @@ export const AdminTaxonomyManagement: React.FC = () => {
     return { total, active, missingBN, totalLinkedProds };
   }, [tabItems, productUsageMap]);
 
+  // Suggested ingredient labels for Skin Concerns & Pairs Well With quick-picker
+  const suggestedIngredientOptions = useMemo(() => {
+    const names = new Set<string>();
+    allTaxonomies
+      .filter((t) => t.type === 'ingredient' && t.isActive !== false)
+      .forEach((t) => {
+        if (t.name) names.add(t.name.replace(/\s*\([^)]*\)\s*/g, '').trim() || t.name);
+      });
+    INGREDIENT_LIBRARY.forEach((ing) => {
+      names.add(ing.name.replace(/\s*\([^)]*\)\s*/g, '').trim() || ing.name);
+    });
+    ['Salicylic Acid (BHA)', 'Niacinamide', 'Centella Asiatica', 'Hyaluronic Acid', 'Snail Mucin', 'Rice Extract', 'Panthenol', 'Ceramides', 'Heartleaf', 'Vitamin C', 'Tranexamic Acid', 'Mugwort', 'Retinol & Retinal', 'Peptides', 'Tea Tree', 'Sunscreen'].forEach((n) => names.add(n));
+    return Array.from(names).slice(0, 18);
+  }, [allTaxonomies]);
+
+  // Suggested skin type labels for Key Ingredients quick-picker
+  const suggestedSkinTypeOptions = useMemo(() => {
+    const names = new Set<string>();
+    allTaxonomies
+      .filter((t) => t.type === 'skin_type' && t.isActive !== false)
+      .forEach((t) => {
+        if (t.name) names.add(t.name.replace(/\s+Skin$/i, '').trim() || t.name);
+      });
+    ['All Skin Types', 'Oily', 'Dry', 'Combination', 'Sensitive', 'Acne-Prone', 'Dehydrated', 'Dull', 'Normal', 'Mature', 'Redness-Prone'].forEach((n) => names.add(n));
+    return Array.from(names).slice(0, 14);
+  }, [allTaxonomies]);
+
   // Open Add Modal
   const handleOpenAddModal = () => {
     setEditingItem(null);
@@ -299,25 +345,141 @@ export const AdminTaxonomyManagement: React.FC = () => {
     setFormIsActive(true);
     setFormIsFeatured(false);
     setFormIsPopular(false);
+    setFormKeyFocusIngredients([]);
+    setIngredientDraftInput('');
+    setFormRoutineTips(['']);
+    setFormRoutineTipsBN([]);
+    setFormMatchKeywordsText('');
+    setShowBnTipsEditor(false);
+    setFormKoreanName('');
+    setFormShortRole('');
+    setFormShortRoleBN('');
+    setFormBestForSkinTypes([]);
+    setSkinTypeDraftInput('');
+    setFormPairsWellWith([]);
+    setPairDraftInput('');
+    setFormLayeringCautions(['']);
+    setFormLayeringCautionsBN([]);
+    setShowBnCautionsEditor(false);
     setIsCustomSlug(false);
     setIsEditModalOpen(true);
   };
 
   // Open Edit Modal
   const handleOpenEditModal = (item: TaxonomyItem) => {
+    const concernEnrichment = item.type === 'skin_concern' ? getConcernDefaultEnrichment(item.slug) : undefined;
+    const ingEnrichment = item.type === 'ingredient' ? getIngredientDefaultEnrichment(item.slug) : undefined;
+
+    const resolvedIngredients =
+      item.keyFocusIngredients !== undefined
+        ? item.keyFocusIngredients
+        : concernEnrichment?.keyFocusIngredients || [];
+    const resolvedTips =
+      item.routineTips !== undefined
+        ? item.routineTips
+        : concernEnrichment?.routineTips || [];
+    const resolvedTipsBN =
+      item.routineTipsBN !== undefined
+        ? item.routineTipsBN
+        : concernEnrichment?.routineTipsBN || [];
+    const resolvedKeywords =
+      item.matchKeywords !== undefined
+        ? item.matchKeywords
+        : concernEnrichment?.matchKeywords || ingEnrichment?.matchKeywords || [];
+
+    const resolvedBestFor =
+      item.bestForSkinTypes !== undefined
+        ? item.bestForSkinTypes
+        : ingEnrichment?.bestForSkinTypes || [];
+    const resolvedPairsWell =
+      item.pairsWellWith !== undefined
+        ? item.pairsWellWith
+        : ingEnrichment?.pairsWellWith || [];
+    const resolvedCautions =
+      item.layeringCautions !== undefined
+        ? item.layeringCautions
+        : ingEnrichment?.layeringCautions || [];
+    const resolvedCautionsBN =
+      item.layeringCautionsBN !== undefined
+        ? item.layeringCautionsBN
+        : ingEnrichment?.layeringCautionsBN || [];
+
     setEditingItem(item);
     setFormName(item.name);
     setFormNameBN(item.nameBN || '');
     setFormSlug(item.slug || generateTaxonomySlug(item.name));
-    setFormDescription(item.description || '');
-    setFormDescriptionBN(item.descriptionBN || '');
+    setFormDescription(item.description || concernEnrichment?.summary || ingEnrichment?.summary || '');
+    setFormDescriptionBN(item.descriptionBN || concernEnrichment?.summaryBN || ingEnrichment?.summaryBN || '');
     setFormImage(item.image || '');
     setFormDisplayOrder(item.displayOrder || 1);
     setFormIsActive(item.isActive ?? true);
     setFormIsFeatured(item.isFeatured ?? false);
     setFormIsPopular(item.isPopular ?? false);
+    setFormKeyFocusIngredients(resolvedIngredients);
+    setIngredientDraftInput('');
+    setFormRoutineTips(resolvedTips.length > 0 ? resolvedTips : ['']);
+    setFormRoutineTipsBN(resolvedTipsBN);
+    setShowBnTipsEditor(resolvedTipsBN.length > 0);
+    setFormMatchKeywordsText(resolvedKeywords.join(', '));
+    setFormKoreanName(item.koreanName !== undefined ? item.koreanName : ingEnrichment?.koreanName || '');
+    setFormShortRole(item.shortRole !== undefined ? item.shortRole : ingEnrichment?.shortRole || '');
+    setFormShortRoleBN(item.shortRoleBN !== undefined ? item.shortRoleBN : ingEnrichment?.shortRoleBN || '');
+    setFormBestForSkinTypes(resolvedBestFor);
+    setSkinTypeDraftInput('');
+    setFormPairsWellWith(resolvedPairsWell);
+    setPairDraftInput('');
+    setFormLayeringCautions(resolvedCautions.length > 0 ? resolvedCautions : ['']);
+    setFormLayeringCautionsBN(resolvedCautionsBN);
+    setShowBnCautionsEditor(resolvedCautionsBN.length > 0);
     setIsCustomSlug(true);
     setIsEditModalOpen(true);
+  };
+
+  const handleAddIngredientChip = (rawVal?: string) => {
+    const source = rawVal !== undefined ? rawVal : ingredientDraftInput;
+    const parts = source
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    setFormKeyFocusIngredients((prev) => {
+      const next = [...prev];
+      parts.forEach((p) => {
+        if (!next.some((existing) => existing.toLowerCase() === p.toLowerCase())) {
+          next.push(p);
+        }
+      });
+      return next;
+    });
+    if (rawVal === undefined) {
+      setIngredientDraftInput('');
+    }
+  };
+
+  const handleAddChipToList = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    draftSetter: React.Dispatch<React.SetStateAction<string>>,
+    draftValue: string,
+    rawVal?: string
+  ) => {
+    const source = rawVal !== undefined ? rawVal : draftValue;
+    const parts = source
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    setter((prev) => {
+      const next = [...prev];
+      parts.forEach((p) => {
+        if (!next.some((existing) => existing.toLowerCase() === p.toLowerCase())) {
+          next.push(p);
+        }
+      });
+      return next;
+    });
+    if (rawVal === undefined) {
+      draftSetter('');
+    }
   };
 
   // Open Product Assignment Modal
@@ -342,13 +504,89 @@ export const AdminTaxonomyManagement: React.FC = () => {
       return;
     }
 
+    const targetType = editingItem ? editingItem.type : activeTab;
     const slug = formSlug.trim() || generateTaxonomySlug(formName);
+    const isSkinConcern = targetType === 'skin_concern';
+    const isIngredient = targetType === 'ingredient';
+
+    const cleanIngredients: string[] = Array.from(
+      new Set<string>(
+        [
+          ...formKeyFocusIngredients,
+          ...(ingredientDraftInput.trim()
+            ? ingredientDraftInput.split(',').map((s) => s.trim()).filter(Boolean)
+            : []),
+        ]
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
+    const cleanRoutineTips: string[] = formRoutineTips.map((s) => s.trim()).filter(Boolean);
+    const cleanRoutineTipsBN: string[] = formRoutineTipsBN.map((s) => s.trim()).filter(Boolean);
+    const cleanMatchKeywords: string[] = Array.from(
+      new Set<string>(
+        formMatchKeywordsText
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+
+    const cleanBestForSkinTypes: string[] = Array.from(
+      new Set<string>(
+        [
+          ...formBestForSkinTypes,
+          ...(skinTypeDraftInput.trim()
+            ? skinTypeDraftInput.split(',').map((s) => s.trim()).filter(Boolean)
+            : []),
+        ]
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
+    const cleanPairsWellWith: string[] = Array.from(
+      new Set<string>(
+        [
+          ...formPairsWellWith,
+          ...(pairDraftInput.trim()
+            ? pairDraftInput.split(',').map((s) => s.trim()).filter(Boolean)
+            : []),
+        ]
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
+    const cleanLayeringCautions: string[] = formLayeringCautions.map((s) => s.trim()).filter(Boolean);
+    const cleanLayeringCautionsBN: string[] = formLayeringCautionsBN.map((s) => s.trim()).filter(Boolean);
+
+    const concernFields = isSkinConcern
+      ? {
+          keyFocusIngredients: cleanIngredients,
+          routineTips: cleanRoutineTips,
+          routineTipsBN: cleanRoutineTipsBN,
+          matchKeywords: cleanMatchKeywords,
+        }
+      : {};
+
+    const ingredientFields = isIngredient
+      ? {
+          koreanName: formKoreanName.trim(),
+          shortRole: formShortRole.trim(),
+          shortRoleBN: formShortRoleBN.trim(),
+          bestForSkinTypes: cleanBestForSkinTypes,
+          pairsWellWith: cleanPairsWellWith,
+          layeringCautions: cleanLayeringCautions,
+          layeringCautionsBN: cleanLayeringCautionsBN,
+          matchKeywords: cleanMatchKeywords,
+        }
+      : {};
 
     try {
       if (editingItem) {
         await updateMutation.mutateAsync({
           id: editingItem.id,
           updates: {
+            type: editingItem.type,
             name: formName.trim(),
             nameBN: formNameBN.trim() || '',
             slug,
@@ -359,9 +597,11 @@ export const AdminTaxonomyManagement: React.FC = () => {
             isActive: formIsActive,
             isFeatured: formIsFeatured,
             isPopular: formIsPopular,
+            ...concernFields,
+            ...ingredientFields,
           },
         });
-        showNotification(`${DIMENSION_CONFIG[activeTab].singular} "${formName}" updated successfully.`);
+        showNotification(`${DIMENSION_CONFIG[targetType].singular} "${formName}" updated successfully.`);
       } else {
         await createMutation.mutateAsync({
           type: activeTab,
@@ -375,6 +615,8 @@ export const AdminTaxonomyManagement: React.FC = () => {
           isActive: formIsActive,
           isFeatured: formIsFeatured,
           isPopular: formIsPopular,
+          ...concernFields,
+          ...ingredientFields,
         });
         showNotification(`New ${DIMENSION_CONFIG[activeTab].singular} "${formName}" created successfully.`);
       }
@@ -539,6 +781,48 @@ export const AdminTaxonomyManagement: React.FC = () => {
             </span>
           </div>
         </div>
+
+        {activeTab === 'skin_concern' && (
+          <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-600">
+              <Sparkles className="w-4 h-4 text-rose-500 shrink-0" />
+              <span>
+                Active Skin Concerns sync live with the storefront{' '}
+                <strong className="text-slate-900">Shop &amp; Learn by Skin Concern</strong> page, including Key Focus Ingredients, Routine Tips &amp; Match Keywords.
+              </span>
+            </div>
+            <a
+              href="/concerns"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold border border-rose-200 transition-colors shrink-0"
+            >
+              <span>View /concerns Page</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        )}
+
+        {activeTab === 'ingredient' && (
+          <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-600">
+              <Sparkles className="w-4 h-4 text-teal-600 shrink-0" />
+              <span>
+                Active Key Ingredients sync live with the storefront{' '}
+                <strong className="text-slate-900">Korean Skincare Ingredients Library</strong> page, including Korean Name, Short Role, Best Skin Types, Pairings &amp; Layering Cautions.
+              </span>
+            </div>
+            <a
+              href="/ingredients"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-semibold border border-teal-200 transition-colors shrink-0"
+            >
+              <span>View /ingredients Page</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        )}
       </div>
 
       {/* Alert Banner Notification */}
@@ -807,6 +1091,125 @@ export const AdminTaxonomyManagement: React.FC = () => {
                     </p>
                   )}
 
+                  {/* Skin Concern Shop & Learn Preview */}
+                  {item.type === 'skin_concern' && (() => {
+                    const enrichment = getConcernDefaultEnrichment(item.slug);
+                    const ingredients =
+                      item.keyFocusIngredients !== undefined
+                        ? item.keyFocusIngredients
+                        : enrichment?.keyFocusIngredients || [];
+                    const tips =
+                      item.routineTips !== undefined
+                        ? item.routineTips
+                        : enrichment?.routineTips || [];
+                    const keywords =
+                      item.matchKeywords !== undefined
+                        ? item.matchKeywords
+                        : enrichment?.matchKeywords || [];
+                    const needsAttention = ingredients.length === 0 || tips.length === 0 || keywords.length === 0;
+
+                    return (
+                      <div className="mb-3 space-y-1.5">
+                        {ingredients.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {ingredients.slice(0, 3).map((ing, idx) => (
+                              <span
+                                key={`${ing}-${idx}`}
+                                className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-100 text-[10px] font-semibold"
+                              >
+                                {ing}
+                              </span>
+                            ))}
+                            {ingredients.length > 3 && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold">
+                                +{ingredients.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                          <span>Tips: {tips.length}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>Keywords: {keywords.length}</span>
+                          {needsAttention && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                              Missing guide data
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Key Ingredient Library Preview */}
+                  {item.type === 'ingredient' && (() => {
+                    const enrichment = getIngredientDefaultEnrichment(item.slug);
+                    const koreanName =
+                      item.koreanName !== undefined ? item.koreanName : enrichment?.koreanName || '';
+                    const shortRole =
+                      item.shortRole !== undefined ? item.shortRole : enrichment?.shortRole || '';
+                    const skinTypes =
+                      item.bestForSkinTypes !== undefined
+                        ? item.bestForSkinTypes
+                        : enrichment?.bestForSkinTypes || [];
+                    const pairs =
+                      item.pairsWellWith !== undefined
+                        ? item.pairsWellWith
+                        : enrichment?.pairsWellWith || [];
+                    const cautions =
+                      item.layeringCautions !== undefined
+                        ? item.layeringCautions
+                        : enrichment?.layeringCautions || [];
+                    const needsAttention =
+                      !shortRole || skinTypes.length === 0 || pairs.length === 0 || cautions.length === 0;
+
+                    return (
+                      <div className="mb-3 space-y-1.5">
+                        {(koreanName || shortRole) && (
+                          <div className="space-y-1">
+                            {koreanName && (
+                              <span className="inline-block px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-100 text-[10px] font-semibold">
+                                {koreanName}
+                              </span>
+                            )}
+                            {shortRole && (
+                              <p className="text-[11px] font-medium text-slate-700 line-clamp-1">
+                                {shortRole}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {skinTypes.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {skinTypes.slice(0, 3).map((st) => (
+                              <span
+                                key={st}
+                                className="px-1.5 py-0.5 rounded bg-pink-50 text-rose-700 border border-pink-100 text-[10px] font-semibold"
+                              >
+                                {st}
+                              </span>
+                            ))}
+                            {skinTypes.length > 3 && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold">
+                                +{skinTypes.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                          <span>Pairs: {pairs.length}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>Cautions: {cautions.length}</span>
+                          {needsAttention && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold">
+                              Missing library data
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Quiet Metadata Info */}
                   <div className="flex items-center gap-2 text-[11px] text-slate-400 mb-2.5 font-mono">
                     <span className="truncate" title={`Slug: ${item.slug}`}>
@@ -943,6 +1346,49 @@ export const AdminTaxonomyManagement: React.FC = () => {
                         ) : (
                           <div className="text-[10px] text-slate-400 italic">No Bengali translation</div>
                         )}
+                        {item.type === 'skin_concern' && (() => {
+                          const enrichment = getConcernDefaultEnrichment(item.slug);
+                          const ingredients =
+                            item.keyFocusIngredients !== undefined
+                              ? item.keyFocusIngredients
+                              : enrichment?.keyFocusIngredients || [];
+                          const tips =
+                            item.routineTips !== undefined
+                              ? item.routineTips
+                              : enrichment?.routineTips || [];
+                          const keywords =
+                            item.matchKeywords !== undefined
+                              ? item.matchKeywords
+                              : enrichment?.matchKeywords || [];
+                          return (
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              Ingredients: {ingredients.length} · Tips: {tips.length} · Keywords: {keywords.length}
+                            </div>
+                          );
+                        })()}
+                        {item.type === 'ingredient' && (() => {
+                          const enrichment = getIngredientDefaultEnrichment(item.slug);
+                          const koreanName =
+                            item.koreanName !== undefined ? item.koreanName : enrichment?.koreanName || '';
+                          const skinTypes =
+                            item.bestForSkinTypes !== undefined
+                              ? item.bestForSkinTypes
+                              : enrichment?.bestForSkinTypes || [];
+                          const pairs =
+                            item.pairsWellWith !== undefined
+                              ? item.pairsWellWith
+                              : enrichment?.pairsWellWith || [];
+                          const cautions =
+                            item.layeringCautions !== undefined
+                              ? item.layeringCautions
+                              : enrichment?.layeringCautions || [];
+                          return (
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              {koreanName ? `${koreanName} · ` : ''}
+                              Skin Types: {skinTypes.length} · Pairs: {pairs.length} · Cautions: {cautions.length}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Slug */}
@@ -1047,7 +1493,13 @@ export const AdminTaxonomyManagement: React.FC = () => {
       {/* CREATE & EDIT TAXONOMY MODAL */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 relative animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
+          <div
+            className={`bg-white rounded-2xl w-full p-6 shadow-2xl border border-slate-200 relative animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto ${
+              (editingItem?.type || activeTab) === 'skin_concern' || (editingItem?.type || activeTab) === 'ingredient'
+                ? 'max-w-2xl'
+                : 'max-w-lg'
+            }`}
+          >
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
@@ -1211,6 +1663,593 @@ export const AdminTaxonomyManagement: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* Shop & Learn by Skin Concern Extra Fields */}
+              {(editingItem?.type || activeTab) === 'skin_concern' && (
+                <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200/80 space-y-4">
+                  <div className="flex items-center justify-between gap-2 border-b border-rose-200/60 pb-2">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900">
+                        Shop &amp; Learn by Skin Concern Guide Fields
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Displayed on the public /concerns &amp; /concern/:slug storefront pages.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Key Focus Ingredients */}
+                  <div className="space-y-2">
+                    <label className="block text-slate-700 font-semibold">
+                      Key Focus Ingredients
+                    </label>
+                    {formKeyFocusIngredients.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {formKeyFocusIngredients.map((ing, idx) => (
+                          <span
+                            key={`${ing}-${idx}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-rose-200 text-rose-700 font-semibold text-[11px]"
+                          >
+                            <span>{ing}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFormKeyFocusIngredients((prev) => prev.filter((item) => item !== ing))
+                              }
+                              className="text-rose-400 hover:text-rose-700"
+                              title={`Remove ${ing}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={ingredientDraftInput}
+                        onChange={(e) => setIngredientDraftInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientChip();
+                          }
+                        }}
+                        placeholder="Add ingredient (e.g. Niacinamide, Centella Asiatica) & press Enter"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddIngredientChip()}
+                        className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-semibold shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {suggestedIngredientOptions
+                        .filter(
+                          (opt) =>
+                            !formKeyFocusIngredients.some(
+                              (cur) => cur.toLowerCase() === opt.toLowerCase()
+                            )
+                        )
+                        .slice(0, 10)
+                        .map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => handleAddIngredientChip(opt)}
+                            className="px-2 py-0.5 rounded-md bg-white hover:bg-rose-100 border border-slate-200 hover:border-rose-300 text-[10px] font-medium text-slate-600 hover:text-rose-700 transition-colors"
+                          >
+                            + {opt}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Practical Routine Tips (EN) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-slate-700 font-semibold">
+                        Practical Cosmetic Routine Habits (EN)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setFormRoutineTips((prev) => [...prev, ''])}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:text-rose-700"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add Tip
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {formRoutineTips.map((tip, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono text-slate-400 w-4 shrink-0">
+                            {idx + 1}.
+                          </span>
+                          <input
+                            type="text"
+                            value={tip}
+                            onChange={(e) => {
+                              const next = [...formRoutineTips];
+                              next[idx] = e.target.value;
+                              setFormRoutineTips(next);
+                            }}
+                            placeholder="e.g. Apply SPF 50+ PA++++ every morning..."
+                            className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormRoutineTips((prev) =>
+                                prev.length > 1 ? prev.filter((_, i) => i !== idx) : ['']
+                              )
+                            }
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
+                            title="Remove tip"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Practical Routine Tips (BN - Optional) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => setShowBnTipsEditor((prev) => !prev)}
+                        className="text-[11px] font-semibold text-slate-600 hover:text-rose-600 flex items-center gap-1"
+                      >
+                        <span>
+                          {showBnTipsEditor ? '▾ Hide' : '▸ Add / Edit'} Bengali Routine Tips (বাংলা টিপস · {formRoutineTipsBN.filter((t) => t.trim()).length})
+                        </span>
+                      </button>
+                      {showBnTipsEditor && (
+                        <button
+                          type="button"
+                          onClick={() => setFormRoutineTipsBN((prev) => [...prev, ''])}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:text-rose-700"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Add বাংলা Tip
+                        </button>
+                      )}
+                    </div>
+                    {showBnTipsEditor && (
+                      <div className="space-y-2">
+                        {formRoutineTipsBN.length === 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setFormRoutineTipsBN([''])}
+                            className="w-full py-2 px-3 rounded-xl border border-dashed border-rose-200 bg-white text-[11px] font-medium text-slate-500 hover:text-rose-600"
+                          >
+                            + Add first Bengali routine tip
+                          </button>
+                        ) : (
+                          formRoutineTipsBN.map((tip, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="text-[11px] font-mono text-slate-400 w-4 shrink-0">
+                                {idx + 1}.
+                              </span>
+                              <input
+                                type="text"
+                                value={tip}
+                                onChange={(e) => {
+                                  const next = [...formRoutineTipsBN];
+                                  next[idx] = e.target.value;
+                                  setFormRoutineTipsBN(next);
+                                }}
+                                placeholder="বাংলায় ব্যবহারিক রুটিন টিপস লিখুন..."
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-slate-900 font-bengali focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFormRoutineTipsBN((prev) => prev.filter((_, i) => i !== idx))
+                                }
+                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
+                                title="Remove Bengali tip"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Catalog Match Keywords */}
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-700 font-semibold">
+                      Catalog Auto-Match Keywords (Comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={formMatchKeywordsText}
+                      onChange={(e) => setFormMatchKeywordsText(e.target.value)}
+                      placeholder="e.g. acne, blemish, pimple, pore, sebum, breakout"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Products assigned directly via &ldquo;Assign Products&rdquo; or matching these keywords appear on this concern&apos;s page.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Korean Skincare Ingredients Library Extra Fields */}
+              {(editingItem?.type || activeTab) === 'ingredient' && (
+                <div className="p-4 rounded-2xl bg-teal-50/50 border border-teal-200/80 space-y-4">
+                  <div className="flex items-center justify-between gap-2 border-b border-teal-200/60 pb-2">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900">
+                        Korean Skincare Ingredients Library Fields
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Displayed on the public /ingredients &amp; /ingredient/:slug library pages.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Korean Name & Short Role (EN) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">
+                        Korean Name (한국어)
+                      </label>
+                      <input
+                        type="text"
+                        value={formKoreanName}
+                        onChange={(e) => setFormKoreanName(e.target.value)}
+                        placeholder="e.g. 병풀추출물"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">
+                        Short Cosmetic Role (EN)
+                      </label>
+                      <input
+                        type="text"
+                        value={formShortRole}
+                        onChange={(e) => setFormShortRole(e.target.value)}
+                        placeholder="e.g. Calming botanical extract for redness"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Short Role (BN - Optional) */}
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      Short Role in Bengali (সংক্ষিপ্ত ভূমিকা - ঐচ্ছিক)
+                    </label>
+                    <input
+                      type="text"
+                      value={formShortRoleBN}
+                      onChange={(e) => setFormShortRoleBN(e.target.value)}
+                      placeholder="e.g. লালচে ভাব ও সংবেদনশীল ত্বক প্রশমিত করার উপাদান"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 font-bengali focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                    />
+                  </div>
+
+                  {/* Best For Skin Types */}
+                  <div className="space-y-2">
+                    <label className="block text-slate-700 font-semibold">
+                      Best For Skin Types
+                    </label>
+                    {formBestForSkinTypes.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {formBestForSkinTypes.map((st) => (
+                          <span
+                            key={st}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-teal-200 text-teal-800 font-semibold text-[11px]"
+                          >
+                            <span>{st}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFormBestForSkinTypes((prev) => prev.filter((item) => item !== st))
+                              }
+                              className="text-teal-500 hover:text-rose-600"
+                              title={`Remove ${st}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={skinTypeDraftInput}
+                        onChange={(e) => setSkinTypeDraftInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddChipToList(
+                              setFormBestForSkinTypes,
+                              setSkinTypeDraftInput,
+                              skinTypeDraftInput
+                            );
+                          }
+                        }}
+                        placeholder="Add skin type (e.g. Sensitive, Oily, Acne-Prone) & press Enter"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddChipToList(
+                            setFormBestForSkinTypes,
+                            setSkinTypeDraftInput,
+                            skinTypeDraftInput
+                          )
+                        }
+                        className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-semibold shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {suggestedSkinTypeOptions
+                        .filter(
+                          (opt) =>
+                            !formBestForSkinTypes.some(
+                              (cur) => cur.toLowerCase() === opt.toLowerCase()
+                            )
+                        )
+                        .slice(0, 10)
+                        .map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() =>
+                              handleAddChipToList(
+                                setFormBestForSkinTypes,
+                                setSkinTypeDraftInput,
+                                skinTypeDraftInput,
+                                opt
+                              )
+                            }
+                            className="px-2 py-0.5 rounded-md bg-white hover:bg-teal-100 border border-slate-200 hover:border-teal-300 text-[10px] font-medium text-slate-600 hover:text-teal-800 transition-colors"
+                          >
+                            + {opt}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Pairs Well With */}
+                  <div className="space-y-2">
+                    <label className="block text-slate-700 font-semibold">
+                      Pairs Well With
+                    </label>
+                    {formPairsWellWith.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {formPairsWellWith.map((partner, idx) => (
+                          <span
+                            key={`${partner}-${idx}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-emerald-200 text-emerald-800 font-semibold text-[11px]"
+                          >
+                            <span>{partner}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFormPairsWellWith((prev) => prev.filter((item) => item !== partner))
+                              }
+                              className="text-emerald-500 hover:text-rose-600"
+                              title={`Remove ${partner}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={pairDraftInput}
+                        onChange={(e) => setPairDraftInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddChipToList(
+                              setFormPairsWellWith,
+                              setPairDraftInput,
+                              pairDraftInput
+                            );
+                          }
+                        }}
+                        placeholder="Add compatible ingredient (e.g. Panthenol, Ceramides) & press Enter"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAddChipToList(
+                            setFormPairsWellWith,
+                            setPairDraftInput,
+                            pairDraftInput
+                          )
+                        }
+                        className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-semibold shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {suggestedIngredientOptions
+                        .filter(
+                          (opt) =>
+                            !formPairsWellWith.some(
+                              (cur) => cur.toLowerCase() === opt.toLowerCase()
+                            )
+                        )
+                        .slice(0, 10)
+                        .map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() =>
+                              handleAddChipToList(
+                                setFormPairsWellWith,
+                                setPairDraftInput,
+                                pairDraftInput,
+                                opt
+                              )
+                            }
+                            className="px-2 py-0.5 rounded-md bg-white hover:bg-emerald-100 border border-slate-200 hover:border-emerald-300 text-[10px] font-medium text-slate-600 hover:text-emerald-800 transition-colors"
+                          >
+                            + {opt}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Layering & Patch Test Cautions (EN) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-slate-700 font-semibold">
+                        Layering &amp; Patch Test Notes (EN)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setFormLayeringCautions((prev) => [...prev, ''])}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 hover:text-teal-800"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add Note
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {formLayeringCautions.map((note, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono text-slate-400 w-4 shrink-0">
+                            {idx + 1}.
+                          </span>
+                          <input
+                            type="text"
+                            value={note}
+                            onChange={(e) => {
+                              const next = [...formLayeringCautions];
+                              next[idx] = e.target.value;
+                              setFormLayeringCautions(next);
+                            }}
+                            placeholder="e.g. Gentle for daily AM/PM use. Patch test on jawline first."
+                            className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormLayeringCautions((prev) =>
+                                prev.length > 1 ? prev.filter((_, i) => i !== idx) : ['']
+                              )
+                            }
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
+                            title="Remove note"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Layering Cautions (BN - Optional) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => setShowBnCautionsEditor((prev) => !prev)}
+                        className="text-[11px] font-semibold text-slate-600 hover:text-teal-700 flex items-center gap-1"
+                      >
+                        <span>
+                          {showBnCautionsEditor ? '▾ Hide' : '▸ Add / Edit'} Bengali Layering Notes (বাংলা সতর্কতা · {formLayeringCautionsBN.filter((t) => t.trim()).length})
+                        </span>
+                      </button>
+                      {showBnCautionsEditor && (
+                        <button
+                          type="button"
+                          onClick={() => setFormLayeringCautionsBN((prev) => [...prev, ''])}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal-700 hover:text-teal-800"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Add বাংলা Note
+                        </button>
+                      )}
+                    </div>
+                    {showBnCautionsEditor && (
+                      <div className="space-y-2">
+                        {formLayeringCautionsBN.length === 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setFormLayeringCautionsBN([''])}
+                            className="w-full py-2 px-3 rounded-xl border border-dashed border-teal-200 bg-white text-[11px] font-medium text-slate-500 hover:text-teal-700"
+                          >
+                            + Add first Bengali layering note
+                          </button>
+                        ) : (
+                          formLayeringCautionsBN.map((note, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="text-[11px] font-mono text-slate-400 w-4 shrink-0">
+                                {idx + 1}.
+                              </span>
+                              <input
+                                type="text"
+                                value={note}
+                                onChange={(e) => {
+                                  const next = [...formLayeringCautionsBN];
+                                  next[idx] = e.target.value;
+                                  setFormLayeringCautionsBN(next);
+                                }}
+                                placeholder="বাংলায় ব্যবহার ও সতর্কতা লিখুন..."
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-slate-900 font-bengali focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFormLayeringCautionsBN((prev) => prev.filter((_, i) => i !== idx))
+                                }
+                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg"
+                                title="Remove Bengali note"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Catalog Match Keywords */}
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-700 font-semibold">
+                      Catalog Auto-Match Keywords (Comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={formMatchKeywordsText}
+                      onChange={(e) => setFormMatchKeywordsText(e.target.value)}
+                      placeholder="e.g. centella, cica, madecassoside, asiaticoside"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Products assigned directly via &ldquo;Assign Products&rdquo; or matching these keywords appear on this ingredient&apos;s page.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Display Order & Flags */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">

@@ -17,7 +17,10 @@ import { Product } from '../types';
 import { SavedRoutineRecord, userPortalService } from '../services/userPortalService';
 import { buildRoutineBuilderSeo } from '../services/seoService';
 import { getRetailPrice } from '../utils/pricing';
+import { getProductPath } from '../utils/productSlug';
 import { SeoHead } from './SeoHead';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { RoutineBuilderPageThemeSettings } from '../types/theme';
 
 const AM_SLOTS = [
   { id: 'am_cleanser', label: '1. Cleanser (AM)', keywords: ['cleanser', 'foam', 'gel wash', 'wash'] },
@@ -77,6 +80,15 @@ export const RoutineBuilderPage: React.FC = () => {
   const [pmSelection, setPmSelection] = useState<Record<string, string>>({});
   const [savedRoutines, setSavedRoutines] = useState<SavedRoutineRecord[]>([]);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [pageTheme, setPageTheme] = useState<RoutineBuilderPageThemeSettings>(
+    () => themeService.getPagesTheme().routineBuilder || DEFAULT_PAGES_THEME.routineBuilder
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.routineBuilder) setPageTheme(pages.routineBuilder);
+    });
+  }, []);
 
   const inStockProducts = useMemo(() => products.filter((p) => (p.stock || 0) > 0), [products]);
 
@@ -203,13 +215,13 @@ export const RoutineBuilderPage: React.FC = () => {
           <div className="space-y-2 max-w-2xl">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-pink-50 border border-pink-100 text-[#E91E8C] text-[11px] font-black uppercase tracking-wider">
               <Sparkles size={13} />
-              <span>Interactive Routine Planner</span>
+              <span>{pageTheme.badgeText}</span>
             </span>
             <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-              {isBn ? 'AM ও PM স্কিনকেয়ার রুটিন বিল্ডার' : 'AM & PM Skincare Routine Builder'}
+              {isBn ? pageTheme.titleBN : pageTheme.titleEN}
             </h1>
             <p className="text-sm text-gray-600 leading-relaxed">
-              Pair live in-stock Korean skincare steps for morning and evening while checking active ingredient compatibility.
+              {pageTheme.subtitle}
             </p>
           </div>
 
@@ -218,13 +230,13 @@ export const RoutineBuilderPage: React.FC = () => {
               to="/skin-quiz"
               className="px-4 py-2.5 rounded-xl border border-pink-200 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] text-xs font-bold text-center"
             >
-              Take Skin Quiz
+              {pageTheme.quizCtaLabel}
             </Link>
             <Link
               to="/ingredients"
               className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-gray-700 text-xs font-bold text-center"
             >
-              Ingredient Glossary
+              {pageTheme.glossaryCtaLabel}
             </Link>
           </div>
         </div>
@@ -255,7 +267,7 @@ export const RoutineBuilderPage: React.FC = () => {
               className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-gray-900 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Save size={14} />
-              <span>Save Routine</span>
+              <span>{pageTheme.saveRoutineLabel}</span>
             </button>
             <button
               type="button"
@@ -264,7 +276,7 @@ export const RoutineBuilderPage: React.FC = () => {
               className="px-4 py-2.5 rounded-xl bg-[#E91E8C] hover:bg-pink-700 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <ShoppingBag size={14} />
-              <span>Add Selected to Cart</span>
+              <span>{pageTheme.addToCartLabel}</span>
             </button>
           </div>
         </div>
@@ -286,13 +298,13 @@ export const RoutineBuilderPage: React.FC = () => {
                   <Sun size={18} />
                 </div>
                 <div>
-                  <h2 className="text-base font-black text-gray-900">Morning Routine (AM)</h2>
-                  <p className="text-xs text-gray-500">Cleanse, hydrate, antioxidant support, and daily SPF</p>
+                  <h2 className="text-base font-black text-gray-900">{pageTheme.amTitle}</h2>
+                  <p className="text-xs text-gray-500">{pageTheme.amSubtitle}</p>
                 </div>
               </div>
             </div>
 
-            {amWarnings.length > 0 && (
+            {pageTheme.showLayeringWarnings && amWarnings.length > 0 && (
               <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2 text-xs text-amber-900">
                 {amWarnings.map((w, i) => (
                   <div key={i} className="flex items-start gap-2">
@@ -325,7 +337,7 @@ export const RoutineBuilderPage: React.FC = () => {
                     {selectedProduct && (
                       <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
                         <span>{selectedProduct.brand}</span>
-                        <Link to={`/product/${selectedProduct.id}`} className="text-[#E91E8C] font-bold hover:underline">
+                        <Link to={getProductPath(selectedProduct)} className="text-[#E91E8C] font-bold hover:underline">
                           View details →
                         </Link>
                       </div>
@@ -344,13 +356,13 @@ export const RoutineBuilderPage: React.FC = () => {
                   <Moon size={18} />
                 </div>
                 <div>
-                  <h2 className="text-base font-black text-gray-900">Evening Routine (PM)</h2>
-                  <p className="text-xs text-gray-500">Remove sunscreen, treat targeted concerns, and lock in barrier moisture</p>
+                  <h2 className="text-base font-black text-gray-900">{pageTheme.pmTitle}</h2>
+                  <p className="text-xs text-gray-500">{pageTheme.pmSubtitle}</p>
                 </div>
               </div>
             </div>
 
-            {pmWarnings.length > 0 && (
+            {pageTheme.showLayeringWarnings && pmWarnings.length > 0 && (
               <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 space-y-2 text-xs text-amber-900">
                 {pmWarnings.map((w, i) => (
                   <div key={i} className="flex items-start gap-2">
@@ -383,7 +395,7 @@ export const RoutineBuilderPage: React.FC = () => {
                     {selectedProduct && (
                       <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
                         <span>{selectedProduct.brand}</span>
-                        <Link to={`/product/${selectedProduct.id}`} className="text-[#E91E8C] font-bold hover:underline">
+                        <Link to={getProductPath(selectedProduct)} className="text-[#E91E8C] font-bold hover:underline">
                           View details →
                         </Link>
                       </div>
@@ -396,7 +408,7 @@ export const RoutineBuilderPage: React.FC = () => {
         </div>
 
         {/* Saved Routines List */}
-        {savedRoutines.length > 0 && (
+        {pageTheme.showSavedRoutines && savedRoutines.length > 0 && (
           <section className="bg-white rounded-3xl border border-pink-100 p-6 shadow-sm space-y-4">
             <h2 className="text-base font-black text-gray-900">Your Saved Routines</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

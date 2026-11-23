@@ -1,6 +1,6 @@
 import { Product, InventoryLog, StockMovement, StockReceipt, StockReceiptItem } from '../types';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from './firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, limit, startAfter, writeBatch, runTransaction, getDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, limit, startAfter, writeBatch, runTransaction, getDoc, getDocs, where } from 'firebase/firestore';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { normalizeBarcode, findProductByScannedCode } from '../utils/barcode';
 import { getCanonicalBrandName } from '../data/brands';
@@ -200,35 +200,67 @@ export const productService = {
     }
   },
 
-  async fetchProductById(id: string): Promise<Product | null> {
-    const local = productsCache.find(p => p.id === id);
+  async fetchProductById(idOrSlug: string): Promise<Product | null> {
+    const cleanParam = (idOrSlug || '').trim();
+    const lowerParam = cleanParam.toLowerCase();
+    const local = productsCache.find(
+      p => p.id === cleanParam || (p.seoSlug && p.seoSlug.toLowerCase() === lowerParam)
+    );
     if (local) return local;
 
     try {
-      const docSnap = await getDoc(doc(db, 'products', id));
-      if (!docSnap.exists()) {
-        const offlineMatch = posOfflineStorage.lookupProductOffline(id);
-        return offlineMatch || null;
+      const docSnap = await getDoc(doc(db, 'products', cleanParam));
+      if (docSnap.exists()) {
+        const rawData = docSnap.data() as Product;
+        const data = normalizeProductPricing(rawData);
+        const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
+        const prod: Product = {
+          ...data,
+          id: docSnap.id || data.id,
+          brand: normalizedBrand,
+          barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode),
+        };
+        productsCache = [...productsCache.filter(p => p.id !== prod.id), prod];
+        try {
+          queryClient.setQueryData(queryKeys.products.detail(cleanParam), prod);
+        } catch {
+          // Safe guard
+        }
+        return prod;
       }
-      const rawData = docSnap.data() as Product;
-      const data = normalizeProductPricing(rawData);
-      const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
-      const prod: Product = {
-        ...data,
-        id: docSnap.id || data.id,
-        brand: normalizedBrand,
-        barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode),
-      };
-      productsCache = [...productsCache.filter(p => p.id !== id), prod];
-      try {
-        queryClient.setQueryData(queryKeys.products.detail(id), prod);
-      } catch {
-        // Safe guard
+
+      // Fallback: resolve by seoSlug
+      const slugQuery = query(
+        collection(db, 'products'),
+        where('seoSlug', '==', lowerParam),
+        limit(1)
+      );
+      const slugSnap = await getDocs(slugQuery);
+      if (!slugSnap.empty) {
+        const matchDoc = slugSnap.docs[0];
+        const rawData = matchDoc.data() as Product;
+        const data = normalizeProductPricing(rawData);
+        const normalizedBrand = getCanonicalBrandName(data.brand) || data.brand;
+        const prod: Product = {
+          ...data,
+          id: matchDoc.id || data.id,
+          brand: normalizedBrand,
+          barcodeNormalized: data.barcodeNormalized || normalizeBarcode(data.barcode),
+        };
+        productsCache = [...productsCache.filter(p => p.id !== prod.id), prod];
+        try {
+          queryClient.setQueryData(queryKeys.products.detail(cleanParam), prod);
+        } catch {
+          // Safe guard
+        }
+        return prod;
       }
-      return prod;
+
+      const offlineMatch = posOfflineStorage.lookupProductOffline(cleanParam);
+      return offlineMatch || null;
     } catch (err) {
       console.warn('[ProductService] fetchProductById error (checking offline storage):', err);
-      const offlineMatch = posOfflineStorage.lookupProductOffline(id);
+      const offlineMatch = posOfflineStorage.lookupProductOffline(cleanParam);
       return offlineMatch || null;
     }
   },
@@ -265,10 +297,14 @@ export const productService = {
     }
   },
 
-  getProductById(id: string): Product | undefined {
-    const mem = productsCache.find(p => p.id === id);
+  getProductById(idOrSlug: string): Product | undefined {
+    const cleanParam = (idOrSlug || '').trim();
+    const lowerParam = cleanParam.toLowerCase();
+    const mem = productsCache.find(
+      p => p.id === cleanParam || (p.seoSlug && p.seoSlug.toLowerCase() === lowerParam)
+    );
     if (mem) return mem;
-    return posOfflineStorage.lookupProductOffline(id);
+    return posOfflineStorage.lookupProductOffline(cleanParam);
   },
 
   getProductByBarcode(barcode: string): Product | undefined {

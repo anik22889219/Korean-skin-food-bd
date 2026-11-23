@@ -10,10 +10,21 @@ import {
   Clock, Eye, ChevronLeft, ChevronRight, X, FileText, Truck, 
   CreditCard, ShieldCheck, Sparkles, Store, Lock, Save, RefreshCw, Layers
 } from 'lucide-react';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { WholesalePortalPageThemeSettings } from '../types/theme';
 
 export function WholesaleDashboard() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [pageTheme, setPageTheme] = useState<WholesalePortalPageThemeSettings>(
+    () => themeService.getPagesTheme().wholesalePortal || DEFAULT_PAGES_THEME.wholesalePortal
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.wholesalePortal) setPageTheme(pages.wholesalePortal);
+    });
+  }, []);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'payments' | 'profile'>('overview');
   const [loading, setLoading] = useState(true);
@@ -183,7 +194,7 @@ export function WholesaleDashboard() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <span className="px-3 py-1 bg-pink-500/20 border border-pink-500/30 text-pink-300 rounded-full text-xs font-black uppercase tracking-wider">
-              Wholesale Portal
+              {pageTheme.dashboardBadge}
             </span>
             <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
               isVerified ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
@@ -195,7 +206,7 @@ export function WholesaleDashboard() {
             Welcome back, {customer?.name || user.displayName || 'Wholesale Partner'}!
           </h1>
           <p className="text-slate-300 text-sm mt-1">
-            {businessName || pageName || 'Manage your B2B orders, ledger balance, and store profile.'}
+            {businessName || pageName || pageTheme.dashboardSubtitle}
           </p>
         </div>
 
@@ -205,7 +216,7 @@ export function WholesaleDashboard() {
             className="px-5 py-3 bg-[#E91E8C] hover:bg-pink-600 text-white font-black rounded-2xl shadow-lg shadow-pink-900/30 transition flex items-center gap-2 text-sm"
           >
             <Truck size={18} />
-            <span>Place Wholesale Order</span>
+            <span>{pageTheme.placeOrderBtnLabel}</span>
           </Link>
         </div>
       </div>

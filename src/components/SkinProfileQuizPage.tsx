@@ -19,6 +19,8 @@ import { buildSkinQuizSeo } from '../services/seoService';
 import { getRetailPrice } from '../utils/pricing';
 import { SeoHead } from './SeoHead';
 import { ProductCard } from './ProductCard';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { SkinQuizPageThemeSettings } from '../types/theme';
 
 type SkinTypeOption = SkinProfileRecord['skinType'];
 
@@ -129,6 +131,15 @@ export const SkinProfileQuizPage: React.FC = () => {
   const [showResults, setShowResults] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [pageTheme, setPageTheme] = useState<SkinQuizPageThemeSettings>(
+    () => themeService.getPagesTheme().skinQuiz || DEFAULT_PAGES_THEME.skinQuiz
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.skinQuiz) setPageTheme(pages.skinQuiz);
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -281,15 +292,13 @@ export const SkinProfileQuizPage: React.FC = () => {
         <div className="bg-white rounded-3xl border border-pink-100 p-6 sm:p-8 shadow-sm space-y-2">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-pink-50 border border-pink-100 text-[#E91E8C] text-[11px] font-black uppercase tracking-wider">
             <Sparkles size={13} />
-            <span>Personalized Routine Finder</span>
+            <span>{pageTheme.badgeText}</span>
           </span>
           <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-            {isBn ? 'আপনার স্কিন প্রোফাইল কুইজ' : 'Korean Skincare Profile Quiz'}
+            {isBn ? pageTheme.titleBN : pageTheme.titleEN}
           </h1>
           <p className="text-sm text-gray-600 max-w-2xl leading-relaxed">
-            {isBn
-              ? '৫টি সহজ প্রশ্নের উত্তর দিন এবং আমাদের লাইভ বাংলাদেশ ক্যাটালগ থেকে আপনার ত্বকের ধরন অনুযায়ী সাজানো প্রডাক্ট শর্টলিস্ট পান।'
-              : 'Answer 5 quick questions about your skin behavior in Bangladesh weather to generate an in-stock catalog shortlist.'}
+            {isBn ? pageTheme.subtitleBN : pageTheme.subtitleEN}
           </p>
         </div>
 
@@ -432,7 +441,7 @@ export const SkinProfileQuizPage: React.FC = () => {
               className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-gray-700 hover:bg-slate-50 inline-flex items-center gap-1.5 cursor-pointer"
             >
               <RotateCcw size={14} />
-              <span>Reset Answers</span>
+              <span>{pageTheme.resetButtonLabel}</span>
             </button>
 
             <button
@@ -441,7 +450,7 @@ export const SkinProfileQuizPage: React.FC = () => {
               className="px-6 py-3 rounded-xl bg-[#E91E8C] hover:bg-pink-700 text-white text-xs font-black shadow-md shadow-pink-500/20 inline-flex items-center gap-2 cursor-pointer"
             >
               <Save size={15} />
-              <span>{saving ? 'Generating...' : 'Show My Catalog Matches & Save Profile'}</span>
+              <span>{saving ? 'Generating...' : pageTheme.submitButtonLabel}</span>
             </button>
           </div>
         </form>
@@ -456,30 +465,32 @@ export const SkinProfileQuizPage: React.FC = () => {
                   </span>
                   {savedNotice && <span className="text-xs font-semibold text-emerald-700">{savedNotice}</span>}
                 </div>
-                <h2 className="text-xl font-black text-gray-900">Your Matched In-Stock Shortlist</h2>
+                <h2 className="text-xl font-black text-gray-900">{pageTheme.resultsHeading}</h2>
                 <p className="text-xs text-gray-600">
-                  Selected across Cleanser, Serum/Toner, Moisturizer, and Sunscreen categories where available in stock.
+                  {pageTheme.resultsSubtext}
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2.5">
-                <button
-                  type="button"
-                  onClick={handleOpenInRoutineBuilder}
-                  className="px-4 py-2.5 rounded-xl border border-pink-200 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span>Customize in Routine Builder</span>
-                  <ArrowRight size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddShortlistToBag}
-                  className="px-4 py-2.5 rounded-xl bg-[#E91E8C] hover:bg-pink-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ShoppingBag size={14} />
-                  <span>Add Top 4 to Bag</span>
-                </button>
-              </div>
+              {pageTheme.showResultsActions && (
+                <div className="flex flex-wrap gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleOpenInRoutineBuilder}
+                    className="px-4 py-2.5 rounded-xl border border-pink-200 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>{pageTheme.routineBuilderCtaLabel}</span>
+                    <ArrowRight size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddShortlistToBag}
+                    className="px-4 py-2.5 rounded-xl bg-[#E91E8C] hover:bg-pink-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ShoppingBag size={14} />
+                    <span>{pageTheme.addTopToBagCtaLabel}</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {recommendedProducts.length === 0 ? (

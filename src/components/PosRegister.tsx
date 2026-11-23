@@ -27,6 +27,7 @@ import { posService, isAllowedPosRole, detectDeviceType } from '../services/posS
 import { posOfflineStorage, OfflineScanRecord } from '../services/posOfflineStorage';
 import { PWAInstallButton } from './PWAInstallButton';
 import { PosSession } from '../types';
+import { logPosPerf, markPosPerfAnchor } from '../utils/posPerf';
 
 import { 
   Tv, 
@@ -72,6 +73,15 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
   const [sessionId, setSessionId] = useState<string>('');
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
+
+  const sessionIdRef = useRef<string>('');
+  sessionIdRef.current = sessionId;
+  const sessionInitPromiseRef = useRef<Promise<PosSession | null> | null>(null);
+
+  useEffect(() => {
+    markPosPerfAnchor('pos_register_mount');
+    logPosPerf('pos_register_mount', { role: userRole || 'unknown' });
+  }, []);
 
   const [scans, setScans] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -222,7 +232,10 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     if (next) playSuccessBeep(0.2);
   };
 
-  // 1. Initialize & Maintain User-based POS session in Firestore (with offline fallback)
+  const soundEnabledRef = useRef<boolean>(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+
+  // 1. Initialize & Maintain User-based POS session in Firestore (single owner, non-blocking UI)
   useEffect(() => {
     if (!user?.uid || !userRole) {
       setIsLoadingSession(false);
@@ -236,7 +249,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
     let isMounted = true;
 
-    const initUserSession = async () => {
+    const initUserSession = async (): Promise<PosSession | null> => {
+      const initStartMs = performance.now();
+      logPosPerf('session_init_start', { owner: 'PosRegister' });
       try {
         setIsLoadingSession(true);
         setSessionError(null);
@@ -246,10 +261,16 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           userRole: userRole,
           operatorEmail
         });
+        logPosPerf('session_init_complete', {
+          owner: 'PosRegister',
+          durationMs: performance.now() - initStartMs,
+          offlineFallback: false
+        });
         if (isMounted) {
           setCurrentSession(session);
           setSessionId(session.id);
         }
+        return session;
       } catch (err: any) {
         console.warn('[PosRegister] Network error initializing session, restoring from offline cache:', err);
         const cached = await posOfflineStorage.getCachedActiveSession(user.uid);
@@ -268,10 +289,16 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
           items: []
         };
         posOfflineStorage.cacheActiveSession(fallbackSession).catch(() => {});
+        logPosPerf('session_init_complete', {
+          owner: 'PosRegister',
+          durationMs: performance.now() - initStartMs,
+          offlineFallback: true
+        });
         if (isMounted) {
           setCurrentSession(fallbackSession);
           setSessionId(fallbackSid);
         }
+        return fallbackSession;
       } finally {
         if (isMounted) {
           setIsLoadingSession(false);
@@ -279,7 +306,8 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       }
     };
 
-    initUserSession();
+    const p = initUserSession();
+    sessionInitPromiseRef.current = p;
 
     return () => {
       isMounted = false;
@@ -336,7 +364,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
       if (isNewlyConnected) {
         setNotificationOpen(true);
-        if (soundEnabled) {
+        if (soundEnabledRef.current) {
           playSuccessBeep(0.25);
         }
       }
@@ -361,9 +389,9 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     });
 
     return () => unsub();
-  }, [sessionId, soundEnabled]);
+  }, [sessionId]);
 
-  // 3. Real-time subscription to scans subcollection
+  // 3. Real-time subscription to scans subcollection (single owner)
   const prevScanCountRef = useRef<number>(0);
   useEffect(() => {
     if (!sessionId) return;
@@ -375,7 +403,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
         snapshot.forEach((docSnap) => {
           list.push({ id: docSnap.id, ...docSnap.data() });
         });
-        if (list.length > prevScanCountRef.current && prevScanCountRef.current > 0 && soundEnabled) {
+        if (list.length > prevScanCountRef.current && prevScanCountRef.current > 0 && soundEnabledRef.current) {
           playSuccessBeep(0.2);
         }
         prevScanCountRef.current = list.length;
@@ -386,7 +414,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
       }
     );
     return () => unsubscribe();
-  }, [sessionId, soundEnabled]);
+  }, [sessionId]);
 
   // 4. Listen to orders for history
   useEffect(() => {
@@ -508,7 +536,6 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
 
   // Cart Adjustments
   const handleAddToCart = async (product: Product, quantityToAdd: number = 1) => {
-    if (!sessionId) return;
     const currentCartQty = cartQuantitiesMap[product.id] || 0;
     const effectiveStock = product.isCombo ? getComboEffectiveStock(product, products) : Number(product.stock ?? 0);
     if (effectiveStock <= 0) {
@@ -528,8 +555,16 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     }));
     setScans(prev => [...prev, ...tempDocs]);
 
+    // Ensure session ID is resolved if a rapid scan occurred during background session init
+    let activeSid = sessionIdRef.current;
+    if (!activeSid && sessionInitPromiseRef.current) {
+      const resolved = await sessionInitPromiseRef.current;
+      activeSid = resolved?.id || sessionIdRef.current;
+    }
+    if (!activeSid) return;
+
     // Atomic sync to Firestore or record to persistent offline storage
-    addProductToSession(sessionId, product.id, currentCartQty, quantityToAdd).then((res: any) => {
+    addProductToSession(activeSid, product.id, currentCartQty, quantityToAdd).then((res: any) => {
       if (res.isOffline) {
         // Saved in persistent offline queue, retain optimistic item in cart
         return;
@@ -541,7 +576,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     }).catch(err => {
       console.warn('Session sync network error, saving to offline storage queue:', err);
       posOfflineStorage.recordOfflineScan({
-        sessionId,
+        sessionId: activeSid,
         productId: product.id,
         productName: product.name,
         barcode: product.barcode,
@@ -819,21 +854,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
     );
   }
 
-  if (isLoadingSession) {
-    return (
-      <div className="py-24 text-center space-y-4 animate-fadeIn">
-        <div className="w-16 h-16 bg-pink-50 rounded-full flex items-center justify-center mx-auto text-[#E91E8C] border border-pink-100">
-          <Loader2 className="w-8 h-8 animate-spin" />
-        </div>
-        <div>
-          <h3 className="text-base font-bold text-gray-900">Loading User POS Session</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Connecting authenticated session for {operatorName} ({userRole})...
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Do not block POS UI or camera startup behind isLoadingSession
 
   if (sessionError) {
     return (
@@ -899,11 +920,16 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   <span className="capitalize">{currentSession.deviceType}</span>
                 </span>
               )}
-              {sessionId && (
+              {sessionId ? (
                 <span className="hidden sm:inline font-mono text-[11px] text-gray-400">
                   ({sessionId})
                 </span>
-              )}
+              ) : isLoadingSession ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-pink-600 bg-pink-50 border border-pink-100 px-2 py-0.5 rounded-md">
+                  <Loader2 size={10} className="animate-spin" />
+                  <span>Connecting session...</span>
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1135,6 +1161,55 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
             </button>
           </div>
         </div>
+      ) : activeTab === 'scan' ? (
+        /* SINGLE SHARED POS SCANNER INSTANCE (prevents dual camera contention & duplicate listeners) */
+        <div className="max-w-2xl mx-auto space-y-4">
+          <div className="hidden lg:flex items-center justify-between bg-pink-50/50 p-4 rounded-2xl border border-pink-100">
+            <div>
+              <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                <ScanLine size={16} className="text-[#E91E8C]" />
+                <span>
+                  {scannerContext === 'STOCK_IN' ? 'Stock Receiving Barcode Scanner' : 'Desktop Barcode Scanner & Camera View'}
+                </span>
+              </h3>
+              <p className="text-xs text-gray-500">
+                {scannerContext === 'STOCK_IN' 
+                  ? 'Scan products to quickly add quantities to the stock-in receiving queue.'
+                  : 'Use connected webcam or wireless mobile phone to scan products directly into cart.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
+              className="bg-[#E91E8C] text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-[#FF4B91] transition cursor-pointer shadow-xs"
+            >
+              {scannerContext === 'STOCK_IN' ? `View Stock Queue (${stockInQueue.length})` : `View Cart (${totalCartCount})`}
+            </button>
+          </div>
+
+          <PosScan
+            sessionId={sessionId}
+            isRegisterManaged={true}
+            isSessionLoading={isLoadingSession}
+            sharedCartItems={cartItems}
+            onDecrementCartItem={handleDecrement}
+            onRemoveCartItem={handleRemove}
+            onBack={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
+            currentUser={{
+              uid: user?.uid || 'staff-pos',
+              email: operatorEmail,
+              role: (userRole as any) || 'admin',
+              name: operatorName
+            }}
+            onLoginStaff={() => {}}
+            context={scannerContext}
+            onAddToCart={handleAddToCart}
+            onAddToStockIn={handleAddToStockIn}
+            stockInQueue={stockInQueue}
+            onRemoveFromStockIn={(pId) => setStockInQueue(prev => prev.filter(it => it.product.id !== pId))}
+            onUpdateStockInQty={(pId, qty) => setStockInQueue(prev => prev.map(it => it.product.id === pId ? { ...it, quantity: qty } : it))}
+          />
+        </div>
       ) : (
         <>
           {/* DESKTOP SPLIT VIEW (On Large Screens) */}
@@ -1165,47 +1240,6 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                   }
                 }}
               />
-            ) : activeTab === 'scan' ? (
-              <div className="max-w-2xl mx-auto space-y-4">
-                <div className="flex items-center justify-between bg-pink-50/50 p-4 rounded-2xl border border-pink-100">
-                  <div>
-                    <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
-                      <ScanLine size={16} className="text-[#E91E8C]" />
-                      <span>
-                        {scannerContext === 'STOCK_IN' ? 'Stock Receiving Barcode Scanner' : 'Desktop Barcode Scanner & Camera View'}
-                      </span>
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      {scannerContext === 'STOCK_IN' 
-                        ? 'Scan products to quickly add quantities to the stock-in receiving queue.'
-                        : 'Use connected webcam or wireless mobile phone to scan products directly into cart.'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
-                    className="bg-[#E91E8C] text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-[#FF4B91] transition cursor-pointer shadow-xs"
-                  >
-                    {scannerContext === 'STOCK_IN' ? `View Stock Queue (${stockInQueue.length})` : `View Cart (${totalCartCount})`}
-                  </button>
-                </div>
-
-                <PosScan
-                  sessionId={sessionId}
-                  onBack={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
-                  currentUser={{
-                    uid: user?.uid || 'staff-pos',
-                    email: operatorEmail,
-                    role: 'admin',
-                    name: operatorName
-                  }}
-                  onLoginStaff={() => {}}
-                  context={scannerContext}
-                  onAddToCart={handleAddToCart}
-                  onAddToStockIn={handleAddToStockIn}
-                  stockInQueue={stockInQueue}
-                />
-              </div>
             ) : (
               <div className="grid grid-cols-12 gap-8 items-start">
                 {/* Left Column: Product Search & Catalog */}
@@ -1300,24 +1334,6 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
                 setNotes={setPaymentNotes}
                 onCheckout={handleCheckout}
                 isSubmitting={isSubmitting}
-              />
-            )}
-
-            {activeTab === 'scan' && (
-              <PosScan
-                sessionId={sessionId}
-                onBack={() => setActiveTab(scannerContext === 'STOCK_IN' ? 'stock_in' : 'sale')}
-                currentUser={{
-                  uid: user?.uid || 'staff-pos',
-                  email: operatorEmail,
-                  role: 'admin',
-                  name: operatorName
-                }}
-                onLoginStaff={() => {}}
-                context={scannerContext}
-                onAddToCart={handleAddToCart}
-                onAddToStockIn={handleAddToStockIn}
-                stockInQueue={stockInQueue}
               />
             )}
 

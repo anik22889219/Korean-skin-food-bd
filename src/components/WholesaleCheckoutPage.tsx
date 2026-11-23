@@ -12,6 +12,8 @@ import { useWholesaleCart } from '../context/WholesaleCartContext';
 import { useAuth } from '../context/AuthContext';
 import { useProducts } from '../hooks/queries/products';
 import { Product } from '../types';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { WholesalePortalPageThemeSettings } from '../types/theme';
 
 export const WholesaleCheckoutPage: React.FC = () => {
   const navigate = useNavigate();
@@ -48,6 +50,15 @@ export const WholesaleCheckoutPage: React.FC = () => {
   const { data: allProducts = [] } = useProducts();
   const [quickSearch, setQuickSearch] = useState('');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [pageTheme, setPageTheme] = useState<WholesalePortalPageThemeSettings>(
+    () => themeService.getPagesTheme().wholesalePortal || DEFAULT_PAGES_THEME.wholesalePortal
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.wholesalePortal) setPageTheme(pages.wholesalePortal);
+    });
+  }, []);
 
   // Automatically sync codForm.codPrice and parcelForm.codPrice with totalCodValue (COD Price Per Unit * quantity)
   useEffect(() => {
@@ -112,12 +123,12 @@ export const WholesaleCheckoutPage: React.FC = () => {
                 <span>Wholesale Portal</span>
               </Link>
               <span>/</span>
-              <span className="text-slate-900 font-extrabold">B2B Wholesale Checkout</span>
+              <span className="text-slate-900 font-extrabold">{pageTheme.checkoutBreadcrumbLabel}</span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <span>Wholesale Cart & Checkout</span>
+              <span>{pageTheme.checkoutTitle}</span>
               <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                B2B Tiered Pricing
+                {pageTheme.checkoutTierBadge}
               </span>
             </h1>
           </div>
@@ -129,7 +140,7 @@ export const WholesaleCheckoutPage: React.FC = () => {
               className="px-3.5 py-2 rounded-xl text-xs font-bold bg-pink-50 text-[#E91E8C] hover:bg-pink-100/80 border border-pink-200 transition flex items-center gap-1.5 cursor-pointer"
             >
               <Plus size={14} />
-              <span>Add More Products</span>
+              <span>{pageTheme.addProductsBtnLabel}</span>
             </button>
             <Link
               to="/wholesale/profile"
@@ -141,13 +152,13 @@ export const WholesaleCheckoutPage: React.FC = () => {
         </div>
 
         {/* Wholesale Access Authorization Notice */}
-        {!isWholesaleAuthorized && (
+        {pageTheme.showAuthNotice && !isWholesaleAuthorized && (
           <div className="p-4 bg-amber-500/10 border border-amber-300 rounded-2xl flex items-start gap-3 text-xs text-amber-900">
             <AlertCircle size={18} className="text-amber-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="font-black text-amber-950">Wholesale Account Pending / Guest Preview</p>
+              <p className="font-black text-amber-950">{pageTheme.authNoticeTitle}</p>
               <p className="leading-relaxed">
-                You are currently viewing tiered wholesale pricing. To complete authorized wholesale orders with custom delivery terms or credit limits, ensure your wholesale partner status is approved.
+                {pageTheme.authNoticeBody}
               </p>
               <Link to="/wholesale/profile" className="inline-block text-[#E91E8C] font-extrabold hover:underline pt-0.5">
                 Manage Wholesale Profile & Application &rarr;

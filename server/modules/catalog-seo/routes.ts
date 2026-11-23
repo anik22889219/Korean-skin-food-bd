@@ -1,9 +1,11 @@
 import express from 'express';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { DEFAULT_FIRST_PARTY_OG_PATH, resolveSiteBaseUrl } from '../../config/env';
 import { getServerDb } from '../../config/firebase';
 import { verifyAdminAuth } from '../../middleware/auth';
 import { escapeXmlString } from '../../utils/validators';
+import { getProductPath } from '../../../src/utils/productSlug';
+import { encodeSeoPageDocId, normalizeSeoPath } from '../../../src/utils/seoPath';
 
 const router = express.Router();
 
@@ -85,12 +87,20 @@ export function injectMetaIntoHtml(
   let cleanHtml = html
     .replace(/<title>.*?<\/title>/gi, '')
     .replace(/<meta\s+name=["']description["'][^>]*>/gi, '')
+    .replace(/<meta\s+name=["']robots["'][^>]*>/gi, '')
+    .replace(/<link\s+rel=["']canonical["'][^>]*>/gi, '')
     .replace(/<meta\s+property=["']og:title["'][^>]*>/gi, '')
     .replace(/<meta\s+property=["']og:description["'][^>]*>/gi, '')
+    .replace(/<meta\s+property=["']og:url["'][^>]*>/gi, '')
+    .replace(/<meta\s+property=["']og:site_name["'][^>]*>/gi, '')
+    .replace(/<meta\s+property=["']og:type["'][^>]*>/gi, '')
     .replace(/<meta\s+property=["']og:image["'][^>]*>/gi, '')
+    .replace(/<meta\s+property=["']og:image:alt["'][^>]*>/gi, '')
+    .replace(/<meta\s+name=["']twitter:card["'][^>]*>/gi, '')
     .replace(/<meta\s+name=["']twitter:title["'][^>]*>/gi, '')
     .replace(/<meta\s+name=["']twitter:description["'][^>]*>/gi, '')
-    .replace(/<meta\s+name=["']twitter:image["'][^>]*>/gi, '');
+    .replace(/<meta\s+name=["']twitter:image["'][^>]*>/gi, '')
+    .replace(/<script\s+id=["']seo-json-ld["'][^>]*>[\s\S]*?<\/script>/gi, '');
 
   cleanHtml = cleanHtml.replace('</head>', `${tags}  </head>`);
   return cleanHtml;
@@ -151,14 +161,21 @@ router.get('/sitemap.xml', async (req, res) => {
 
     const db = getServerDb();
     let products: any[] = [];
+    let seoPages: any[] = [];
     if (db) {
       try {
-        const snap = await getDocs(collection(db, 'products'));
-        snap.forEach((d) => {
+        const [prodSnap, seoSnap] = await Promise.all([
+          getDocs(collection(db, 'products')),
+          getDocs(collection(db, 'seo_pages')),
+        ]);
+        prodSnap.forEach((d) => {
           products.push({ id: d.id, ...d.data() });
         });
+        seoSnap.forEach((d) => {
+          seoPages.push({ id: d.id, ...d.data() });
+        });
       } catch (err) {
-        console.warn('[Sitemap] Firestore products load warning:', err);
+        console.warn('[Sitemap] Firestore data load warning:', err);
       }
     }
 
@@ -255,21 +272,60 @@ router.get('/sitemap.xml', async (req, res) => {
           }
         }
         return {
-          url: `${siteBase}/product/${encodeURIComponent(p.id)}`,
+          url: `${siteBase}${getProductPath(p)}`,
           priority: '0.8',
           changefreq: 'weekly',
           lastmod,
         };
       });
 
-    const allUrls = [
+    const noindexPaths = new Set<string>();
+    for (const sp of seoPages) {
+      if (sp?.path && sp?.noindex) {
+        noindexPaths.add(normalizeSeoPath(sp.path));
+      }
+    }
+
+    const baseUrls = [
       ...staticRoutes,
       ...brandRoutes,
       ...guideRoutes,
       ...ingredientRoutes,
       ...concernRoutes,
       ...productRoutes,
-    ];
+    ].filter((entry) => {
+      try {
+        const parsed = new URL(entry.url);
+        return !noindexPaths.has(normalizeSeoPath(`${parsed.pathname}${parsed.search}`));
+      } catch {
+        return true;
+      }
+    });
+
+    const includedUrls = new Set(baseUrls.map((u) => u.url));
+    const customSeoUrls = seoPages
+      .filter((sp) => sp?.path && !sp.noindex && !sp.path.startsWith('/admin'))
+      .map((sp) => {
+        const normalizedPath = normalizeSeoPath(sp.path);
+        const fullUrl = `${siteBase}${normalizedPath === '/' ? '/' : normalizedPath}`;
+        let lastmod = '2026-10-15';
+        if (sp.updatedAt) {
+          try {
+            lastmod = new Date(sp.updatedAt).toISOString().split('T')[0];
+          } catch {
+            // fallback
+          }
+        }
+        return {
+          url: fullUrl,
+          priority: sp.pageType === 'shop_filter' ? '0.8' : '0.75',
+          changefreq: 'weekly',
+          lastmod,
+        };
+      })
+      .filter((entry) => !includedUrls.has(entry.url));
+
+    const allUrls = [...baseUrls, ...customSeoUrls];
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
     xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
@@ -434,14 +490,119 @@ export async function buildBotSsrMetadata(req: express.Request): Promise<{
     noindex: false,
   };
 
-  if (req.path.startsWith('/product/')) {
-    const prodId = decodeURIComponent(req.path.replace('/product/', '').trim());
-    let product: any = null;
-    if (db && prodId) {
+  const resolvePageSeoOverride = async (): Promise<any | null> => {
+    if (!db) return null;
+    try {
+      const fullNorm = normalizeSeoPath(req.originalUrl || req.path);
+      const docId = encodeSeoPageDocId(fullNorm);
+      const snap = await getDoc(doc(db, 'seo_pages', docId));
+      if (snap.exists()) return snap.data();
+
+      const pathNorm = normalizeSeoPath(req.path);
+      if (pathNorm !== fullNorm) {
+        const fallbackSnap = await getDoc(doc(db, 'seo_pages', encodeSeoPageDocId(pathNorm)));
+        if (fallbackSnap.exists()) return fallbackSnap.data();
+      }
+    } catch {
+      // ignore seo_pages lookup error
+    }
+    return null;
+  };
+
+  const applySeoOverride = (
+    baseMeta: {
+      title: string;
+      description: string;
+      canonicalUrl: string;
+      ogImage: string;
+      ogImageAlt: string;
+      ogType: string;
+      jsonLd?: any;
+      noindex: boolean;
+    },
+    override: any | null
+  ) => {
+    if (!override) return baseMeta;
+    let schemas: any[] = Array.isArray(baseMeta.jsonLd)
+      ? [...baseMeta.jsonLd]
+      : baseMeta.jsonLd
+        ? [baseMeta.jsonLd]
+        : [];
+
+    if (Array.isArray(override.faqs) && override.faqs.length > 0) {
+      const validFaqs = override.faqs.filter((f: any) => f?.question?.trim() && f?.answer?.trim());
+      if (validFaqs.length > 0) {
+        schemas = schemas.filter((s) => s?.['@type'] !== 'FAQPage');
+        schemas.push({
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: validFaqs.map((faq: any) => ({
+            '@type': 'Question',
+            name: String(faq.question).trim(),
+            acceptedAnswer: {
+              '@type': 'Answer',
+              text: String(faq.answer).trim(),
+            },
+          })),
+        });
+      }
+    }
+
+    if (override.customJsonLd && typeof override.customJsonLd === 'string') {
       try {
-        const pDoc = await getDoc(doc(db, 'products', prodId));
+        const parsed = JSON.parse(override.customJsonLd);
+        if (Array.isArray(parsed)) schemas.push(...parsed);
+        else if (parsed && typeof parsed === 'object') schemas.push(parsed);
+      } catch {
+        // ignore invalid custom JSON-LD
+      }
+    }
+
+    let resolvedCanonical = baseMeta.canonicalUrl;
+    if (override.canonicalUrl && typeof override.canonicalUrl === 'string' && override.canonicalUrl.trim()) {
+      const c = override.canonicalUrl.trim();
+      resolvedCanonical = /^https?:\/\//i.test(c)
+        ? c
+        : `${siteBase}${c.startsWith('/') ? c : `/${c}`}`;
+    }
+
+    let resolvedOgImage = baseMeta.ogImage;
+    if (override.ogImage && typeof override.ogImage === 'string' && override.ogImage.trim()) {
+      const img = override.ogImage.trim();
+      resolvedOgImage = /^https?:\/\//i.test(img)
+        ? img
+        : `${siteBase}${img.startsWith('/') ? img : `/${img}`}`;
+    }
+
+    return {
+      ...baseMeta,
+      title: override.metaTitle?.trim() || baseMeta.title,
+      description: override.metaDescription?.trim() || baseMeta.description,
+      canonicalUrl: resolvedCanonical,
+      ogImage: resolvedOgImage,
+      ogImageAlt: override.ogImageAlt?.trim() || baseMeta.ogImageAlt,
+      ogType: override.ogType || baseMeta.ogType,
+      noindex: typeof override.noindex === 'boolean' ? override.noindex : baseMeta.noindex,
+      jsonLd: schemas.length > 0 ? schemas : baseMeta.jsonLd,
+    };
+  };
+
+  if (req.path.startsWith('/product/')) {
+    const prodParam = decodeURIComponent(req.path.replace('/product/', '').trim());
+    let product: any = null;
+    if (db && prodParam) {
+      try {
+        const pDoc = await getDoc(doc(db, 'products', prodParam));
         if (pDoc.exists()) {
           product = { id: pDoc.id, ...pDoc.data() };
+        } else {
+          const slugSnap = await getDocs(
+            query(collection(db, 'products'), where('seoSlug', '==', prodParam.toLowerCase()), limit(1))
+          );
+          if (!slugSnap.empty) {
+            const matchedDoc = slugSnap.docs[0];
+            product = { id: matchedDoc.id, ...matchedDoc.data() };
+          }
         }
       } catch {
         // ignore fetch error
@@ -461,38 +622,77 @@ export async function buildBotSsrMetadata(req: express.Request): Promise<{
         typeof product.discountPrice === 'number' && product.discountPrice > 0 ? product.discountPrice : regularPrice;
       const activePrice = salePrice > 0 ? salePrice : regularPrice;
       const isAvail = (product.stock ?? 0) > 0;
+      const productPath = getProductPath(product);
+      const productUrl = `${siteBase}${productPath}`;
+
+      const productSchema: any = {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        '@id': `${productUrl}#product`,
+        name: product.name,
+        image: [product.ogImage, product.image, ...(product.images || [])].filter(Boolean),
+        description: pDesc,
+        sku: product.sku || product.barcode || product.id,
+        brand: {
+          '@type': 'Brand',
+          name: product.brand || 'Korean Skin Food BD',
+        },
+        offers: {
+          '@type': 'Offer',
+          url: productUrl,
+          priceCurrency: 'BDT',
+          price: activePrice,
+          availability: isAvail ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+          itemCondition: 'https://schema.org/NewCondition',
+        },
+      };
+
+      const schemas: any[] = [productSchema];
+      if (Array.isArray(product.faqs) && product.faqs.length > 0) {
+        const validFaqs = product.faqs.filter((f: any) => f?.question?.trim() && f?.answer?.trim());
+        if (validFaqs.length > 0) {
+          schemas.push({
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            mainEntity: validFaqs.map((faq: any) => ({
+              '@type': 'Question',
+              name: String(faq.question).trim(),
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: String(faq.answer).trim(),
+              },
+            })),
+          });
+        }
+      }
 
       meta = {
         title: pTitle,
         description: pDesc,
-        canonicalUrl: `${siteBase}/product/${encodeURIComponent(product.id)}`,
-        ogImage: product.image || (Array.isArray(product.images) && product.images[0]) || defaultOgImage,
-        ogImageAlt: product.imageAltText || `${product.name} ${product.brand || 'Korean Skin Food BD'}`,
+        canonicalUrl: productUrl,
+        ogImage: product.ogImage || product.image || (Array.isArray(product.images) && product.images[0]) || defaultOgImage,
+        ogImageAlt: product.ogImageAlt || product.imageAltText || `${product.name} ${product.brand || 'Korean Skin Food BD'}`,
         ogType: 'product',
         noindex: Boolean(product.noindex),
-        jsonLd: {
-          '@context': 'https://schema.org',
-          '@type': 'Product',
-          '@id': `${siteBase}/product/${encodeURIComponent(product.id)}#product`,
-          name: product.name,
-          image: [product.image, ...(product.images || [])].filter(Boolean),
-          description: pDesc,
-          sku: product.sku || product.barcode || product.id,
-          brand: {
-            '@type': 'Brand',
-            name: product.brand || 'Korean Skin Food BD',
-          },
-          offers: {
-            '@type': 'Offer',
-            url: `${siteBase}/product/${encodeURIComponent(product.id)}`,
-            priceCurrency: 'BDT',
-            price: activePrice,
-            availability: isAvail ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-            itemCondition: 'https://schema.org/NewCondition',
-          },
-        },
+        jsonLd: schemas,
       };
-      return { status: 200, meta };
+
+      // Also check seo_pages override using both canonical product path & requested path
+      let override: any = null;
+      if (db) {
+        try {
+          const snap = await getDoc(doc(db, 'seo_pages', encodeSeoPageDocId(productPath)));
+          if (snap.exists()) {
+            override = snap.data();
+          } else {
+            override = await resolvePageSeoOverride();
+          }
+        } catch {
+          override = null;
+        }
+      }
+
+      return { status: 200, meta: applySeoOverride(meta, override) };
     }
 
     return {
@@ -551,7 +751,8 @@ export async function buildBotSsrMetadata(req: express.Request): Promise<{
     meta.noindex = true;
   }
 
-  return { status: 200, meta };
+  const pageOverride = await resolvePageSeoOverride();
+  return { status: 200, meta: applySeoOverride(meta, pageOverride) };
 }
 
 export default router;

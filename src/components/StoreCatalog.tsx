@@ -31,6 +31,7 @@ import { getRetailPrice } from '../utils/pricing';
 import { SeoHead } from './SeoHead';
 import { buildHomepageSeo } from '../services/seoService';
 import { getYouTubeEmbedUrl as buildYouTubeEmbedUrl } from '../utils/youtubeUrl';
+import { getProductPath } from '../utils/productSlug';
 import { YouTubeShortItem, YouTubeShortsDisplaySettings } from '../types';
 import {
   DEFAULT_YOUTUBE_SHORTS_DISPLAY_SETTINGS,
@@ -561,7 +562,7 @@ export const StoreCatalog: React.FC = () => {
     return (
       <div 
         key="hero" 
-        className="relative w-full min-h-[480px] md:min-h-[560px] overflow-hidden bg-[#fbf2ed] bg-cover bg-center bg-no-repeat border-b border-pink-100 shadow-sm transition-all duration-500 flex items-center"
+        className="relative w-full min-h-[480px] md:min-h-[560px] overflow-hidden bg-[#fbf2ed] bg-cover bg-center bg-no-repeat border-b border-pink-100 shadow-sm transition-all duration-500"
         style={{
           backgroundImage: h.backgroundImageUrl ? `url("${h.backgroundImageUrl}")` : undefined
         }}
@@ -983,7 +984,7 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
               >
                 <ProductCard
                   product={prod}
-                  onQuickView={(p) => navigate(`/product/${p.id}`)}
+                  onQuickView={(p) => navigate(getProductPath(p))}
                 />
               </div>
             ))}
@@ -1161,7 +1162,7 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
                           key={product.id}
                           onClick={() => {
                             setIsSearchDropdownOpen(false);
-                            navigate(`/product/${product.id}`);
+                            navigate(getProductPath(product));
                           }}
                           className="p-2.5 hover:bg-rose-50/50 cursor-pointer transition-colors flex items-center gap-3 group"
                         >
@@ -2025,7 +2026,7 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
         catalog={products}
         onAddToCart={(product) => {
           if (profile?.wholesaleAccess) {
-            navigate(`/product/${product.id}`);
+            navigate(getProductPath(product));
           } else {
             addToCart(product);
           }
@@ -2039,7 +2040,7 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
         onClose={() => setQuickViewProduct(null)}
         onAddToCart={(product) => {
           if (profile?.wholesaleAccess) {
-            navigate(`/product/${product.id}`);
+            navigate(getProductPath(product));
           } else {
             addToCart(product);
             setIsCartOpen(true);

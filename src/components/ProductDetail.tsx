@@ -36,8 +36,10 @@ import { ComboComponentDetail } from '../types';
 import { SeoHead } from './SeoHead';
 import { buildProductSeo } from '../services/seoService';
 import { userPortalService } from '../services/userPortalService';
-import { findIngredientSlug } from '../data/ingredientLibrary';
-import { findConcernSlug } from '../data/skinConcerns';
+import { findIngredientSlug, taxonomiesToIngredientGuideEntries } from '../data/ingredientLibrary';
+import { findConcernSlug, taxonomiesToSkinConcernEntries } from '../data/skinConcerns';
+import { useTaxonomies } from '../hooks/queries/taxonomies';
+import { getProductPath, isCleanProductSlug } from '../utils/productSlug';
 
 export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -48,6 +50,16 @@ export const ProductDetail: React.FC = () => {
 
   const { data: product, isLoading: isProductLoading, isError } = useProduct(id);
   const { data: allProducts = [] } = useProducts();
+  const { data: concernTaxonomies = [] } = useTaxonomies('skin_concern');
+  const { data: ingredientTaxonomies = [] } = useTaxonomies('ingredient');
+  const dynamicConcerns = useMemo(
+    () => taxonomiesToSkinConcernEntries(concernTaxonomies),
+    [concernTaxonomies]
+  );
+  const dynamicIngredients = useMemo(
+    () => taxonomiesToIngredientGuideEntries(ingredientTaxonomies),
+    [ingredientTaxonomies]
+  );
 
   const [activeTab, setActiveTab] = useState<'desc' | 'ingredients' | 'how-to' | 'safety'>('desc');
   const [selectedMainImage, setSelectedMainImage] = useState<string>('');
@@ -338,6 +350,12 @@ export const ProductDetail: React.FC = () => {
     if (!id) return;
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [id]);
+
+  useEffect(() => {
+    if (product && isCleanProductSlug(product.seoSlug) && id && id !== product.seoSlug) {
+      navigate(getProductPath(product), { replace: true });
+    }
+  }, [product, id, navigate]);
 
   useEffect(() => {
     if (product && trackedProductIdRef.current !== product.id) {
@@ -1327,11 +1345,11 @@ export const ProductDetail: React.FC = () => {
                         Targeted Skin Concerns
                       </span>
                       <div className="flex flex-wrap gap-1.5">
-                        {product.concerns.map((concern) => {
-                          const concernSlug = findConcernSlug(concern);
+                        {product.concerns.map((concern, idx) => {
+                          const concernSlug = findConcernSlug(concern, dynamicConcerns);
                           return concernSlug ? (
                             <Link
-                              key={concern}
+                              key={`${concern}-${idx}`}
                               to={`/concern/${concernSlug}`}
                               className="px-2.5 py-1 rounded-full bg-white border border-pink-200 text-[#E91E8C] font-bold text-[11px] hover:bg-pink-50 transition"
                             >
@@ -1339,7 +1357,7 @@ export const ProductDetail: React.FC = () => {
                             </Link>
                           ) : (
                             <span
-                              key={concern}
+                              key={`${concern}-${idx}`}
                               className="px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-700 font-semibold text-[11px]"
                             >
                               {concern}
@@ -1351,8 +1369,8 @@ export const ProductDetail: React.FC = () => {
                   )}
                   {product.benefits && product.benefits.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
-                      {product.benefits.map((b) => (
-                        <span key={b} className="px-2.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px] font-bold">
+                      {product.benefits.map((b, idx) => (
+                        <span key={`${b}-${idx}`} className="px-2.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-100 text-emerald-700 text-[10px] font-bold">
                           {b}
                         </span>
                       ))}
@@ -1369,11 +1387,11 @@ export const ProductDetail: React.FC = () => {
                         Select any highlighted active ingredient below to view cosmetic layering education and compatible catalog products:
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {product.keyIngredients.map((ing) => {
-                          const slug = findIngredientSlug(ing);
+                        {product.keyIngredients.map((ing, idx) => {
+                          const slug = findIngredientSlug(ing, dynamicIngredients);
                           return slug ? (
                             <Link
-                              key={ing}
+                              key={`${ing}-${idx}`}
                               to={`/ingredient/${slug}`}
                               className="px-3 py-1 rounded-full bg-white border border-pink-200 text-[#E91E8C] font-bold text-[11px] hover:bg-pink-50 transition"
                             >
@@ -1381,7 +1399,7 @@ export const ProductDetail: React.FC = () => {
                             </Link>
                           ) : (
                             <Link
-                              key={ing}
+                              key={`${ing}-${idx}`}
                               to="/ingredients"
                               className="px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-700 font-semibold text-[11px] hover:border-pink-200 transition"
                             >
@@ -2282,7 +2300,7 @@ export const ProductDetail: React.FC = () => {
             <ProductCard 
               key={p.id} 
               product={p} 
-              onQuickView={(prod) => navigate(`/product/${prod.id}`)}
+              onQuickView={(prod) => navigate(getProductPath(prod))}
             />
           ))}
         </div>

@@ -22,10 +22,12 @@ import {
   Sparkles, Layers, Sliders, ChevronDown, ChevronUp, Plus, Trash2, ExternalLink,
   Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
   Upload, RefreshCw, Star, Package, Search, CheckCircle, X, FileText, Award, BookOpen,
-  FileCheck, LogIn, AlertTriangle, Youtube, Clock, Pin, PinOff, Play, Loader2
+  FileCheck, LogIn, AlertTriangle, Youtube, Clock, Pin, PinOff, Play, Loader2,
+  ShieldCheck, Droplets, HeartPulse, ClipboardCheck, CalendarClock, CreditCard, CheckCircle2, Trophy, Building2, User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
+import { getProductPath } from '../utils/productSlug';
 
 type ThemeEditorTab = 'global' | 'home' | 'shop' | PageThemeKey;
 
@@ -56,19 +58,39 @@ const PAGE_DIRECTORY_GROUPS: Array<{ groupTitle: string; items: PageDirectoryIte
     ],
   },
   {
-    groupTitle: 'Partners & Info',
+    groupTitle: 'Skincare Tools & Trust',
     items: [
-      { key: 'becomeCreator', name: 'Become a Creator', route: '/become-a-creator', Icon: Sparkles },
-      { key: 'about', name: 'About Us', route: '/about-us', Icon: Info },
-      { key: 'contact', name: 'Contact Us', route: '/contact-us', Icon: Phone },
+      { key: 'authenticity', name: 'Authenticity Center', route: '/authenticity', Icon: ShieldCheck },
+      { key: 'ingredients', name: 'Ingredient Glossary', route: '/ingredients', Icon: Droplets },
+      { key: 'concerns', name: 'Skin Concerns Hub', route: '/concerns', Icon: HeartPulse },
+      { key: 'skinQuiz', name: 'Skin Profile Quiz', route: '/skin-quiz', Icon: ClipboardCheck },
+      { key: 'routineBuilder', name: 'Routine Builder', route: '/routine-builder', Icon: CalendarClock },
     ],
   },
   {
-    groupTitle: 'Legal & Utility',
+    groupTitle: 'Checkout & Account',
     items: [
+      { key: 'checkout', name: 'Checkout Page', route: '/checkout', Icon: CreditCard },
+      { key: 'thankYou', name: 'Thank You Page', route: '/thank-you', Icon: CheckCircle2 },
+      { key: 'profile', name: 'Customer Profile', route: '/profile', Icon: UserIcon },
+      { key: 'login', name: 'Login Page', route: '/login', Icon: LogIn },
+    ],
+  },
+  {
+    groupTitle: 'Partners & Portals',
+    items: [
+      { key: 'becomeCreator', name: 'Become a Creator', route: '/become-a-creator', Icon: Sparkles },
+      { key: 'creatorLeaderboard', name: 'Creator Leaderboard', route: '/creator/leaderboard', Icon: Trophy },
+      { key: 'wholesalePortal', name: 'Wholesale Portal', route: '/wholesale', Icon: Building2 },
+    ],
+  },
+  {
+    groupTitle: 'Info, Legal & Utility',
+    items: [
+      { key: 'about', name: 'About Us', route: '/about-us', Icon: Info },
+      { key: 'contact', name: 'Contact Us', route: '/contact-us', Icon: Phone },
       { key: 'privacy', name: 'Privacy Policy', route: '/privacy-policy', Icon: Shield },
       { key: 'terms', name: 'Terms of Service', route: '/terms-of-service', Icon: FileText },
-      { key: 'login', name: 'Login Page', route: '/login', Icon: LogIn },
       { key: 'notFound', name: '404 Not Found', route: '/404', Icon: AlertTriangle },
     ],
   },
@@ -561,11 +583,31 @@ export const AdminThemeEditor: React.FC = () => {
       case 'guideDetail':
         return '/guide/korean-skincare-routine-for-beginners-in-bangladesh';
       case 'productDetail':
-        return allProducts[0]?.id ? `/product/${allProducts[0].id}` : '/shop';
+        return allProducts[0]?.id ? getProductPath(allProducts[0]) : '/shop';
       case 'login':
         return '/login';
       case 'notFound':
         return '/404';
+      case 'authenticity':
+        return '/authenticity';
+      case 'ingredients':
+        return '/ingredients';
+      case 'concerns':
+        return '/concerns';
+      case 'skinQuiz':
+        return '/skin-quiz';
+      case 'routineBuilder':
+        return '/routine-builder';
+      case 'checkout':
+        return '/checkout';
+      case 'thankYou':
+        return '/thank-you';
+      case 'creatorLeaderboard':
+        return '/creator/leaderboard';
+      case 'wholesalePortal':
+        return '/wholesale';
+      case 'profile':
+        return '/profile';
       default:
         return '/';
     }
@@ -722,13 +764,13 @@ export const AdminThemeEditor: React.FC = () => {
         </motion.div>
       )}
 
-      {/* All-Pages Directory Switcher (15 Modules) */}
+      {/* All-Pages Directory Switcher (25 Modules) */}
       <div className="bg-white p-4 rounded-[24px] border border-pink-100 shadow-sm space-y-3">
         <div className="flex items-center justify-between gap-2 px-1">
           <div className="flex items-center gap-2">
             <Layout size={15} className="text-[#E91E8C]" />
             <span className="text-xs font-black text-slate-900">
-              All Storefront & Info Pages Directory (15 Editable Modules)
+              All Storefront & Info Pages Directory (25 Editable Modules)
             </span>
           </div>
           <span className="text-[10px] font-mono font-bold text-slate-400">
@@ -736,7 +778,7 @@ export const AdminThemeEditor: React.FC = () => {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {PAGE_DIRECTORY_GROUPS.map((group) => (
             <div key={group.groupTitle} className="bg-pink-50/20 border border-pink-100/80 rounded-2xl p-2.5 space-y-1.5">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-2 block">
@@ -3472,7 +3514,7 @@ export const AdminThemeEditor: React.FC = () => {
         </div>
       )}
 
-      {/* SUBPAGES: DYNAMIC EDITORS FOR ALL 12 PUBLIC STOREFRONT, INFO, PARTNER & LEGAL PAGES */}
+      {/* SUBPAGES: DYNAMIC EDITORS FOR ALL 22 PUBLIC STOREFRONT, TOOL, PORTAL, INFO, PARTNER & LEGAL PAGES */}
       {activeTab !== 'global' && activeTab !== 'home' && activeTab !== 'shop' && (
         <PagesThemeEditors
           activePage={activeTab}

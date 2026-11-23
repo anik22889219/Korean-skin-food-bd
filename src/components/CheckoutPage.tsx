@@ -32,6 +32,8 @@ import { getSiteUrl } from '../utils/siteUrl';
 import { authFetch } from '../services/apiClient';
 import { SavedAddress, userPortalService } from '../services/userPortalService';
 import { SeoHead } from './SeoHead';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { CheckoutPageThemeSettings } from '../types/theme';
 
 const normalizeBdPhone = (raw: string) => {
   let clean = raw.replace(/[\s\-()]/g, '');
@@ -90,6 +92,15 @@ export const CheckoutPage: React.FC = () => {
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string>('');
+  const [pageTheme, setPageTheme] = useState<CheckoutPageThemeSettings>(
+    () => themeService.getPagesTheme().checkout || DEFAULT_PAGES_THEME.checkout
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.checkout) setPageTheme(pages.checkout);
+    });
+  }, []);
 
   const hydratedQueryRef = useRef<string | null>(null);
   const trackedCheckoutRef = useRef<boolean>(false);
@@ -360,12 +371,10 @@ export const CheckoutPage: React.FC = () => {
               <span className="text-gray-900 font-bold">{activeTranslations.checkout || 'Checkout'}</span>
             </nav>
             <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
-              {isBn ? 'অর্ডার চেকআউট' : 'Checkout & Delivery Details'}
+              {isBn ? pageTheme.titleBN : pageTheme.titleEN}
             </h1>
             <p className="text-xs text-gray-500">
-              {isBn
-                ? 'সারা বাংলাদেশে ক্যাশ অন ডেলিভারি সুবিধা · সরাসরি ফোন কনফার্মেশন'
-                : 'Cash on Delivery across Bangladesh · Phone Confirmation Dispatch'}
+              {isBn ? pageTheme.subtitleBN : pageTheme.subtitleEN}
             </p>
           </div>
 
@@ -382,8 +391,8 @@ export const CheckoutPage: React.FC = () => {
                     ? 'লিংক কপি হয়েছে!'
                     : 'Checkout Link Copied!'
                   : isBn
-                    ? 'চেকআউট লিংক কপি'
-                    : 'Copy Checkout Link'}
+                    ? pageTheme.copyLinkLabelBN
+                    : pageTheme.copyLinkLabelEN}
               </span>
             </button>
             <Link
@@ -391,7 +400,7 @@ export const CheckoutPage: React.FC = () => {
               className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-gray-700 text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <ArrowLeft size={14} />
-              <span>{isBn ? 'শপিং চালিয়ে যান' : 'Continue Shopping'}</span>
+              <span>{isBn ? pageTheme.continueShoppingLabelBN : pageTheme.continueShoppingLabelEN}</span>
             </Link>
           </div>
         </div>
@@ -404,12 +413,10 @@ export const CheckoutPage: React.FC = () => {
                 <ShoppingBag size={28} />
               </div>
               <h2 className="text-lg sm:text-xl font-black text-gray-900">
-                {isBn ? 'আপনার চেকআউট কার্টটি খালি' : 'Your Checkout Basket is Empty'}
+                {isBn ? pageTheme.emptyTitleBN : pageTheme.emptyTitleEN}
               </h2>
               <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-                {isBn
-                  ? 'সরাসরি এখান থেকে পছন্দের পণ্য যোগ করুন অথবা আমাদের শপ ক্যাটালগ থেকে বেছে নিন।'
-                  : 'Add products directly below to start an instant order, or browse our full K-Beauty catalog.'}
+                {isBn ? pageTheme.emptySubtitleBN : pageTheme.emptySubtitleEN}
               </p>
               <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
                 <Link
@@ -417,12 +424,13 @@ export const CheckoutPage: React.FC = () => {
                   className="min-h-[44px] px-6 py-2.5 bg-[#E91E8C] hover:bg-[#d8177f] text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-2 whitespace-nowrap shrink-0"
                 >
                   <ShoppingBag size={15} />
-                  <span>{isBn ? 'শপ ক্যাটালগ দেখুন' : 'Browse Shop Catalog'}</span>
+                  <span>{isBn ? pageTheme.emptyShopBtnBN : pageTheme.emptyShopBtnEN}</span>
                 </Link>
               </div>
             </div>
 
             {/* Inline Quick-Add Search */}
+            {pageTheme.showQuickAdd && (
             <div className="border-t border-pink-100 pt-6 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <h3 className="text-sm font-black text-gray-900">
@@ -486,6 +494,7 @@ export const CheckoutPage: React.FC = () => {
                 })}
               </div>
             </div>
+            )}
           </div>
         ) : (
           /* Two-Column Active Checkout Grid */
@@ -494,6 +503,7 @@ export const CheckoutPage: React.FC = () => {
             <div className="lg:col-span-7 space-y-5">
               {/* Optional Google Account Banner for Guest Users / Rewards */}
               {!user ? (
+                pageTheme.showGuestRewardsBanner && (
                 <div className="bg-white rounded-2xl border border-pink-100 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#E91E8C] shrink-0">
@@ -524,6 +534,7 @@ export const CheckoutPage: React.FC = () => {
                     <span>{activeTranslations.loginToOrderBtn || 'Continue with Google'}</span>
                   </button>
                 </div>
+                )
               ) : (
                 <div className="bg-white rounded-2xl border border-emerald-200/80 p-4 shadow-xs flex items-center justify-between gap-3 text-xs">
                   <div className="flex items-center gap-3 min-w-0">
@@ -738,7 +749,7 @@ export const CheckoutPage: React.FC = () => {
               {/* Section 2: Payment Method (Cash on Delivery) */}
               <div className="bg-white rounded-2xl border border-pink-100 p-5 sm:p-6 shadow-xs space-y-3">
                 <h2 className="text-base font-black text-gray-900">
-                  {isBn ? 'পেমেন্ট পদ্ধতি' : 'Payment Method'}
+                  {isBn ? pageTheme.paymentTitleBN : pageTheme.paymentTitleEN}
                 </h2>
                 <div className="flex items-start justify-between gap-4 p-4 rounded-xl border border-[#E91E8C]/40 bg-pink-50/40">
                   <div className="flex items-start gap-3">
@@ -748,9 +759,7 @@ export const CheckoutPage: React.FC = () => {
                     <div className="space-y-1">
                       <p className="text-sm font-bold text-gray-900">{activeTranslations.cod}</p>
                       <p className="text-xs text-gray-600 leading-relaxed">
-                        {isBn
-                          ? 'পণ্য হাতে পেয়ে যাচাই করে ডেলিভারি ম্যানের কাছে মূল্য পরিশোধ করুন।'
-                          : 'Pay in cash upon receiving your parcel at your doorstep anywhere in Bangladesh.'}
+                        {isBn ? pageTheme.paymentCodDescBN : pageTheme.paymentCodDescEN}
                       </p>
                     </div>
                   </div>
@@ -763,7 +772,7 @@ export const CheckoutPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-black text-gray-900 flex items-center gap-2">
                     <Tag size={15} className="text-[#E91E8C]" />
-                    <span>{isBn ? 'প্রমো কোড / কুপন' : 'Promo / Discount Code'}</span>
+                    <span>{isBn ? pageTheme.promoTitleBN : pageTheme.promoTitleEN}</span>
                   </span>
                   {appliedCoupon && (
                     <button
@@ -813,7 +822,7 @@ export const CheckoutPage: React.FC = () => {
                         setCouponInput(e.target.value.toUpperCase());
                         if (couponNotice) setCouponNotice(null);
                       }}
-                      placeholder={isBn ? 'কুপন কোড লিখুন...' : 'Enter promo code (e.g. FREEDELIVERY)'}
+                      placeholder={isBn ? pageTheme.promoPlaceholderBN : pageTheme.promoPlaceholderEN}
                       className="flex-1 min-h-[44px] bg-slate-50 focus:bg-white text-gray-900 uppercase tracking-wider font-mono px-3.5 py-2 rounded-xl border border-slate-200 outline-none focus:border-[#E91E8C] text-xs"
                     />
                     <button
@@ -875,20 +884,22 @@ export const CheckoutPage: React.FC = () => {
                 <div className="flex items-center justify-between border-b border-pink-100 pb-3.5">
                   <div>
                     <h2 className="text-base font-black text-gray-900">
-                      {isBn ? 'অর্ডার সারাংশ' : 'Order Summary'}
+                      {isBn ? pageTheme.summaryTitleBN : pageTheme.summaryTitleEN}
                     </h2>
                     <p className="text-xs text-gray-500 mt-0.5 font-mono tabular-nums">
                       {totalItemCount} {totalItemCount === 1 ? 'item' : 'items'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsQuickAddOpen((prev) => !prev)}
-                    className="text-xs font-bold text-[#E91E8C] hover:underline flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
-                  >
-                    <Plus size={14} />
-                    <span>{isBn ? 'আরও পণ্য যোগ' : 'Add Items'}</span>
-                  </button>
+                  {pageTheme.showQuickAdd && (
+                    <button
+                      type="button"
+                      onClick={() => setIsQuickAddOpen((prev) => !prev)}
+                      className="text-xs font-bold text-[#E91E8C] hover:underline flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <Plus size={14} />
+                      <span>{isBn ? 'আরও পণ্য যোগ' : 'Add Items'}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Inline Mini Quick-Add Drawer inside Summary */}
@@ -1113,9 +1124,7 @@ export const CheckoutPage: React.FC = () => {
                 </button>
 
                 <p className="text-[11px] text-center text-gray-500">
-                  {isBn
-                    ? 'অর্ডার নিশ্চিত করলে ডেলিভারির আগে আমাদের টিম কল করে কনফার্ম করবে।'
-                    : 'Our team confirms every Cash on Delivery order by phone before dispatch.'}
+                  {isBn ? pageTheme.dispatchNoteBN : pageTheme.dispatchNoteEN}
                 </p>
               </div>
             </div>

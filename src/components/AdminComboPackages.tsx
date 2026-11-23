@@ -12,6 +12,7 @@ import { useProducts } from '../hooks/queries/products';
 import { productService } from '../services/productService';
 import { Product } from '../types';
 import { getRetailPrice, getComboEffectiveStock, getComboSavings } from '../utils/pricing';
+import { getProductPath } from '../utils/productSlug';
 import { ComboPackageModal } from './ComboPackageModal';
 
 export const AdminComboPackages: React.FC = () => {
@@ -600,7 +601,7 @@ export const AdminComboPackages: React.FC = () => {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => navigate(`/product/${combo.id}`)}
+                      onClick={() => navigate(getProductPath(combo))}
                       className="p-2 hover:bg-white text-slate-600 hover:text-purple-600 rounded-xl transition cursor-pointer border border-transparent hover:border-slate-200"
                       title="View on Storefront"
                     >
@@ -745,7 +746,7 @@ export const AdminComboPackages: React.FC = () => {
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            onClick={() => navigate(`/product/${combo.id}`)}
+                            onClick={() => navigate(getProductPath(combo))}
                             className="p-1.5 hover:bg-purple-50 text-slate-600 hover:text-purple-600 rounded-xl transition"
                             title="View on Storefront"
                           >

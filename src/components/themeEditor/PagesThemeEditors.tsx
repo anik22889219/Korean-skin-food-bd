@@ -22,7 +22,17 @@ import {
   RotateCcw,
   Plus,
   Trash2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ShieldCheck,
+  Droplets,
+  HeartPulse,
+  ClipboardCheck,
+  CalendarClock,
+  CreditCard,
+  CheckCircle2,
+  Trophy,
+  Building2,
+  User as UserIcon
 } from 'lucide-react';
 
 interface PagesThemeEditorsProps {
@@ -107,6 +117,66 @@ const PAGE_HEADERS: Record<PageThemeKey, { title: string; route: string; desc: s
     route: '/404',
     desc: 'Manage missing-page error badge, apology message & quick navigation shortcut labels.',
     Icon: AlertTriangle,
+  },
+  authenticity: {
+    title: 'Authenticity & Inspection Center',
+    route: '/authenticity',
+    desc: 'Edit bilingual inspection hero copy, MFG/EXP date guide headings, checklist/policy toggles & support CTA banner.',
+    Icon: ShieldCheck,
+  },
+  ingredients: {
+    title: 'Ingredients Library (/ingredients & /ingredient/:slug)',
+    route: '/ingredients',
+    desc: 'Customize glossary badge, EN/BN titles, search placeholder, bottom quiz banner & ingredient detail disclaimer.',
+    Icon: Droplets,
+  },
+  concerns: {
+    title: 'Skin Concerns Library (/concerns & /concern/:slug)',
+    route: '/concerns',
+    desc: 'Control skin-concern directory headlines (EN/BN), card CTA text, detail disclaimers & ingredient/product toggles.',
+    Icon: HeartPulse,
+  },
+  skinQuiz: {
+    title: 'Skin Profile Quiz Page',
+    route: '/skin-quiz',
+    desc: 'Customize quiz badge, EN/BN headings, submit/reset buttons & matched shortlist results header/CTAs.',
+    Icon: ClipboardCheck,
+  },
+  routineBuilder: {
+    title: 'AM/PM Routine Builder Page',
+    route: '/routine-builder',
+    desc: 'Edit routine planner badge, EN/BN titles, AM/PM column headings, button labels & conflict/saved toggles.',
+    Icon: CalendarClock,
+  },
+  checkout: {
+    title: 'Retail Checkout Page',
+    route: '/checkout',
+    desc: 'Customize bilingual checkout headers, empty-cart prompt, COD payment copy, promo box & dispatch note.',
+    Icon: CreditCard,
+  },
+  thankYou: {
+    title: 'Order Confirmation / Thank You Page',
+    route: '/thank-you',
+    desc: 'Edit bilingual confirmation title, receipt/delivery headings, WhatsApp/print button labels & guest reward tip.',
+    Icon: CheckCircle2,
+  },
+  creatorLeaderboard: {
+    title: 'Creator Leaderboard Page',
+    route: '/creator/leaderboard',
+    desc: 'Customize ranking hero badge, headline, subtitle, search placeholder & period/criteria visibility.',
+    Icon: Trophy,
+  },
+  wholesalePortal: {
+    title: 'Wholesale Portal & B2B Checkout',
+    route: '/wholesale',
+    desc: 'Edit Wholesale Dashboard badge/subtitle, B2B checkout title/tier badge & authorization notice.',
+    Icon: Building2,
+  },
+  profile: {
+    title: 'Customer Account & Profile Page',
+    route: '/profile',
+    desc: 'Customize customer profile fallback name, tab labels & role/metrics visibility toggles.',
+    Icon: UserIcon,
   },
 };
 
@@ -1055,6 +1125,374 @@ export const PagesThemeEditors: React.FC<PagesThemeEditorsProps> = ({
               <FieldInput label="Guides Button Label" value={d.guidesBtnLabel} onChange={(v) => set({ guidesBtnLabel: v })} />
             </div>
           </SectionBlock>
+        );
+      })()}
+
+      {/* 13. AUTHENTICITY & INSPECTION CENTER */}
+      {activePage === 'authenticity' && (() => {
+        const d = pagesTheme.authenticity;
+        const set = (patch: Partial<typeof d>) => updatePage('authenticity', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Section Visibility Toggles">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <ToggleRow label="4-Step Inspection Grid" checked={d.showChecklist} onChange={(v) => set({ showChecklist: v })} />
+                <ToggleRow label="Korean Date Code Guide" checked={d.showDateCodes} onChange={(v) => set({ showDateCodes: v })} />
+                <ToggleRow label="COD & Hygiene Policy Cards" checked={d.showPolicyCards} onChange={(v) => set({ showPolicyCards: v })} />
+                <ToggleRow label="Bottom Help Banner" checked={d.showHelpBanner} onChange={(v) => set({ showHelpBanner: v })} />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Hero Header (English & বাংলা)">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Badge (English)" value={d.badgeEN} onChange={(v) => set({ badgeEN: v })} />
+                <FieldInput label="Badge (বাংলা)" value={d.badgeBN} onChange={(v) => set({ badgeBN: v })} />
+                <FieldInput label="Headline (English)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Headline (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldTextarea label="Subtitle (English)" rows={3} value={d.subtitleEN} onChange={(v) => set({ subtitleEN: v })} />
+                <FieldTextarea label="Subtitle (বাংলা)" rows={3} value={d.subtitleBN} onChange={(v) => set({ subtitleBN: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FieldInput label="Primary CTA (EN)" value={d.primaryCtaEN} onChange={(v) => set({ primaryCtaEN: v })} />
+                <FieldInput label="Primary CTA (বাংলা)" value={d.primaryCtaBN} onChange={(v) => set({ primaryCtaBN: v })} />
+                <FieldInput label="Primary CTA Route" value={d.primaryCtaLink} onChange={(v) => set({ primaryCtaLink: v })} mono />
+                <FieldInput label="Secondary CTA (EN)" value={d.secondaryCtaEN} onChange={(v) => set({ secondaryCtaEN: v })} />
+                <FieldInput label="Secondary CTA (বাংলা)" value={d.secondaryCtaBN} onChange={(v) => set({ secondaryCtaBN: v })} />
+                <FieldInput label="Secondary CTA Route" value={d.secondaryCtaLink} onChange={(v) => set({ secondaryCtaLink: v })} mono />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Date Codes Heading & Bottom Support Banner">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Date Codes Heading (EN)" value={d.dateCodesHeadingEN} onChange={(v) => set({ dateCodesHeadingEN: v })} />
+                <FieldInput label="Date Codes Heading (বাংলা)" value={d.dateCodesHeadingBN} onChange={(v) => set({ dateCodesHeadingBN: v })} />
+                <FieldInput label="Help Banner Title (EN)" value={d.helpTitleEN} onChange={(v) => set({ helpTitleEN: v })} />
+                <FieldInput label="Help Banner Title (বাংলা)" value={d.helpTitleBN} onChange={(v) => set({ helpTitleBN: v })} />
+                <FieldTextarea label="Help Banner Subtitle (EN)" rows={2} value={d.helpSubtitleEN} onChange={(v) => set({ helpSubtitleEN: v })} />
+                <FieldTextarea label="Help Banner Subtitle (বাংলা)" rows={2} value={d.helpSubtitleBN} onChange={(v) => set({ helpSubtitleBN: v })} />
+                <FieldInput label="Secondary Button (EN)" value={d.helpSecondaryLabelEN} onChange={(v) => set({ helpSecondaryLabelEN: v })} />
+                <FieldInput label="Secondary Button (বাংলা)" value={d.helpSecondaryLabelBN} onChange={(v) => set({ helpSecondaryLabelBN: v })} />
+                <FieldInput label="Secondary Button Route" value={d.helpSecondaryLink} onChange={(v) => set({ helpSecondaryLink: v })} mono />
+                <FieldInput label="Primary Button (EN)" value={d.helpPrimaryLabelEN} onChange={(v) => set({ helpPrimaryLabelEN: v })} />
+                <FieldInput label="Primary Button (বাংলা)" value={d.helpPrimaryLabelBN} onChange={(v) => set({ helpPrimaryLabelBN: v })} />
+                <FieldInput label="Primary Button Route" value={d.helpPrimaryLink} onChange={(v) => set({ helpPrimaryLink: v })} mono />
+              </div>
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 14. INGREDIENTS LIBRARY */}
+      {activePage === 'ingredients' && (() => {
+        const d = pagesTheme.ingredients;
+        const set = (patch: Partial<typeof d>) => updatePage('ingredients', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Glossary Index Header & Search">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Top Badge Text" value={d.badgeText} onChange={(v) => set({ badgeText: v })} />
+                <FieldInput label="Card CTA Label" value={d.cardCtaLabel} onChange={(v) => set({ cardCtaLabel: v })} />
+                <FieldInput label="Title (English)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Title (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+                <FieldInput label="Search Placeholder (EN)" value={d.searchPlaceholderEN} onChange={(v) => set({ searchPlaceholderEN: v })} />
+                <FieldInput label="Search Placeholder (বাংলা)" value={d.searchPlaceholderBN} onChange={(v) => set({ searchPlaceholderBN: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldTextarea label="Subtitle (English)" rows={2} value={d.subtitleEN} onChange={(v) => set({ subtitleEN: v })} />
+                <FieldTextarea label="Subtitle (বাংলা)" rows={2} value={d.subtitleBN} onChange={(v) => set({ subtitleBN: v })} />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Bottom Guidance Banner & Detail Page Settings">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <ToggleRow label="Show Bottom Quiz / Concerns Banner" checked={d.showBottomBanner} onChange={(v) => set({ showBottomBanner: v })} />
+                <ToggleRow label="Show Matching Products on Detail Page" checked={d.showDetailRelatedProducts} onChange={(v) => set({ showDetailRelatedProducts: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Bottom Title (EN)" value={d.bottomTitleEN} onChange={(v) => set({ bottomTitleEN: v })} />
+                <FieldInput label="Bottom Title (বাংলা)" value={d.bottomTitleBN} onChange={(v) => set({ bottomTitleBN: v })} />
+                <FieldInput label="Secondary CTA Label" value={d.bottomSecondaryLabel} onChange={(v) => set({ bottomSecondaryLabel: v })} />
+                <FieldInput label="Secondary CTA Route" value={d.bottomSecondaryLink} onChange={(v) => set({ bottomSecondaryLink: v })} mono />
+                <FieldInput label="Primary CTA Label" value={d.bottomPrimaryLabel} onChange={(v) => set({ bottomPrimaryLabel: v })} />
+                <FieldInput label="Primary CTA Route" value={d.bottomPrimaryLink} onChange={(v) => set({ bottomPrimaryLink: v })} mono />
+              </div>
+              <FieldTextarea label="Bottom Banner Subtitle" rows={2} value={d.bottomSubtitle} onChange={(v) => set({ bottomSubtitle: v })} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-pink-100">
+                <FieldInput label="Detail Page Badge" value={d.detailBadgeText} onChange={(v) => set({ detailBadgeText: v })} />
+              </div>
+              <FieldTextarea label="Detail Cosmetic Disclaimer" rows={2} value={d.detailDisclaimer} onChange={(v) => set({ detailDisclaimer: v })} />
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 15. SKIN CONCERNS LIBRARY */}
+      {activePage === 'concerns' && (() => {
+        const d = pagesTheme.concerns;
+        const set = (patch: Partial<typeof d>) => updatePage('concerns', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Concerns Directory Header (EN & বাংলা)">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Top Badge Text" value={d.badgeText} onChange={(v) => set({ badgeText: v })} />
+                <FieldInput label="Card CTA Label" value={d.cardCtaLabel} onChange={(v) => set({ cardCtaLabel: v })} />
+                <FieldInput label="Title (English)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Title (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldTextarea label="Subtitle (English)" rows={2} value={d.subtitleEN} onChange={(v) => set({ subtitleEN: v })} />
+                <FieldTextarea label="Subtitle (বাংলা)" rows={2} value={d.subtitleBN} onChange={(v) => set({ subtitleBN: v })} />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Concern Detail Page (/concern/:slug)">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <ToggleRow label="Show Key Focus Ingredients Box" checked={d.showDetailKeyIngredients} onChange={(v) => set({ showDetailKeyIngredients: v })} />
+                <ToggleRow label="Show Matching Catalog Products" checked={d.showDetailRelatedProducts} onChange={(v) => set({ showDetailRelatedProducts: v })} />
+              </div>
+              <FieldInput label="Detail Badge Fallback Label" value={d.detailBadgeFallback} onChange={(v) => set({ detailBadgeFallback: v })} />
+              <FieldTextarea label="Cosmetic Care Disclaimer" rows={2} value={d.detailDisclaimer} onChange={(v) => set({ detailDisclaimer: v })} />
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 16. SKIN PROFILE QUIZ */}
+      {activePage === 'skinQuiz' && (() => {
+        const d = pagesTheme.skinQuiz;
+        const set = (patch: Partial<typeof d>) => updatePage('skinQuiz', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Quiz Hero & Buttons">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Badge Text" value={d.badgeText} onChange={(v) => set({ badgeText: v })} />
+                <FieldInput label="Title (English)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Title (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+                <FieldInput label="Reset Button Label" value={d.resetButtonLabel} onChange={(v) => set({ resetButtonLabel: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldTextarea label="Subtitle (English)" rows={2} value={d.subtitleEN} onChange={(v) => set({ subtitleEN: v })} />
+                <FieldTextarea label="Subtitle (বাংলা)" rows={2} value={d.subtitleBN} onChange={(v) => set({ subtitleBN: v })} />
+              </div>
+              <FieldInput label="Submit Quiz Button Label" value={d.submitButtonLabel} onChange={(v) => set({ submitButtonLabel: v })} />
+            </SectionBlock>
+
+            <SectionBlock title="Matched Shortlist Results Section">
+              <ToggleRow label="Show Routine Builder & Add-to-Bag Result Buttons" checked={d.showResultsActions} onChange={(v) => set({ showResultsActions: v })} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Results Heading" value={d.resultsHeading} onChange={(v) => set({ resultsHeading: v })} />
+                <FieldInput label="Routine Builder CTA" value={d.routineBuilderCtaLabel} onChange={(v) => set({ routineBuilderCtaLabel: v })} />
+                <FieldInput label="Add Top 4 CTA" value={d.addTopToBagCtaLabel} onChange={(v) => set({ addTopToBagCtaLabel: v })} />
+              </div>
+              <FieldTextarea label="Results Subtext" rows={2} value={d.resultsSubtext} onChange={(v) => set({ resultsSubtext: v })} />
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 17. ROUTINE BUILDER */}
+      {activePage === 'routineBuilder' && (() => {
+        const d = pagesTheme.routineBuilder;
+        const set = (patch: Partial<typeof d>) => updatePage('routineBuilder', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Header & Quick Links">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Badge Text" value={d.badgeText} onChange={(v) => set({ badgeText: v })} />
+                <FieldInput label="Title (English)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Title (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+                <FieldInput label="Quiz CTA Button Label" value={d.quizCtaLabel} onChange={(v) => set({ quizCtaLabel: v })} />
+                <FieldInput label="Glossary CTA Button Label" value={d.glossaryCtaLabel} onChange={(v) => set({ glossaryCtaLabel: v })} />
+              </div>
+              <FieldTextarea label="Header Subtitle" rows={2} value={d.subtitle} onChange={(v) => set({ subtitle: v })} />
+            </SectionBlock>
+
+            <SectionBlock title="AM / PM Slots, Action Buttons & Toggles">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <ToggleRow label="Show Active Layering Conflict Warnings" checked={d.showLayeringWarnings} onChange={(v) => set({ showLayeringWarnings: v })} />
+                <ToggleRow label="Show Saved Routines List" checked={d.showSavedRoutines} onChange={(v) => set({ showSavedRoutines: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="AM Column Title" value={d.amTitle} onChange={(v) => set({ amTitle: v })} />
+                <FieldInput label="AM Column Subtitle" value={d.amSubtitle} onChange={(v) => set({ amSubtitle: v })} />
+                <FieldInput label="PM Column Title" value={d.pmTitle} onChange={(v) => set({ pmTitle: v })} />
+                <FieldInput label="PM Column Subtitle" value={d.pmSubtitle} onChange={(v) => set({ pmSubtitle: v })} />
+                <FieldInput label="Save Routine Button" value={d.saveRoutineLabel} onChange={(v) => set({ saveRoutineLabel: v })} />
+                <FieldInput label="Add to Cart Button" value={d.addToCartLabel} onChange={(v) => set({ addToCartLabel: v })} />
+              </div>
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 18. CHECKOUT PAGE */}
+      {activePage === 'checkout' && (() => {
+        const d = pagesTheme.checkout;
+        const set = (patch: Partial<typeof d>) => updatePage('checkout', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Checkout Header & Controls (EN & বাংলা)">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <ToggleRow label="Show Guest Rewards Login Banner" checked={d.showGuestRewardsBanner} onChange={(v) => set({ showGuestRewardsBanner: v })} />
+                <ToggleRow label="Show Inline Quick-Add Catalog on Empty Cart" checked={d.showQuickAdd} onChange={(v) => set({ showQuickAdd: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Title (English)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Title (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+                <FieldInput label="Subtitle (English)" value={d.subtitleEN} onChange={(v) => set({ subtitleEN: v })} />
+                <FieldInput label="Subtitle (বাংলা)" value={d.subtitleBN} onChange={(v) => set({ subtitleBN: v })} />
+                <FieldInput label="Copy Link Button (EN)" value={d.copyLinkLabelEN} onChange={(v) => set({ copyLinkLabelEN: v })} />
+                <FieldInput label="Copy Link Button (বাংলা)" value={d.copyLinkLabelBN} onChange={(v) => set({ copyLinkLabelBN: v })} />
+                <FieldInput label="Continue Shopping (EN)" value={d.continueShoppingLabelEN} onChange={(v) => set({ continueShoppingLabelEN: v })} />
+                <FieldInput label="Continue Shopping (বাংলা)" value={d.continueShoppingLabelBN} onChange={(v) => set({ continueShoppingLabelBN: v })} />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Empty Basket State">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Empty Basket Title (EN)" value={d.emptyTitleEN} onChange={(v) => set({ emptyTitleEN: v })} />
+                <FieldInput label="Empty Basket Title (বাংলা)" value={d.emptyTitleBN} onChange={(v) => set({ emptyTitleBN: v })} />
+                <FieldTextarea label="Empty Basket Subtitle (EN)" rows={2} value={d.emptySubtitleEN} onChange={(v) => set({ emptySubtitleEN: v })} />
+                <FieldTextarea label="Empty Basket Subtitle (বাংলা)" rows={2} value={d.emptySubtitleBN} onChange={(v) => set({ emptySubtitleBN: v })} />
+                <FieldInput label="Browse Shop Button (EN)" value={d.emptyShopBtnEN} onChange={(v) => set({ emptyShopBtnEN: v })} />
+                <FieldInput label="Browse Shop Button (বাংলা)" value={d.emptyShopBtnBN} onChange={(v) => set({ emptyShopBtnBN: v })} />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Payment, Promo & Order Summary Copy">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Payment Heading (EN)" value={d.paymentTitleEN} onChange={(v) => set({ paymentTitleEN: v })} />
+                <FieldInput label="Payment Heading (বাংলা)" value={d.paymentTitleBN} onChange={(v) => set({ paymentTitleBN: v })} />
+                <FieldInput label="COD Description (EN)" value={d.paymentCodDescEN} onChange={(v) => set({ paymentCodDescEN: v })} />
+                <FieldInput label="COD Description (বাংলা)" value={d.paymentCodDescBN} onChange={(v) => set({ paymentCodDescBN: v })} />
+                <FieldInput label="Promo Section Title (EN)" value={d.promoTitleEN} onChange={(v) => set({ promoTitleEN: v })} />
+                <FieldInput label="Promo Section Title (বাংলা)" value={d.promoTitleBN} onChange={(v) => set({ promoTitleBN: v })} />
+                <FieldInput label="Promo Input Placeholder (EN)" value={d.promoPlaceholderEN} onChange={(v) => set({ promoPlaceholderEN: v })} />
+                <FieldInput label="Promo Input Placeholder (বাংলা)" value={d.promoPlaceholderBN} onChange={(v) => set({ promoPlaceholderBN: v })} />
+                <FieldInput label="Summary Heading (EN)" value={d.summaryTitleEN} onChange={(v) => set({ summaryTitleEN: v })} />
+                <FieldInput label="Summary Heading (বাংলা)" value={d.summaryTitleBN} onChange={(v) => set({ summaryTitleBN: v })} />
+                <FieldInput label="Dispatch Footnote (EN)" value={d.dispatchNoteEN} onChange={(v) => set({ dispatchNoteEN: v })} />
+                <FieldInput label="Dispatch Footnote (বাংলা)" value={d.dispatchNoteBN} onChange={(v) => set({ dispatchNoteBN: v })} />
+              </div>
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 19. THANK YOU / ORDER CONFIRMATION */}
+      {activePage === 'thankYou' && (() => {
+        const d = pagesTheme.thankYou;
+        const set = (patch: Partial<typeof d>) => updatePage('thankYou', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Order Confirmation Banner (EN & বাংলা)">
+              <ToggleRow label="Show Guest Loyalty Rewards Tip Card" checked={d.showGuestRewardsTip} onChange={(v) => set({ showGuestRewardsTip: v })} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Confirmed Headline (EN)" value={d.titleEN} onChange={(v) => set({ titleEN: v })} />
+                <FieldInput label="Confirmed Headline (বাংলা)" value={d.titleBN} onChange={(v) => set({ titleBN: v })} />
+                <FieldTextarea label="Confirmed Subtitle (EN)" rows={2} value={d.subtitleEN} onChange={(v) => set({ subtitleEN: v })} />
+                <FieldTextarea label="Confirmed Subtitle (বাংলা)" rows={2} value={d.subtitleBN} onChange={(v) => set({ subtitleBN: v })} />
+              </div>
+            </SectionBlock>
+
+            <SectionBlock title="Receipt Headings, Buttons & Missing Order Copy">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Delivery Section Heading (EN)" value={d.deliveryHeadingEN} onChange={(v) => set({ deliveryHeadingEN: v })} />
+                <FieldInput label="Delivery Section Heading (বাংলা)" value={d.deliveryHeadingBN} onChange={(v) => set({ deliveryHeadingBN: v })} />
+                <FieldInput label="Receipt Section Heading (EN)" value={d.receiptHeadingEN} onChange={(v) => set({ receiptHeadingEN: v })} />
+                <FieldInput label="Receipt Section Heading (বাংলা)" value={d.receiptHeadingBN} onChange={(v) => set({ receiptHeadingBN: v })} />
+                <FieldInput label="Print Receipt Button (EN)" value={d.printBtnEN} onChange={(v) => set({ printBtnEN: v })} />
+                <FieldInput label="Print Receipt Button (বাংলা)" value={d.printBtnBN} onChange={(v) => set({ printBtnBN: v })} />
+                <FieldInput label="WhatsApp Help Button (EN)" value={d.whatsappBtnEN} onChange={(v) => set({ whatsappBtnEN: v })} />
+                <FieldInput label="WhatsApp Help Button (বাংলা)" value={d.whatsappBtnBN} onChange={(v) => set({ whatsappBtnBN: v })} />
+                <FieldInput label="Continue Shopping Button (EN)" value={d.continueShoppingEN} onChange={(v) => set({ continueShoppingEN: v })} />
+                <FieldInput label="Continue Shopping Button (বাংলা)" value={d.continueShoppingBN} onChange={(v) => set({ continueShoppingBN: v })} />
+                <FieldInput label="Missing Receipt Title (EN)" value={d.notFoundTitleEN} onChange={(v) => set({ notFoundTitleEN: v })} />
+                <FieldInput label="Missing Receipt Title (বাংলা)" value={d.notFoundTitleBN} onChange={(v) => set({ notFoundTitleBN: v })} />
+              </div>
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 20. CREATOR LEADERBOARD */}
+      {activePage === 'creatorLeaderboard' && (() => {
+        const d = pagesTheme.creatorLeaderboard;
+        const set = (patch: Partial<typeof d>) => updatePage('creatorLeaderboard', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Leaderboard Header & Display Toggles">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <ToggleRow label="Show Period Switcher Tabs" checked={d.showPeriodTabs} onChange={(v) => set({ showPeriodTabs: v })} />
+                <ToggleRow label="Show Creator Search Bar" checked={d.showSearchBar} onChange={(v) => set({ showSearchBar: v })} />
+                <ToggleRow label="Show Ranking Criteria Strip" checked={d.showCriteriaStrip} onChange={(v) => set({ showCriteriaStrip: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Top Badge Text" value={d.badgeText} onChange={(v) => set({ badgeText: v })} />
+                <FieldInput label="Leaderboard Title" value={d.title} onChange={(v) => set({ title: v })} />
+                <FieldInput label="Search Input Placeholder" value={d.searchPlaceholder} onChange={(v) => set({ searchPlaceholder: v })} />
+              </div>
+              <FieldTextarea label="Header Subtitle" rows={2} value={d.subtitle} onChange={(v) => set({ subtitle: v })} />
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 21. WHOLESALE PORTAL & B2B CHECKOUT */}
+      {activePage === 'wholesalePortal' && (() => {
+        const d = pagesTheme.wholesalePortal;
+        const set = (patch: Partial<typeof d>) => updatePage('wholesalePortal', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Wholesale Dashboard (/wholesale)">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Dashboard Badge" value={d.dashboardBadge} onChange={(v) => set({ dashboardBadge: v })} />
+                <FieldInput label="Place Order Button Label" value={d.placeOrderBtnLabel} onChange={(v) => set({ placeOrderBtnLabel: v })} />
+              </div>
+              <FieldTextarea label="Dashboard Default Subtitle" rows={2} value={d.dashboardSubtitle} onChange={(v) => set({ dashboardSubtitle: v })} />
+            </SectionBlock>
+
+            <SectionBlock title="Wholesale B2B Checkout (/wholesale/checkout)">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FieldInput label="Breadcrumb Label" value={d.checkoutBreadcrumbLabel} onChange={(v) => set({ checkoutBreadcrumbLabel: v })} />
+                <FieldInput label="Checkout Page Title" value={d.checkoutTitle} onChange={(v) => set({ checkoutTitle: v })} />
+                <FieldInput label="Pricing Tier Badge" value={d.checkoutTierBadge} onChange={(v) => set({ checkoutTierBadge: v })} />
+                <FieldInput label="Add Products Button Label" value={d.addProductsBtnLabel} onChange={(v) => set({ addProductsBtnLabel: v })} />
+              </div>
+              <ToggleRow label="Show Pending / Guest Wholesale Authorization Notice" checked={d.showAuthNotice} onChange={(v) => set({ showAuthNotice: v })} />
+              <FieldInput label="Authorization Notice Title" value={d.authNoticeTitle} onChange={(v) => set({ authNoticeTitle: v })} />
+              <FieldTextarea label="Authorization Notice Body" rows={2} value={d.authNoticeBody} onChange={(v) => set({ authNoticeBody: v })} />
+            </SectionBlock>
+          </div>
+        );
+      })()}
+
+      {/* 22. CUSTOMER PROFILE PORTAL */}
+      {activePage === 'profile' && (() => {
+        const d = pagesTheme.profile;
+        const set = (patch: Partial<typeof d>) => updatePage('profile', patch);
+        return (
+          <div className="space-y-6">
+            <SectionBlock title="Customer Profile Header & Tab Labels (/profile)">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <ToggleRow label="Show Quick Account Metrics (Orders, Spent, Points)" checked={d.showQuickMetrics} onChange={(v) => set({ showQuickMetrics: v })} />
+                <ToggleRow label="Show Role Shortcut Banners (Admin, Creator, Wholesale)" checked={d.showRoleBanners} onChange={(v) => set({ showRoleBanners: v })} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FieldInput label="Fallback Display Name" value={d.fallbackDisplayName} onChange={(v) => set({ fallbackDisplayName: v })} />
+                <FieldInput label="Orders Tab Label" value={d.ordersTabLabel} onChange={(v) => set({ ordersTabLabel: v })} />
+                <FieldInput label="Wishlist Tab Label" value={d.wishlistTabLabel} onChange={(v) => set({ wishlistTabLabel: v })} />
+                <FieldInput label="Addresses Tab Label" value={d.addressesTabLabel} onChange={(v) => set({ addressesTabLabel: v })} />
+                <FieldInput label="Skin & Routine Tab Label" value={d.routineTabLabel} onChange={(v) => set({ routineTabLabel: v })} />
+                <FieldInput label="Loyalty Tab Label" value={d.loyaltyTabLabel} onChange={(v) => set({ loyaltyTabLabel: v })} />
+                <FieldInput label="Reviews Tab Label" value={d.reviewsTabLabel} onChange={(v) => set({ reviewsTabLabel: v })} />
+                <FieldInput label="Support Tab Label" value={d.supportTabLabel} onChange={(v) => set({ supportTabLabel: v })} />
+                <FieldInput label="Account Info Tab Label" value={d.accountTabLabel} onChange={(v) => set({ accountTabLabel: v })} />
+              </div>
+            </SectionBlock>
+          </div>
         );
       })()}
     </div>

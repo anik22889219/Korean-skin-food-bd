@@ -1,5 +1,13 @@
-import React, { useEffect } from 'react';
-import { SeoMetadata, applySeoMetadata, DEFAULT_HOMEPAGE_TITLE, DEFAULT_HOMEPAGE_DESCRIPTION } from '../services/seoService';
+import React, { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import {
+  SeoMetadata,
+  applySeoMetadata,
+  DEFAULT_HOMEPAGE_TITLE,
+  DEFAULT_HOMEPAGE_DESCRIPTION,
+} from '../services/seoService';
+import { pageSeoService, mergePageSeoMetadata } from '../services/pageSeoService';
+import { PageSeoConfig } from '../types';
 
 interface SeoHeadProps {
   metadata?: SeoMetadata;
@@ -16,7 +24,8 @@ interface SeoHeadProps {
 }
 
 /**
- * Declarative component to inject dynamic On-Page SEO meta tags and Schema.org JSON-LD
+ * Declarative component to inject dynamic On-Page SEO meta tags and Schema.org JSON-LD,
+ * automatically merging any per-URL overrides configured in Firestore `seo_pages`.
  */
 export const SeoHead: React.FC<SeoHeadProps> = ({
   metadata,
@@ -29,11 +38,19 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
   ogImageAlt,
   twitterCard,
   jsonLd,
-  noindex
+  noindex,
 }) => {
+  const location = useLocation();
+  const [seoPages, setSeoPages] = useState<PageSeoConfig[]>(() => pageSeoService.getAll());
+
   useEffect(() => {
-    // If a full metadata object was supplied, use it; otherwise compose from individual props
-    const activeMeta: SeoMetadata = metadata || {
+    return pageSeoService.subscribe((pages) => {
+      setSeoPages(pages);
+    });
+  }, []);
+
+  useEffect(() => {
+    const baseMeta: SeoMetadata = metadata || {
       title: title || DEFAULT_HOMEPAGE_TITLE,
       description: description || DEFAULT_HOMEPAGE_DESCRIPTION,
       canonicalUrl,
@@ -43,14 +60,14 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
       ogImageAlt,
       twitterCard,
       jsonLd,
-      noindex
+      noindex,
     };
 
-    applySeoMetadata(activeMeta);
+    const fullPath = `${location.pathname}${location.search || ''}`;
+    const override = pageSeoService.getForPath(fullPath, location.pathname);
+    const mergedMeta = mergePageSeoMetadata(baseMeta, override);
 
-    return () => {
-      // Cleanup hook if necessary when leaving SPA route
-    };
+    applySeoMetadata(mergedMeta);
   }, [
     metadata,
     title,
@@ -62,7 +79,10 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
     ogImageAlt,
     twitterCard,
     jsonLd,
-    noindex
+    noindex,
+    location.pathname,
+    location.search,
+    seoPages,
   ]);
 
   return null;

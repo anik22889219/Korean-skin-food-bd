@@ -8,6 +8,7 @@ import { productService } from '../services/productService';
 import { useProducts } from '../hooks/queries/products';
 import { useCart } from '../context/CartContext';
 import { getRetailPrice } from '../utils/pricing';
+import { getProductPath } from '../utils/productSlug';
 import {
   CustomerSupportTicket,
   LoyaltyLedgerEntry,
@@ -25,6 +26,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { ProfilePageThemeSettings } from '../types/theme';
 
 /* -------------------------------------------------------------
    Real-Time Visual Order Stage Tracker
@@ -209,6 +212,15 @@ export const Profile: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     'orders' | 'wishlist' | 'addresses' | 'skin_routine' | 'rewards' | 'reviews' | 'support' | 'settings' | 'role_hub'
   >('orders');
+  const [pageTheme, setPageTheme] = useState<ProfilePageThemeSettings>(
+    () => themeService.getPagesTheme().profile || DEFAULT_PAGES_THEME.profile
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.profile) setPageTheme(pages.profile);
+    });
+  }, []);
 
   // Editable Form states
   const [phone, setPhone] = useState(profile?.phone || '');
@@ -591,7 +603,7 @@ export const Profile: React.FC = () => {
       {/* 1. ROLE-AWARE TOP HIGHLIGHT CARDS */}
       
       {/* Super Admin & Staff Fast Deck Access */}
-      {isAdmin && (
+      {pageTheme.showRoleBanners && isAdmin && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -629,7 +641,7 @@ export const Profile: React.FC = () => {
       )}
 
       {/* Verified Creator Status Banner */}
-      {creatorProfile && creatorProfile.status === 'approved' && (
+      {pageTheme.showRoleBanners && creatorProfile && creatorProfile.status === 'approved' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -676,7 +688,7 @@ export const Profile: React.FC = () => {
       )}
 
       {/* Wholesale Partner Status Banner */}
-      {profile?.wholesaleAccess && (
+      {pageTheme.showRoleBanners && profile?.wholesaleAccess && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -742,7 +754,7 @@ export const Profile: React.FC = () => {
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
-                  {profile?.name || user?.displayName || 'K-Beauty Shopper'}
+                  {profile?.name || user?.displayName || pageTheme.fallbackDisplayName}
                 </h1>
                 <RoleBadge role={profile?.role} isCreatorApproved={creatorProfile?.status === 'approved'} />
               </div>
@@ -758,20 +770,22 @@ export const Profile: React.FC = () => {
           </div>
 
           {/* Quick Metrics Cards */}
-          <div className="grid grid-cols-3 gap-2.5 sm:gap-3 bg-pink-50/40 p-3 sm:p-4 rounded-2xl border border-pink-100 text-center shrink-0">
-            <div className="px-2 sm:px-4">
-              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Orders</span>
-              <span className="text-base sm:text-lg font-black text-gray-900 font-mono mt-0.5 block">{userOrders.length}</span>
+          {pageTheme.showQuickMetrics && (
+            <div className="grid grid-cols-3 gap-2.5 sm:gap-3 bg-pink-50/40 p-3 sm:p-4 rounded-2xl border border-pink-100 text-center shrink-0">
+              <div className="px-2 sm:px-4">
+                <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Orders</span>
+                <span className="text-base sm:text-lg font-black text-gray-900 font-mono mt-0.5 block">{userOrders.length}</span>
+              </div>
+              <div className="px-2 sm:px-4 border-x border-pink-200/60">
+                <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Total Spent</span>
+                <span className="text-base sm:text-lg font-black text-[#E91E8C] font-mono mt-0.5 block">৳{totalSpent.toLocaleString()}</span>
+              </div>
+              <div className="px-2 sm:px-4">
+                <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Glow Points</span>
+                <span className="text-base sm:text-lg font-black text-purple-700 font-mono mt-0.5 block">{loyaltyPoints}</span>
+              </div>
             </div>
-            <div className="px-2 sm:px-4 border-x border-pink-200/60">
-              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Total Spent</span>
-              <span className="text-base sm:text-lg font-black text-[#E91E8C] font-mono mt-0.5 block">৳{totalSpent.toLocaleString()}</span>
-            </div>
-            <div className="px-2 sm:px-4">
-              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Glow Points</span>
-              <span className="text-base sm:text-lg font-black text-purple-700 font-mono mt-0.5 block">{loyaltyPoints}</span>
-            </div>
-          </div>
+          )}
 
         </div>
 
@@ -786,7 +800,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <ShoppingBag size={14} />
-            <span>Orders</span>
+            <span>{pageTheme.ordersTabLabel}</span>
             <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
               activeTab === 'orders' ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'
             }`}>
@@ -803,7 +817,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <Heart size={14} />
-            <span>Wishlist ({wishlistProducts.length})</span>
+            <span>{pageTheme.wishlistTabLabel} ({wishlistProducts.length})</span>
           </button>
 
           <button
@@ -815,7 +829,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <MapPin size={14} />
-            <span>Addresses ({savedAddresses.length})</span>
+            <span>{pageTheme.addressesTabLabel} ({savedAddresses.length})</span>
           </button>
 
           <button
@@ -827,7 +841,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <Droplets size={14} />
-            <span>Skin & Routine</span>
+            <span>{pageTheme.routineTabLabel}</span>
           </button>
 
           <button
@@ -839,7 +853,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <Award size={14} />
-            <span>Loyalty ({loyaltyPoints})</span>
+            <span>{pageTheme.loyaltyTabLabel} ({loyaltyPoints})</span>
           </button>
 
           <button
@@ -851,7 +865,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <Star size={14} />
-            <span>My Reviews ({myReviews.length})</span>
+            <span>{pageTheme.reviewsTabLabel} ({myReviews.length})</span>
           </button>
 
           <button
@@ -863,7 +877,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <MessageSquare size={14} />
-            <span>Support ({supportTickets.length})</span>
+            <span>{pageTheme.supportTabLabel} ({supportTickets.length})</span>
           </button>
 
           <button
@@ -875,7 +889,7 @@ export const Profile: React.FC = () => {
             }`}
           >
             <User size={14} />
-            <span>Account Info</span>
+            <span>{pageTheme.accountTabLabel}</span>
           </button>
 
           {(creatorProfile || isAdmin) && (
@@ -1144,7 +1158,7 @@ export const Profile: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {wishlistProducts.map((p) => (
                   <div key={p.id} className="p-4 rounded-2xl border border-pink-100 flex items-center justify-between gap-3">
-                    <Link to={`/product/${p.id}`} className="flex items-center gap-3 min-w-0">
+                    <Link to={getProductPath(p)} className="flex items-center gap-3 min-w-0">
                       <img src={p.image} alt={p.name} className="w-14 h-14 rounded-xl object-cover border border-pink-100 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-gray-900 truncate">{p.name}</p>
@@ -1183,7 +1197,7 @@ export const Profile: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {recentProducts.slice(0, 8).map((p) => (
-                  <Link key={p.id} to={`/product/${p.id}`} className="p-3 rounded-2xl border border-slate-200 hover:border-pink-200 transition space-y-2">
+                  <Link key={p.id} to={getProductPath(p)} className="p-3 rounded-2xl border border-slate-200 hover:border-pink-200 transition space-y-2">
                     <img src={p.image} alt={p.name} className="w-full h-28 object-cover rounded-xl bg-pink-50/40" />
                     <p className="text-xs font-bold text-gray-900 truncate">{p.name}</p>
                     <p className="text-xs font-black text-[#E91E8C] font-mono">৳{getRetailPrice(p).toLocaleString()}</p>
@@ -1465,7 +1479,7 @@ export const Profile: React.FC = () => {
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs font-black text-amber-500">{'★'.repeat(rev.rating)}</span>
-                      <Link to={`/product/${rev.productId}`} className="text-xs font-bold text-[#E91E8C] hover:underline">
+                      <Link to={getProductPath(catalogProducts.find((pr) => pr.id === rev.productId) || { id: rev.productId })} className="text-xs font-bold text-[#E91E8C] hover:underline">
                         Product #{rev.productId}
                       </Link>
                     </div>

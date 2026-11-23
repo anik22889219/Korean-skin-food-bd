@@ -10,6 +10,8 @@ import {
   PublicCreatorLeaderboardEntry 
 } from '../services/creatorLeaderboardService';
 import { PublicCreatorProfileModal } from './PublicCreatorProfileModal';
+import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
+import { CreatorLeaderboardPageThemeSettings } from '../types/theme';
 
 interface LeaderboardViewProps {
   isAdminView?: boolean;
@@ -20,6 +22,15 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ isAdminView = 
   const [leaderboard, setLeaderboard] = useState<PublicCreatorLeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchFilter, setSearchFilter] = useState<string>('');
+  const [pageTheme, setPageTheme] = useState<CreatorLeaderboardPageThemeSettings>(
+    () => themeService.getPagesTheme().creatorLeaderboard || DEFAULT_PAGES_THEME.creatorLeaderboard
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.creatorLeaderboard) setPageTheme(pages.creatorLeaderboard);
+    });
+  }, []);
   
   // Selected creator for modal inspect
   const [selectedCreator, setSelectedCreator] = useState<PublicCreatorLeaderboardEntry | null>(null);
@@ -91,74 +102,82 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ isAdminView = 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-black uppercase tracking-wider">
-              <Crown size={14} className="text-amber-400" /> Official K-Beauty Ranking
+              <Crown size={14} className="text-amber-400" /> {pageTheme.badgeText}
             </div>
             <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-3">
               <Trophy className="text-amber-400 fill-amber-400/20" size={32} />
-              Creator Performance Leaderboard
+              {pageTheme.title}
             </h1>
             <p className="text-xs md:text-sm text-slate-300 max-w-xl leading-relaxed">
-              Real-time verified creator rankings based on total engagement points, Facebook video views, likes, and comments.
+              {pageTheme.subtitle}
             </p>
           </div>
 
           {/* Period Selection Controls */}
-          <div className="flex items-center bg-slate-800/80 p-1.5 rounded-2xl border border-slate-700/80 backdrop-blur-md self-start md:self-auto">
-            <button
-              onClick={() => setPeriod('all_time')}
-              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
-                period === 'all_time'
-                  ? 'bg-rose-600 text-white shadow-md'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <Sparkles size={14} /> All Time
-            </button>
-            <button
-              onClick={() => setPeriod('this_month')}
-              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
-                period === 'this_month'
-                  ? 'bg-rose-600 text-white shadow-md'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <Calendar size={14} /> This Month
-            </button>
-            <button
-              onClick={() => setPeriod('this_week')}
-              className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
-                period === 'this_week'
-                  ? 'bg-rose-600 text-white shadow-md'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <Clock size={14} /> This Week
-            </button>
-          </div>
+          {pageTheme.showPeriodTabs && (
+            <div className="flex items-center bg-slate-800/80 p-1.5 rounded-2xl border border-slate-700/80 backdrop-blur-md self-start md:self-auto">
+              <button
+                onClick={() => setPeriod('all_time')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                  period === 'all_time'
+                    ? 'bg-rose-600 text-white shadow-md'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Sparkles size={14} /> All Time
+              </button>
+              <button
+                onClick={() => setPeriod('this_month')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                  period === 'this_month'
+                    ? 'bg-rose-600 text-white shadow-md'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Calendar size={14} /> This Month
+              </button>
+              <button
+                onClick={() => setPeriod('this_week')}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+                  period === 'this_week'
+                    ? 'bg-rose-600 text-white shadow-md'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Clock size={14} /> This Week
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search creator name or username..."
-            value={searchFilter}
-            onChange={(e) => setSearchFilter(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
-          />
-        </div>
+      {(pageTheme.showSearchBar || pageTheme.showCriteriaStrip) && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {pageTheme.showSearchBar && (
+            <div className="relative flex-1 max-w-md">
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder={pageTheme.searchPlaceholder}
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+              />
+            </div>
+          )}
 
-        <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-          <span>Ranking criteria:</span>
-          <span className="font-extrabold text-slate-800">1. Points</span> →
-          <span className="text-slate-600">2. Views</span> →
-          <span className="text-slate-600">3. Likes</span> →
-          <span className="text-slate-600">4. Comments</span>
+          {pageTheme.showCriteriaStrip && (
+            <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
+              <span>Ranking criteria:</span>
+              <span className="font-extrabold text-slate-800">1. Points</span> →
+              <span className="text-slate-600">2. Views</span> →
+              <span className="text-slate-600">3. Likes</span> →
+              <span className="text-slate-600">4. Comments</span>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* TOP 3 PODIUM SECTION (ON LARGE SCREENS & CARDS ON MOBILE) */}
       {!isLoading && top3.length > 0 && !searchFilter && (

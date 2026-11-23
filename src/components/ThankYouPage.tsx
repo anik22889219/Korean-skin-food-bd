@@ -22,6 +22,7 @@ import { useProducts } from '../hooks/queries/products';
 import { db } from '../services/firebase';
 import { posService } from '../services/posService';
 import { DEFAULT_PAGES_THEME, themeService } from '../services/themeService';
+import { ThankYouPageThemeSettings } from '../types/theme';
 import { Order } from '../types';
 import { SeoHead } from './SeoHead';
 
@@ -63,6 +64,15 @@ export const ThankYouPage: React.FC = () => {
   const [isLoadingOrder, setIsLoadingOrder] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState(false);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+  const [pageTheme, setPageTheme] = useState<ThankYouPageThemeSettings>(
+    () => themeService.getPagesTheme().thankYou || DEFAULT_PAGES_THEME.thankYou
+  );
+
+  useEffect(() => {
+    return themeService.subscribePages((pages) => {
+      if (pages?.thankYou) setPageTheme(pages.thankYou);
+    });
+  }, []);
 
   // Fallback lookup in Firestore / posService when signed in (e.g., opened in another tab)
   useEffect(() => {
@@ -148,7 +158,7 @@ export const ThankYouPage: React.FC = () => {
             <Package size={26} />
           </div>
           <h1 className="text-xl font-black text-gray-900">
-            {isBn ? 'কোনো সাম্প্রতিক অর্ডার পাওয়া যায়নি' : 'Order Receipt Not Found'}
+            {isBn ? pageTheme.notFoundTitleBN : pageTheme.notFoundTitleEN}
           </h1>
           <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
             {orderId
@@ -220,12 +230,10 @@ export const ThankYouPage: React.FC = () => {
 
           <div className="space-y-1.5">
             <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-              {isBn ? 'আপনার অর্ডারটি নিশ্চিত হয়েছে!' : 'Thank You! Your Order is Confirmed'}
+              {isBn ? pageTheme.titleBN : pageTheme.titleEN}
             </h1>
             <p className="text-xs sm:text-sm text-gray-600 max-w-xl mx-auto leading-relaxed">
-              {isBn
-                ? 'কোরিয়ান স্কিন ফুড বিডি থেকে কেনাকাটার জন্য ধন্যবাদ। ডেলিভারির আগে আমাদের টিম আপনার নম্বরে কল করে অর্ডার কনফার্ম করবে।'
-                : 'Thank you for shopping with Korean Skin Food BD. Our fulfillment desk is preparing your parcel and will confirm via phone before dispatch.'}
+              {isBn ? pageTheme.subtitleBN : pageTheme.subtitleEN}
             </p>
           </div>
 
@@ -264,7 +272,7 @@ export const ThankYouPage: React.FC = () => {
             <div className="bg-white rounded-2xl border border-pink-100 p-5 sm:p-6 shadow-xs space-y-4">
               <h2 className="text-sm font-black text-gray-900 uppercase tracking-wider border-b border-pink-100 pb-3 flex items-center gap-2">
                 <Truck size={16} className="text-[#E91E8C]" />
-                <span>{isBn ? 'ডেলিভারি তথ্য' : 'Delivery & Contact Details'}</span>
+                <span>{isBn ? pageTheme.deliveryHeadingBN : pageTheme.deliveryHeadingEN}</span>
               </h2>
 
               <div className="space-y-3 text-xs">
@@ -317,7 +325,7 @@ export const ThankYouPage: React.FC = () => {
               </div>
             )}
 
-            {!user && (resolvedOrder.pointsEarned ?? 0) === 0 && (
+            {pageTheme.showGuestRewardsTip && !user && (resolvedOrder.pointsEarned ?? 0) === 0 && (
               <div className="print:hidden bg-white rounded-2xl border border-slate-200 p-4 flex items-start gap-3 text-xs">
                 <Gift size={18} className="text-[#E91E8C] shrink-0 mt-0.5" />
                 <div className="space-y-1">
@@ -342,7 +350,7 @@ export const ThankYouPage: React.FC = () => {
                   className="min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-gray-800 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
                 >
                   <Printer size={15} />
-                  <span>{isBn ? 'রসিদ প্রিন্ট' : 'Print Receipt'}</span>
+                  <span>{isBn ? pageTheme.printBtnBN : pageTheme.printBtnEN}</span>
                 </button>
 
                 <a
@@ -352,7 +360,7 @@ export const ThankYouPage: React.FC = () => {
                   className="min-h-[44px] px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80 text-emerald-800 text-xs font-bold transition flex items-center justify-center gap-2 whitespace-nowrap"
                 >
                   <MessageCircle size={15} />
-                  <span>{isBn ? 'হোয়াটসঅ্যাপ সাপোর্ট' : 'WhatsApp Help'}</span>
+                  <span>{isBn ? pageTheme.whatsappBtnBN : pageTheme.whatsappBtnEN}</span>
                 </a>
               </div>
 
@@ -362,7 +370,7 @@ export const ThankYouPage: React.FC = () => {
                   className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#E91E8C] hover:bg-[#d8177f] text-white text-xs font-bold transition flex items-center justify-center gap-2 whitespace-nowrap"
                 >
                   <ShoppingBag size={15} />
-                  <span>{isBn ? 'আরও শপিং করুন' : 'Continue Shopping'}</span>
+                  <span>{isBn ? pageTheme.continueShoppingBN : pageTheme.continueShoppingEN}</span>
                 </Link>
                 <Link
                   to={user ? '/profile' : '/login'}
@@ -379,7 +387,7 @@ export const ThankYouPage: React.FC = () => {
           <div className="lg:col-span-7 bg-white rounded-2xl border border-pink-100 p-5 sm:p-6 shadow-xs space-y-5">
             <div className="flex items-center justify-between border-b border-pink-100 pb-3.5">
               <h2 className="text-sm font-black text-gray-900 uppercase tracking-wider">
-                {isBn ? 'অর্ডার রসিদ' : 'Order Receipt Summary'}
+                {isBn ? pageTheme.receiptHeadingBN : pageTheme.receiptHeadingEN}
               </h2>
               <span className="text-xs font-mono font-bold text-gray-500 tabular-nums">
                 {resolvedOrder.items.reduce((s, i) => s + Number(i.quantity || 1), 0)} items

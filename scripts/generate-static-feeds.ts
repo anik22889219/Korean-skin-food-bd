@@ -5,6 +5,7 @@ import { BRAND_SEO_PROFILES } from '../src/data/brandProfiles';
 import { INITIAL_SKINCARE_GUIDES } from '../src/data/skincareGuides';
 import { INGREDIENT_LIBRARY } from '../src/data/ingredientLibrary';
 import { SKIN_CONCERN_LIBRARY } from '../src/data/skinConcerns';
+import { getProductPath } from '../src/utils/productSlug';
 
 function escapeXml(s: any): string {
   if (!s) return '';
@@ -41,7 +42,7 @@ const metaXmlItems = products.map((p) => {
   const name = p.name || 'Korean Skincare Product';
   const desc = stripHtml(p.description || name);
   const price = (typeof p.price === 'number' ? p.price : 0).toFixed(2);
-  const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+  const link = `${baseUrl}${getProductPath({ id, seoSlug: (p as any).seoSlug })}`;
   const img = p.image || '';
   const brand = p.brand || 'Korean Skin Food BD';
   const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
@@ -95,7 +96,7 @@ for (const p of products) {
   const name = p.name || 'Korean Skincare Product';
   const desc = stripHtml(p.description || name);
   const price = `${(typeof p.price === 'number' ? p.price : 0).toFixed(2)} BDT`;
-  const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+  const link = `${baseUrl}${getProductPath({ id, seoSlug: (p as any).seoSlug })}`;
   const img = p.image || '';
   const brand = p.brand || 'Korean Skin Food BD';
   const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
@@ -125,7 +126,7 @@ const pinterestXmlItems = products.map((p) => {
   const name = p.name || 'Korean Skincare Product';
   const desc = stripHtml(p.description || name);
   const price = (typeof p.price === 'number' ? p.price : 0).toFixed(2);
-  const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+  const link = `${baseUrl}${getProductPath({ id, seoSlug: (p as any).seoSlug })}`;
   const img = p.image || '';
   const brand = p.brand || 'Korean Skin Food BD';
   const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
@@ -185,7 +186,7 @@ for (const p of products) {
   const name = p.name || 'Korean Skincare Product';
   const desc = stripHtml(p.description || name);
   const price = `${(typeof p.price === 'number' ? p.price : 0).toFixed(2)} BDT`;
-  const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+  const link = `${baseUrl}${getProductPath({ id, seoSlug: (p as any).seoSlug })}`;
   const img = p.image || '';
   const brand = p.brand || 'Korean Skin Food BD';
   const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
@@ -225,7 +226,7 @@ const previewSampleItems = products.slice(0, 50).map((p) => {
     currency: 'BDT',
     availability: avail,
     brand: p.brand || 'Korean Skin Food BD',
-    link: `${baseUrl}/product/${encodeURIComponent(id)}`,
+    link: `${baseUrl}${getProductPath({ id, seoSlug: (p as any).seoSlug })}`,
     imageLink: p.image || '',
     condition: 'new'
   };
@@ -306,7 +307,7 @@ for (const concern of SKIN_CONCERN_LIBRARY) {
 for (const p of products) {
   if (!p.id || p.noindex) continue;
   sitemapEntries.push({
-    url: `${baseUrl}/product/${encodeURIComponent(p.id)}`,
+    url: `${baseUrl}${getProductPath({ id: p.id, seoSlug: (p as any).seoSlug })}`,
     lastmod: todayIso,
     changefreq: 'weekly',
     priority: '0.8',

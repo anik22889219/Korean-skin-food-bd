@@ -4,6 +4,7 @@ import { authFetch } from './apiClient';
 import { productService } from './productService';
 import { INITIAL_PRODUCTS } from '../data/allProducts';
 import { getSiteUrl } from '../utils/siteUrl';
+import { getProductPath } from '../utils/productSlug';
 
 export interface PinterestSettings {
   domainVerification: {
@@ -399,7 +400,7 @@ class PinterestService {
         currency: 'BDT',
         availability: avail,
         brand: p.brand || 'Korean Skin Food BD',
-        link: `${origin}/product/${encodeURIComponent(id)}`,
+        link: `${origin}${getProductPath({ id, seoSlug: p.seoSlug })}`,
         imageLink: p.image || '',
         condition: 'new',
       };
@@ -432,7 +433,7 @@ class PinterestService {
       const name = p.name || 'Korean Skincare Product';
       const desc = stripHtml(p.description || name);
       const price = (typeof p.price === 'number' ? p.price : 0).toFixed(2);
-      const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+      const link = `${baseUrl}${getProductPath({ id, seoSlug: p.seoSlug })}`;
       const img = p.image || '';
       const brand = p.brand || 'Korean Skin Food BD';
       const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
@@ -494,7 +495,7 @@ ${items}
       const name = p.name || 'Korean Skincare Product';
       const desc = stripHtml(p.description || name);
       const price = `${(typeof p.price === 'number' ? p.price : 0).toFixed(2)} BDT`;
-      const link = `${baseUrl}/product/${encodeURIComponent(id)}`;
+      const link = `${baseUrl}${getProductPath({ id, seoSlug: p.seoSlug })}`;
       const img = p.image || '';
       const brand = p.brand || 'Korean Skin Food BD';
       const cat = 'Health & Beauty > Personal Care > Cosmetics > Skin Care';
