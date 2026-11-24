@@ -7,7 +7,8 @@ import {
   PagesThemeSettings,
   PageThemeKey,
   FooterColumnsSettings,
-  ReelItem
+  ReelItem,
+  InvoiceThemeSettings,
 } from '../types/theme';
 import { queryClient } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
@@ -1010,10 +1011,94 @@ function mergePagesTheme(data?: Partial<PagesThemeSettings> | null): PagesThemeS
   };
 }
 
+export const DEFAULT_INVOICE_THEME: InvoiceThemeSettings = {
+  paperSize: 'a4',
+  orientation: 'portrait',
+  marginTopMm: 10,
+  marginRightMm: 10,
+  marginBottomMm: 10,
+  marginLeftMm: 10,
+  productsPerPage: 10,
+  autoScaleToFit: true,
+  minAutoScalePercent: 55,
+
+  showLogo: true,
+  logoUrl: '',
+  logoSizePx: 44,
+  logoShape: 'circle',
+  storeName: 'Korean Skin Food BD',
+  storeTagline: 'Flagship store, Dhaka',
+  storeAddress: 'Banani Road 11, Dhaka, Bangladesh',
+  storePhone: '+880 1755-837545',
+  storeEmail: 'koreanskinfood.bd@gmail.com',
+  documentTitle: 'Cash Invoice',
+  headerStyle: 'solid',
+  headerLayout: 'split',
+
+  fontFamily: 'sans',
+  brandNameSizePx: 16,
+  taglineSizePx: 11,
+  titleSizePx: 11,
+  metaSizePx: 12,
+  tableHeaderSizePx: 10,
+  tableBodySizePx: 12,
+  totalsSizePx: 12,
+  grandTotalSizePx: 15,
+  footerSizePx: 11,
+  rowVerticalPaddingPx: 10,
+
+  primaryColor: '#C81E78',
+  accentColor: '#993556',
+  headerTextColor: '#FFFFFF',
+  backgroundColor: '#FFFFFF',
+  textColor: '#111827',
+  mutedTextColor: '#6B7280',
+  tableHeaderBgColor: '#FDF2F8',
+  borderColor: '#ED93B1',
+  borderStyle: 'grid',
+
+  showOrderSourceBadge: true,
+  showDateTime: true,
+  showStoreContactInHeader: false,
+  showCustomerPhone: true,
+  showCustomerAddress: true,
+  showCourierTracking: true,
+  showPaymentStatus: true,
+  showProductSerialNumbers: false,
+  showProductSku: false,
+  showDiscountBreakdown: true,
+  showDeliveryCharge: true,
+  showQrCode: true,
+  qrSizePx: 76,
+  showSignatureLine: false,
+  signatureLeftLabel: 'Customer Signature',
+  signatureRightLabel: 'Authorized Signature',
+  showTermsFooter: true,
+  footerThankYouText: 'Thank you for choosing Korean Skin Food BD.',
+  footerTermsText: 'Exchange available within 7 days with receipt.',
+};
+
+export function mergeInvoiceTheme(data?: Partial<InvoiceThemeSettings> | null): InvoiceThemeSettings {
+  const safe = data || {};
+  return {
+    ...DEFAULT_INVOICE_THEME,
+    ...safe,
+    marginTopMm: Math.max(0, Math.min(40, Number(safe.marginTopMm ?? DEFAULT_INVOICE_THEME.marginTopMm))),
+    marginRightMm: Math.max(0, Math.min(40, Number(safe.marginRightMm ?? DEFAULT_INVOICE_THEME.marginRightMm))),
+    marginBottomMm: Math.max(0, Math.min(40, Number(safe.marginBottomMm ?? DEFAULT_INVOICE_THEME.marginBottomMm))),
+    marginLeftMm: Math.max(0, Math.min(40, Number(safe.marginLeftMm ?? DEFAULT_INVOICE_THEME.marginLeftMm))),
+    productsPerPage: Math.max(1, Math.min(100, Number(safe.productsPerPage ?? DEFAULT_INVOICE_THEME.productsPerPage))),
+    minAutoScalePercent: Math.max(40, Math.min(95, Number(safe.minAutoScalePercent ?? DEFAULT_INVOICE_THEME.minAutoScalePercent))),
+    logoSizePx: Math.max(20, Math.min(120, Number(safe.logoSizePx ?? DEFAULT_INVOICE_THEME.logoSizePx))),
+    qrSizePx: Math.max(40, Math.min(140, Number(safe.qrSizePx ?? DEFAULT_INVOICE_THEME.qrSizePx))),
+  };
+}
+
 const STORAGE_KEY = 'ksf_home_theme_settings';
 const GLOBAL_STORAGE_KEY = 'ksf_global_theme_settings';
 const SHOP_STORAGE_KEY = 'ksf_shop_theme_settings';
 const PAGES_STORAGE_KEY = 'ksf_pages_theme_settings';
+const INVOICE_STORAGE_KEY = 'ksf_invoice_theme_settings';
 
 function loadGoogleFont(fontName: string) {
   if (!fontName || typeof document === 'undefined') return;
@@ -1102,10 +1187,12 @@ class ThemeService {
   private currentGlobalTheme: GlobalThemeSettings = DEFAULT_GLOBAL_THEME;
   private currentShopTheme: ShopThemeSettings = DEFAULT_SHOP_THEME;
   private currentPagesTheme: PagesThemeSettings = DEFAULT_PAGES_THEME;
+  private currentInvoiceTheme: InvoiceThemeSettings = DEFAULT_INVOICE_THEME;
   private listeners: ((theme: HomeThemeSettings) => void)[] = [];
   private globalListeners: ((globalTheme: GlobalThemeSettings) => void)[] = [];
   private shopListeners: ((shopTheme: ShopThemeSettings) => void)[] = [];
   private pagesListeners: ((pagesTheme: PagesThemeSettings) => void)[] = [];
+  private invoiceListeners: ((invoiceTheme: InvoiceThemeSettings) => void)[] = [];
 
   constructor() {
     this.init();
@@ -1222,6 +1309,18 @@ class ThemeService {
       console.warn('[ThemeService] LocalStorage pages load error:', err);
     }
 
+    // 2d. Try loading cached local invoice theme
+    try {
+      const cachedInvoice = localStorage.getItem(INVOICE_STORAGE_KEY);
+      if (cachedInvoice) {
+        this.currentInvoiceTheme = mergeInvoiceTheme(JSON.parse(cachedInvoice));
+      } else {
+        this.currentInvoiceTheme = mergeInvoiceTheme(DEFAULT_INVOICE_THEME);
+      }
+    } catch (err) {
+      console.warn('[ThemeService] LocalStorage invoice load error:', err);
+    }
+
     // 3. Subscribe to Firestore real-time updates for site_settings/theme_home
     try {
       const docRef = doc(db, 'site_settings', 'theme_home');
@@ -1318,6 +1417,30 @@ class ThemeService {
     } catch (err) {
       console.warn('[ThemeService] Firestore pages listener init warning:', err);
     }
+
+    // 7. Subscribe to Firestore real-time updates for site_settings/theme_invoice
+    try {
+      const invoiceDocRef = doc(db, 'site_settings', 'theme_invoice');
+      onSnapshot(
+        invoiceDocRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data() as Partial<InvoiceThemeSettings>;
+            this.currentInvoiceTheme = mergeInvoiceTheme(data);
+            localStorage.setItem(INVOICE_STORAGE_KEY, JSON.stringify(this.currentInvoiceTheme));
+            this.notifyInvoiceListeners();
+            try {
+              queryClient.setQueryData(queryKeys.settings.invoiceTheme(), this.currentInvoiceTheme);
+            } catch {}
+          }
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.GET, 'site_settings/theme_invoice', false);
+        }
+      );
+    } catch (err) {
+      console.warn('[ThemeService] Firestore invoice listener init warning:', err);
+    }
   }
 
   public getHomeTheme(): HomeThemeSettings {
@@ -1334,6 +1457,10 @@ class ThemeService {
 
   public getPagesTheme(): PagesThemeSettings {
     return this.currentPagesTheme;
+  }
+
+  public getInvoiceTheme(): InvoiceThemeSettings {
+    return this.currentInvoiceTheme;
   }
 
   public async saveHomeTheme(settings: HomeThemeSettings): Promise<void> {
@@ -1422,6 +1549,27 @@ class ThemeService {
     }
   }
 
+  public async saveInvoiceTheme(settings: InvoiceThemeSettings): Promise<void> {
+    const updated: InvoiceThemeSettings = mergeInvoiceTheme({
+      ...settings,
+      updatedAt: new Date().toISOString()
+    });
+    this.currentInvoiceTheme = updated;
+    localStorage.setItem(INVOICE_STORAGE_KEY, JSON.stringify(updated));
+    this.notifyInvoiceListeners();
+    try {
+      queryClient.setQueryData(queryKeys.settings.invoiceTheme(), updated);
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.invoiceTheme() });
+    } catch {}
+
+    try {
+      const docRef = doc(db, 'site_settings', 'theme_invoice');
+      await setDoc(docRef, sanitizeForFirestore(updated), { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'site_settings/theme_invoice', false);
+    }
+  }
+
   public async resetToDefault(): Promise<void> {
     await this.saveHomeTheme(DEFAULT_HOME_THEME);
   }
@@ -1444,6 +1592,10 @@ class ThemeService {
       [pageKey]: DEFAULT_PAGES_THEME[pageKey]
     };
     await this.savePagesTheme(next);
+  }
+
+  public async resetInvoiceToDefault(): Promise<void> {
+    await this.saveInvoiceTheme(DEFAULT_INVOICE_THEME);
   }
 
   public subscribe(listener: (theme: HomeThemeSettings) => void): () => void {
@@ -1478,6 +1630,14 @@ class ThemeService {
     };
   }
 
+  public subscribeInvoice(listener: (invoiceTheme: InvoiceThemeSettings) => void): () => void {
+    this.invoiceListeners.push(listener);
+    listener(this.currentInvoiceTheme);
+    return () => {
+      this.invoiceListeners = this.invoiceListeners.filter((l) => l !== listener);
+    };
+  }
+
   private notifyListeners() {
     this.listeners.forEach((l) => l(this.currentTheme));
   }
@@ -1492,6 +1652,10 @@ class ThemeService {
 
   private notifyPagesListeners() {
     this.pagesListeners.forEach((l) => l(this.currentPagesTheme));
+  }
+
+  private notifyInvoiceListeners() {
+    this.invoiceListeners.forEach((l) => l(this.currentInvoiceTheme));
   }
 }
 

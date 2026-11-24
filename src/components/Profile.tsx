@@ -22,12 +22,13 @@ import {
   HelpCircle, Search, Copy, Check, ChevronDown, ChevronUp,
   RefreshCw, Mail, ArrowRight, Tag, ShieldCheck, Truck, XCircle,
   Gift, Award, Crown, Coins, Percent, Sparkles, Video, Flame,
-  ChevronRight, Zap, Heart, Star, Building2, Trash2, MessageSquare, Droplets, Eye, AlertCircle, Plus
+  ChevronRight, Zap, Heart, Star, Building2, Trash2, MessageSquare, Droplets, Eye, AlertCircle, Plus, Printer, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { ProfilePageThemeSettings } from '../types/theme';
+import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 
 /* -------------------------------------------------------------
    Real-Time Visual Order Stage Tracker
@@ -1126,6 +1127,26 @@ export const Profile: React.FC = () => {
                                 <span className="font-mono text-[#E91E8C]">৳{order.totalAmount.toLocaleString()}</span>
                               </div>
                             </div>
+                          </div>
+
+                          {/* Invoice Print & PDF Download Actions */}
+                          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => printInvoice(order)}
+                              className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                            >
+                              <Printer size={13} />
+                              <span>Print Invoice</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadInvoicePDF(order)}
+                              className="px-3.5 py-2 rounded-xl bg-pink-50 hover:bg-pink-100 border border-pink-200 text-[#C81E78] text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                            >
+                              <Download size={13} />
+                              <span>Download PDF</span>
+                            </button>
                           </div>
                         </motion.div>
                       )}

@@ -4,6 +4,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Download,
   Gift,
   MapPin,
   MessageCircle,
@@ -25,6 +26,7 @@ import { DEFAULT_PAGES_THEME, themeService } from '../services/themeService';
 import { ThankYouPageThemeSettings } from '../types/theme';
 import { Order } from '../types';
 import { SeoHead } from './SeoHead';
+import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 
 export const ThankYouPage: React.FC = () => {
   const { orderId } = useParams<{ orderId?: string }>();
@@ -343,14 +345,23 @@ export const ThankYouPage: React.FC = () => {
 
             {/* Quick Support & Navigation Actions */}
             <div className="print:hidden space-y-2.5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => printInvoice(resolvedOrder)}
                   className="min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-gray-800 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
                 >
                   <Printer size={15} />
                   <span>{isBn ? pageTheme.printBtnBN : pageTheme.printBtnEN}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => downloadInvoicePDF(resolvedOrder)}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-pink-200 bg-pink-50/70 hover:bg-pink-100/80 text-[#C81E78] text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+                >
+                  <Download size={15} />
+                  <span>{isBn ? 'ইনভয়েস PDF' : 'Download PDF'}</span>
                 </button>
 
                 <a

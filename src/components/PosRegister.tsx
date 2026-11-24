@@ -1140,7 +1140,7 @@ export default function PosRegister({ onBack, products }: PosRegisterProps) {
               className="flex-1 bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 py-3 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
             >
               <Printer size={15} />
-              <span>Print Invoice (A4)</span>
+              <span>Print Invoice</span>
             </button>
 
             <button

@@ -8,10 +8,12 @@ import {
   Building2, User, Phone, MapPin, Globe, Facebook, Instagram, 
   Receipt, DollarSign, TrendingUp, Wallet, AlertCircle, CheckCircle2, 
   Clock, Eye, ChevronLeft, ChevronRight, X, FileText, Truck, 
-  CreditCard, ShieldCheck, Sparkles, Store, Lock, Save, RefreshCw, Layers
+  CreditCard, ShieldCheck, Sparkles, Store, Lock, Save, RefreshCw, Layers, Printer, Download
 } from 'lucide-react';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { WholesalePortalPageThemeSettings } from '../types/theme';
+import { wholesaleOrderToOrder } from '../utils/invoicePaper';
+import { downloadInvoicePDF, printInvoice } from '../utils/invoicePdf';
 
 export function WholesaleDashboard() {
   const { user, profile } = useAuth();
@@ -693,8 +695,24 @@ export function WholesaleDashboard() {
               </div>
             </div>
 
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-              <button onClick={() => setSelectedOrder(null)} className="px-5 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition">
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => printInvoice(wholesaleOrderToOrder(selectedOrder))}
+                className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer size={14} />
+                <span>Print Invoice</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadInvoicePDF(wholesaleOrderToOrder(selectedOrder))}
+                className="px-4 py-2 bg-pink-50 border border-pink-200 hover:bg-pink-100 text-[#C81E78] font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download size={14} />
+                <span>Download PDF</span>
+              </button>
+              <button onClick={() => setSelectedOrder(null)} className="px-5 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition cursor-pointer">
                 Close
               </button>
             </div>

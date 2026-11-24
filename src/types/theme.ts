@@ -764,3 +764,95 @@ export interface PagesThemeSettings {
   updatedAt?: string;
 }
 
+export type InvoicePaperSize =
+  | 'a4'
+  | 'a3'
+  | 'a5'
+  | 'letter'
+  | 'thermal_80'
+  | 'thermal_58';
+
+export type InvoiceOrientation = 'portrait' | 'landscape';
+
+export type InvoiceLogoShape = 'circle' | 'rounded' | 'square';
+
+export type InvoiceFontFamily = 'sans' | 'serif' | 'mono';
+
+export type InvoiceBorderStyle = 'grid' | 'minimal' | 'dashed';
+
+export type InvoiceHeaderStyle = 'solid' | 'tinted' | 'minimal';
+
+export type InvoiceHeaderLayout = 'split' | 'centered' | 'compact';
+
+export interface InvoiceThemeSettings {
+  // Paper & Single-Page Fit
+  paperSize: InvoicePaperSize;
+  orientation: InvoiceOrientation;
+  marginTopMm: number;
+  marginRightMm: number;
+  marginBottomMm: number;
+  marginLeftMm: number;
+  productsPerPage: number;
+  autoScaleToFit: boolean;
+  minAutoScalePercent: number;
+
+  // Logo & Brand Header
+  showLogo: boolean;
+  logoUrl: string;
+  logoSizePx: number;
+  logoShape: InvoiceLogoShape;
+  storeName: string;
+  storeTagline: string;
+  storeAddress: string;
+  storePhone: string;
+  storeEmail: string;
+  documentTitle: string;
+  headerStyle: InvoiceHeaderStyle;
+  headerLayout: InvoiceHeaderLayout;
+
+  // Typography & Element Text Sizes
+  fontFamily: InvoiceFontFamily;
+  brandNameSizePx: number;
+  taglineSizePx: number;
+  titleSizePx: number;
+  metaSizePx: number;
+  tableHeaderSizePx: number;
+  tableBodySizePx: number;
+  totalsSizePx: number;
+  grandTotalSizePx: number;
+  footerSizePx: number;
+  rowVerticalPaddingPx: number;
+
+  // Colors & Borders
+  primaryColor: string;
+  accentColor: string;
+  headerTextColor: string;
+  backgroundColor: string;
+  textColor: string;
+  mutedTextColor: string;
+  tableHeaderBgColor: string;
+  borderColor: string;
+  borderStyle: InvoiceBorderStyle;
+
+  // Section Visibility & Copy
+  showOrderSourceBadge: boolean;
+  showDateTime: boolean;
+  showStoreContactInHeader: boolean;
+  showCustomerPhone: boolean;
+  showCustomerAddress: boolean;
+  showCourierTracking: boolean;
+  showPaymentStatus: boolean;
+  showProductSerialNumbers: boolean;
+  showProductSku: boolean;
+  showDiscountBreakdown: boolean;
+  showDeliveryCharge: boolean;
+  showQrCode: boolean;
+  qrSizePx: number;
+  showSignatureLine: boolean;
+  signatureLeftLabel: string;
+  signatureRightLabel: string;
+  showTermsFooter: boolean;
+  footerThankYouText: string;
+  footerTermsText: string;
+  updatedAt?: string;
+}

@@ -306,7 +306,7 @@ export const PosHistory: React.FC<PosHistoryProps> = ({
                           type="button"
                           onClick={() => printInvoice(order)}
                           className="bg-white border border-pink-200 hover:bg-pink-50 text-pink-700 p-2 rounded-xl text-xs font-bold transition cursor-pointer"
-                          title="Print A4 Invoice"
+                          title="Print Invoice"
                         >
                           <Printer size={14} />
                         </button>

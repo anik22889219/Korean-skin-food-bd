@@ -22,7 +22,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { formatCompactNumber } from './AdminSocial';
 import { StoreCatalogSkeleton } from './Skeletons';
 import { ImageSearchModal } from './ImageSearchModal';
-import { TopCreatorsSection } from './TopCreatorsSection';
 import { ProductCard } from './ProductCard';
 import { ProductQuickViewModal } from './ProductQuickViewModal';
 import { GoogleBusinessReviewsSection } from './GoogleBusinessReviewsSection';
@@ -59,6 +58,139 @@ const CATEGORIES = [
   'Makeup & Tone-Up'
 ];
 const SKIN_TYPES = ['All', 'Oily', 'Dry', 'Sensitive', 'Combination', 'Acne-Prone'];
+
+interface YouTubeShortCardProps {
+  short: YouTubeShortItem;
+  products: Product[];
+  shouldMountEmbed: boolean;
+  onQuickViewProduct: (product: Product) => void;
+}
+
+// Shoppable YouTube Short Card (module-level memoized component so parent re-renders never remount iframes)
+const YouTubeShortCard: React.FC<YouTubeShortCardProps> = React.memo(({
+  short,
+  products,
+  shouldMountEmbed,
+  onQuickViewProduct,
+}) => {
+  const displayTitle = short.customTitle || short.title || 'YouTube Short';
+  const taggedProducts = useMemo(() => {
+    return (short.taggedProductIds || [])
+      .map((pid) => products.find((p) => p.id === pid))
+      .filter((p): p is Product => Boolean(p));
+  }, [short.taggedProductIds, products]);
+
+  const embedSrc = useMemo(
+    () =>
+      buildYouTubeEmbedUrl(short.videoId, {
+        autoplay: true,
+        mute: true,
+        loop: true,
+        controls: true,
+        playsinline: true,
+      }),
+    [short.videoId]
+  );
+
+  return (
+    <div className="bg-white rounded-2xl border border-pink-100 overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between p-3 space-y-3 h-full">
+      {/* 9:16 Portrait YouTube Short Auto-Playing Muted Embed */}
+      <div className="space-y-2.5">
+        <div className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-950">
+          <img
+            src={short.thumbnailUrl || `https://i.ytimg.com/vi/${short.videoId}/hqdefault.jpg`}
+            alt={displayTitle}
+            referrerPolicy="no-referrer"
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          {shouldMountEmbed && (
+            <iframe
+              src={embedSrc}
+              title={displayTitle}
+              loading="lazy"
+              className="relative z-10 w-full h-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          )}
+        </div>
+
+        <div className="px-0.5 space-y-1">
+          <a
+            href={short.videoUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-extrabold text-slate-900 hover:text-[#E91E8C] transition line-clamp-2 leading-snug block"
+          >
+            {displayTitle}
+          </a>
+
+          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 font-semibold tabular-nums">
+            <span>
+              {formatCompactNumber(short.viewsCount)} views · {formatCompactNumber(short.likesCount)} likes
+            </span>
+            <a
+              href={short.videoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[#E91E8C] font-bold hover:underline flex items-center gap-1 whitespace-nowrap shrink-0"
+            >
+              <span>YouTube</span>
+              <ExternalLink size={11} />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Shop the Video — Tagged Store Products */}
+      {taggedProducts.length > 0 && (
+        <div className="pt-2 border-t border-pink-100/80 space-y-1.5">
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1 px-0.5">
+            <ShoppingBag size={11} className="text-[#E91E8C]" />
+            <span>Shop the Video</span>
+          </span>
+          <div className="space-y-1.5">
+            {taggedProducts.slice(0, 2).map((prod) => (
+              <button
+                key={prod.id}
+                type="button"
+                onClick={() => onQuickViewProduct(prod)}
+                className="w-full flex items-center gap-2.5 p-1.5 rounded-xl bg-[#fff8f5] hover:bg-pink-50 transition text-left cursor-pointer group"
+              >
+                <img
+                  src={prod.image}
+                  alt={prod.name}
+                  referrerPolicy="no-referrer"
+                  className="w-10 h-10 rounded-lg object-cover bg-white shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-bold text-slate-900 truncate group-hover:text-[#E91E8C] transition">
+                    {prod.name}
+                  </p>
+                  <p className="text-[11px] font-black text-[#E91E8C] tabular-nums">
+                    ৳{getRetailPrice(prod)}
+                  </p>
+                </div>
+                <span className="px-2 py-1 rounded-lg bg-white text-[10px] font-black text-slate-800 group-hover:bg-[#E91E8C] group-hover:text-white transition whitespace-nowrap shrink-0">
+                  Shop
+                </span>
+              </button>
+            ))}
+            {taggedProducts.length > 2 && (
+              <button
+                type="button"
+                onClick={() => onQuickViewProduct(taggedProducts[2])}
+                className="w-full text-left px-1 text-[10px] font-bold text-[#E91E8C] hover:underline cursor-pointer"
+              >
+                +{taggedProducts.length - 2} more product(s) featured
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 export const StoreCatalog: React.FC = () => {
   const navigate = useNavigate();
@@ -237,6 +369,7 @@ export const StoreCatalog: React.FC = () => {
   const [clActiveIndex, setClActiveIndex] = useState(0);
   const [clAutoPlay, setClAutoPlay] = useState(true);
   const [clIsHovered, setClIsHovered] = useState(false);
+  const [loadedShortIds, setLoadedShortIds] = useState<Record<string, boolean>>({});
   const [youtubeShorts, setYoutubeShorts] = useState<YouTubeShortItem[]>([]);
   const [youtubeShortsLoaded, setYoutubeShortsLoaded] = useState(false);
   const [youtubeShortsSettings, setYoutubeShortsSettings] = useState<YouTubeShortsDisplaySettings>(
@@ -379,11 +512,30 @@ export const StoreCatalog: React.FC = () => {
     return youtubeShorts.slice(0, maxCount);
   }, [youtubeShorts, youtubeShortsSettings.maxDisplayCount]);
 
+  const clVisibleCount = isMobile ? 1 : Math.min(3, Math.max(1, displayedYouTubeShorts.length));
+  const clMaxIndex = Math.max(0, displayedYouTubeShorts.length - clVisibleCount);
+
   useEffect(() => {
-    if (displayedYouTubeShorts.length > 0 && clActiveIndex >= displayedYouTubeShorts.length) {
+    if (clActiveIndex > clMaxIndex) {
       setClActiveIndex(0);
     }
-  }, [displayedYouTubeShorts.length, clActiveIndex]);
+  }, [clMaxIndex, clActiveIndex]);
+
+  // Sticky-mount iframes once a Short enters the visible window so sliding never destroys or reloads them
+  useEffect(() => {
+    if (displayedYouTubeShorts.length === 0) return;
+    const startIdx = Math.min(clActiveIndex, clMaxIndex);
+    const visibleWindow = displayedYouTubeShorts.slice(startIdx, startIdx + clVisibleCount);
+    const hasNew = visibleWindow.some((s) => !loadedShortIds[s.videoId]);
+    if (!hasNew) return;
+    setLoadedShortIds((prev) => {
+      const next = { ...prev };
+      for (const s of visibleWindow) {
+        next[s.videoId] = true;
+      }
+      return next;
+    });
+  }, [displayedYouTubeShorts, clActiveIndex, clMaxIndex, clVisibleCount, loadedShortIds]);
 
   // Community Live Auto Slide Timer
   const clSlideIntervalSeconds = Math.max(
@@ -392,16 +544,14 @@ export const StoreCatalog: React.FC = () => {
   );
 
   useEffect(() => {
-    const shortsCount = displayedYouTubeShorts.length;
-    const minSlideThreshold = isMobile ? 1 : 3;
-    if (!clAutoPlay || clIsHovered || shortsCount <= minSlideThreshold) return;
+    if (!clAutoPlay || clIsHovered || clMaxIndex <= 0) return;
 
     const timer = setInterval(() => {
-      setClActiveIndex((prev) => (prev + 1) % shortsCount);
+      setClActiveIndex((prev) => (prev >= clMaxIndex ? 0 : prev + 1));
     }, clSlideIntervalSeconds * 1000);
 
     return () => clearInterval(timer);
-  }, [clAutoPlay, clIsHovered, displayedYouTubeShorts.length, isMobile, clSlideIntervalSeconds]);
+  }, [clAutoPlay, clIsHovered, clMaxIndex, clSlideIntervalSeconds]);
 
   // Shared Journey Carousel Scroll Listener
   useEffect(() => {
@@ -1665,120 +1815,6 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
     );
   };
 
-  // Shoppable YouTube Short Card (9:16 muted autoplay iframe on visible cards + tagged Store Products)
-  const YouTubeShortCard: React.FC<{ short: YouTubeShortItem }> = ({ short }) => {
-    const displayTitle = short.customTitle || short.title || 'YouTube Short';
-    const taggedProducts = useMemo(() => {
-      return (short.taggedProductIds || [])
-        .map((pid) => products.find((p) => p.id === pid))
-        .filter((p): p is Product => Boolean(p));
-    }, [short.taggedProductIds, products]);
-
-    const embedSrc = buildYouTubeEmbedUrl(short.videoId, {
-      autoplay: true,
-      mute: true,
-      loop: true,
-      controls: true,
-      playsinline: true,
-    });
-
-    return (
-      <div className="bg-white rounded-2xl border border-pink-100 overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between p-3 space-y-3">
-        {/* 9:16 Portrait YouTube Short Auto-Playing Muted Embed */}
-        <div className="space-y-2.5">
-          <div className="relative aspect-[9/16] rounded-xl overflow-hidden bg-slate-950">
-            <img
-              src={short.thumbnailUrl || `https://i.ytimg.com/vi/${short.videoId}/hqdefault.jpg`}
-              alt={displayTitle}
-              referrerPolicy="no-referrer"
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-            <iframe
-              src={embedSrc}
-              title={displayTitle}
-              className="relative z-10 w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
-          </div>
-
-          <div className="px-0.5 space-y-1">
-            <a
-              href={short.videoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-extrabold text-slate-900 hover:text-[#E91E8C] transition line-clamp-2 leading-snug block"
-            >
-              {displayTitle}
-            </a>
-
-            <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 font-semibold tabular-nums">
-              <span>
-                {formatCompactNumber(short.viewsCount)} views · {formatCompactNumber(short.likesCount)} likes
-              </span>
-              <a
-                href={short.videoUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[#E91E8C] font-bold hover:underline flex items-center gap-1 whitespace-nowrap shrink-0"
-              >
-                <span>YouTube</span>
-                <ExternalLink size={11} />
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* Shop the Video — Tagged Store Products */}
-        {taggedProducts.length > 0 && (
-          <div className="pt-2 border-t border-pink-100/80 space-y-1.5">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1 px-0.5">
-              <ShoppingBag size={11} className="text-[#E91E8C]" />
-              <span>Shop the Video</span>
-            </span>
-            <div className="space-y-1.5">
-              {taggedProducts.slice(0, 2).map((prod) => (
-                <button
-                  key={prod.id}
-                  type="button"
-                  onClick={() => setQuickViewProduct(prod)}
-                  className="w-full flex items-center gap-2.5 p-1.5 rounded-xl bg-[#fff8f5] hover:bg-pink-50 transition text-left cursor-pointer group"
-                >
-                  <img
-                    src={prod.image}
-                    alt={prod.name}
-                    referrerPolicy="no-referrer"
-                    className="w-10 h-10 rounded-lg object-cover bg-white shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-bold text-slate-900 truncate group-hover:text-[#E91E8C] transition">
-                      {prod.name}
-                    </p>
-                    <p className="text-[11px] font-black text-[#E91E8C] tabular-nums">
-                      ৳{getRetailPrice(prod)}
-                    </p>
-                  </div>
-                  <span className="px-2 py-1 rounded-lg bg-white text-[10px] font-black text-slate-800 group-hover:bg-[#E91E8C] group-hover:text-white transition whitespace-nowrap shrink-0">
-                    Shop
-                  </span>
-                </button>
-              ))}
-              {taggedProducts.length > 2 && (
-                <button
-                  type="button"
-                  onClick={() => setQuickViewProduct(taggedProducts[2])}
-                  className="w-full text-left px-1 text-[10px] font-bold text-[#E91E8C] hover:underline cursor-pointer"
-                >
-                  +{taggedProducts.length - 2} more product(s) featured
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
   // SECTION 9: COMMUNITY LIVE (SYNCED YOUTUBE CHANNEL SHORTS)
   const renderCommunityLiveSection = () => {
     if (!youtubeShortsSettings.enabled) return null;
@@ -1808,27 +1844,23 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
     const shorts = displayedYouTubeShorts;
     if (shorts.length === 0) return null;
 
+    const safeActiveIndex = Math.min(clActiveIndex, clMaxIndex);
+    const canSlide = clMaxIndex > 0;
+
     const handleNextShort = () => {
-      setClActiveIndex((prev) => (prev + 1) % shorts.length);
+      if (!canSlide) return;
+      setClActiveIndex((prev) => (prev >= clMaxIndex ? 0 : prev + 1));
     };
 
     const handlePrevShort = () => {
-      setClActiveIndex((prev) => (prev - 1 + shorts.length) % shorts.length);
+      if (!canSlide) return;
+      setClActiveIndex((prev) => (prev <= 0 ? clMaxIndex : prev - 1));
     };
 
-    // Visible slice: 1 card on mobile, 3 cards on desktop — keeps live iframe count bounded cleanly
-    const getVisibleShorts = () => {
-      const maxVisible = isMobile ? 1 : 3;
-      if (shorts.length <= maxVisible) return shorts;
-      const visible: YouTubeShortItem[] = [];
-      for (let i = 0; i < Math.min(maxVisible, shorts.length); i++) {
-        visible.push(shorts[(clActiveIndex + i) % shorts.length]);
-      }
-      return visible;
-    };
+    const trackTransform = isMobile
+      ? `translateX(calc(-${safeActiveIndex} * (100% + 1.25rem)))`
+      : `translateX(calc(-${safeActiveIndex} * ((100% + 1.25rem) / 3)))`;
 
-    const visibleShorts = getVisibleShorts();
-    const canSlide = shorts.length > (isMobile ? 1 : 3);
     const channelLinkUrl =
       youtubeShortsSettings.viewAllLinkUrl ||
       (youtubeShortsSettings.lastSyncedChannelId
@@ -1912,35 +1944,48 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
           </div>
         </div>
 
-        {/* Visible Carousel Cards Grid (3 Desktop / 1 Mobile) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {visibleShorts.map((short) => (
-            <div key={short.videoId}>
-              <YouTubeShortCard short={short} />
-            </div>
-          ))}
+        {/* Fixed-order Horizontal Track (never unmounts or reorders iframes on slide/hover) */}
+        <div className="overflow-hidden">
+          <div
+            className="flex gap-5 transition-transform duration-500 ease-out will-change-transform"
+            style={{ transform: trackTransform }}
+          >
+            {shorts.map((short) => (
+              <div
+                key={short.videoId}
+                className="w-full md:w-[calc((100%-2.5rem)/3)] shrink-0"
+              >
+                <YouTubeShortCard
+                  short={short}
+                  products={products}
+                  shouldMountEmbed={Boolean(loadedShortIds[short.videoId])}
+                  onQuickViewProduct={setQuickViewProduct}
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Clean Carousel Progress / Dots */}
         {canSlide && (
           <div className="flex items-center justify-center gap-2 pt-1">
-            {shorts.length <= 10 ? (
-              shorts.map((s, idx) => (
+            {clMaxIndex + 1 <= 10 ? (
+              Array.from({ length: clMaxIndex + 1 }).map((_, idx) => (
                 <button
-                  key={s.videoId}
+                  key={idx}
                   type="button"
                   onClick={() => setClActiveIndex(idx)}
                   className={`h-2 rounded-full transition-all duration-200 cursor-pointer ${
-                    clActiveIndex === idx
+                    safeActiveIndex === idx
                       ? 'w-8 bg-[#E91E8C]'
                       : 'w-2 bg-pink-200 hover:bg-pink-300'
                   }`}
-                  aria-label={`Go to Short ${idx + 1}`}
+                  aria-label={`Go to Slide ${idx + 1}`}
                 />
               ))
             ) : (
               <span className="text-xs font-bold text-slate-600 tabular-nums">
-                {clActiveIndex + 1} / {shorts.length} Shorts
+                {safeActiveIndex + 1} / {clMaxIndex + 1}
               </span>
             )}
           </div>
@@ -1971,12 +2016,7 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
       case 'reachReliability':
         return renderReachReliabilitySection();
       case 'communityLive':
-        return (
-          <>
-            <TopCreatorsSection />
-            {renderCommunityLiveSection()}
-          </>
-        );
+        return renderCommunityLiveSection();
       default:
         return null;
     }
@@ -1998,23 +2038,26 @@ const BrandLogoWordmark: React.FC<{ brandName: string }> = ({ brandName }) => {
 
       {/* Dynamic Sections ordered according to theme settings */}
       {theme.sectionOrder.map((secKey) => {
+        const content = renderSectionByKey(secKey);
+        if (!content) return null;
+
         if (secKey === 'hero') {
           return (
             <div key="hero-wrapper" className="w-full">
-              {renderHeroSection()}
+              {content}
             </div>
           );
         }
         if (secKey === 'featureIcons') {
           return (
             <div key="featureIcons-wrapper" className="w-full -mt-10 md:-mt-12">
-              {renderFeatureIconsSection()}
+              {content}
             </div>
           );
         }
         return (
           <div key={secKey} className="w-full max-w-[1720px] mx-auto px-4 md:px-8 lg:px-12">
-            {renderSectionByKey(secKey)}
+            {content}
           </div>
         );
       })}

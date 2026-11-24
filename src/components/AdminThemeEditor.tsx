@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME, DEFAULT_PAGES_THEME } from '../services/themeService';
-import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, PagesThemeSettings, PageThemeKey, SectionKey, CommunityPhotoItem } from '../types/theme';
+import { themeService, DEFAULT_HOME_THEME, DEFAULT_GLOBAL_THEME, DEFAULT_SHOP_THEME, DEFAULT_PAGES_THEME, DEFAULT_INVOICE_THEME } from '../services/themeService';
+import { HomeThemeSettings, GlobalThemeSettings, ShopThemeSettings, PagesThemeSettings, PageThemeKey, SectionKey, CommunityPhotoItem, InvoiceThemeSettings } from '../types/theme';
 import { productService } from '../services/productService';
 import { Product, YouTubeShortItem, YouTubeShortsDisplaySettings } from '../types';
 import {
@@ -16,6 +16,7 @@ import { formatCompactNumber } from './AdminSocial';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { FooterLinkManager } from './themeEditor/FooterLinkManager';
 import { PagesThemeEditors } from './themeEditor/PagesThemeEditors';
+import { InvoiceThemeEditor } from './themeEditor/InvoiceThemeEditor';
 import { 
   Palette, Layout, Home, Info, ShoppingBag, Phone, Save, Globe, Type,
   RotateCcw, Eye, ArrowUp, ArrowDown, EyeOff, Check, Image as ImageIcon,
@@ -23,13 +24,13 @@ import {
   Settings, Type as FontIcon, Shield, SlidersHorizontal, MessageCircle, Mail, Megaphone, Share2,
   Upload, RefreshCw, Star, Package, Search, CheckCircle, X, FileText, Award, BookOpen,
   FileCheck, LogIn, AlertTriangle, Youtube, Clock, Pin, PinOff, Play, Loader2,
-  ShieldCheck, Droplets, HeartPulse, ClipboardCheck, CalendarClock, CreditCard, CheckCircle2, Trophy, Building2, User as UserIcon
+  ShieldCheck, Droplets, HeartPulse, ClipboardCheck, CalendarClock, CreditCard, CheckCircle2, Trophy, Building2, User as UserIcon, Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFileToCloudinary } from '../services/cloudinaryService';
 import { getProductPath } from '../utils/productSlug';
 
-type ThemeEditorTab = 'global' | 'home' | 'shop' | PageThemeKey;
+type ThemeEditorTab = 'global' | 'home' | 'shop' | 'invoice' | PageThemeKey;
 
 interface PageDirectoryItem {
   key: ThemeEditorTab;
@@ -45,6 +46,7 @@ const PAGE_DIRECTORY_GROUPS: Array<{ groupTitle: string; items: PageDirectoryIte
       { key: 'global', name: 'Global & Footer', route: 'Sitewide', Icon: Globe },
       { key: 'home', name: 'Home Page', route: '/', Icon: Home },
       { key: 'shop', name: 'Shop Page', route: '/shop', Icon: ShoppingBag },
+      { key: 'invoice', name: 'Invoice Designer', route: 'PDF & Print', Icon: Receipt },
     ],
   },
   {
@@ -154,6 +156,7 @@ export const AdminThemeEditor: React.FC = () => {
   const [globalTheme, setGlobalTheme] = useState<GlobalThemeSettings>(DEFAULT_GLOBAL_THEME);
   const [shopTheme, setShopTheme] = useState<ShopThemeSettings>(DEFAULT_SHOP_THEME);
   const [pagesTheme, setPagesTheme] = useState<PagesThemeSettings>(DEFAULT_PAGES_THEME);
+  const [invoiceTheme, setInvoiceTheme] = useState<InvoiceThemeSettings>(DEFAULT_INVOICE_THEME);
   const [expandedSection, setExpandedSection] = useState<SectionKey | null>('hero');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -205,6 +208,9 @@ export const AdminThemeEditor: React.FC = () => {
     const unsubscribePages = themeService.subscribePages((data) => {
       setPagesTheme(data);
     });
+    const unsubscribeInvoice = themeService.subscribeInvoice((data) => {
+      setInvoiceTheme(data);
+    });
     const unsubscribeProducts = productService.subscribe((prods) => {
       setAllProducts(prods);
     });
@@ -220,6 +226,7 @@ export const AdminThemeEditor: React.FC = () => {
       unsubscribeGlobal();
       unsubscribeShop();
       unsubscribePages();
+      unsubscribeInvoice();
       unsubscribeProducts();
       unsubscribeYtSettings();
       unsubscribeYtShorts();
@@ -535,9 +542,31 @@ export const AdminThemeEditor: React.FC = () => {
     }
   };
 
+  // Invoice Save handler
+  const handleSaveInvoice = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
+    try {
+      await themeService.saveInvoiceTheme(invoiceTheme);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to save invoice theme:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Invoice Reset handler
+  const handleResetInvoice = async () => {
+    if (confirm('Are you sure you want to reset all Invoice Designer settings (paper size, logo, text sizes, pagination) to defaults?')) {
+      await themeService.resetInvoiceToDefault();
+    }
+  };
+
   // Single Page Reset handler
   const handleResetCurrentPage = async () => {
-    if (activeTab === 'global' || activeTab === 'home' || activeTab === 'shop') return;
+    if (activeTab === 'global' || activeTab === 'home' || activeTab === 'shop' || activeTab === 'invoice') return;
     if (confirm(`Reset "${activeTab}" page theme settings to defaults?`)) {
       await themeService.resetSinglePageToDefault(activeTab);
     }
@@ -547,6 +576,7 @@ export const AdminThemeEditor: React.FC = () => {
     if (activeTab === 'global') return handleSaveGlobal();
     if (activeTab === 'home') return handleSave();
     if (activeTab === 'shop') return handleSaveShop();
+    if (activeTab === 'invoice') return handleSaveInvoice();
     return handleSavePages();
   };
 
@@ -554,6 +584,7 @@ export const AdminThemeEditor: React.FC = () => {
     if (activeTab === 'global') return handleResetGlobal();
     if (activeTab === 'home') return handleReset();
     if (activeTab === 'shop') return handleResetShop();
+    if (activeTab === 'invoice') return handleResetInvoice();
     return handleResetCurrentPage();
   };
 
@@ -564,6 +595,8 @@ export const AdminThemeEditor: React.FC = () => {
         return '/';
       case 'shop':
         return '/shop';
+      case 'invoice':
+        return '/thank-you';
       case 'about':
         return '/about-us';
       case 'contact':
@@ -647,6 +680,12 @@ export const AdminThemeEditor: React.FC = () => {
 
     if (activeMediaTarget === 'shopBannerUrl') {
       setShopTheme((prev) => ({ ...prev, heroBannerUrl: url }));
+      setActiveMediaTarget(null);
+      return;
+    }
+
+    if (activeMediaTarget === 'invoice.logoUrl') {
+      setInvoiceTheme((prev) => ({ ...prev, logoUrl: url }));
       setActiveMediaTarget(null);
       return;
     }
@@ -738,6 +777,8 @@ export const AdminThemeEditor: React.FC = () => {
                 ? 'Save Home Theme'
                 : activeTab === 'shop'
                 ? 'Save Shop Theme'
+                : activeTab === 'invoice'
+                ? 'Save Invoice Design'
                 : 'Save Page Theme'}
             </span>
           </button>
@@ -759,18 +800,20 @@ export const AdminThemeEditor: React.FC = () => {
               ? 'Home page theme changes saved successfully! Live homepage updated.'
               : activeTab === 'shop'
               ? 'Shop page settings saved successfully!'
+              : activeTab === 'invoice'
+              ? 'Invoice design saved! All Customer, POS, and Wholesale invoices updated.'
               : 'Page content & theme settings saved! Live storefront updated.'}
           </span>
         </motion.div>
       )}
 
-      {/* All-Pages Directory Switcher (25 Modules) */}
+      {/* All-Pages Directory Switcher (26 Modules) */}
       <div className="bg-white p-4 rounded-[24px] border border-pink-100 shadow-sm space-y-3">
         <div className="flex items-center justify-between gap-2 px-1">
           <div className="flex items-center gap-2">
             <Layout size={15} className="text-[#E91E8C]" />
             <span className="text-xs font-black text-slate-900">
-              All Storefront & Info Pages Directory (25 Editable Modules)
+              All Storefront & Info Pages Directory (26 Editable Modules)
             </span>
           </div>
           <span className="text-[10px] font-mono font-bold text-slate-400">
@@ -3514,8 +3557,20 @@ export const AdminThemeEditor: React.FC = () => {
         </div>
       )}
 
+      {/* SUBPAGE: UNIFIED INVOICE DESIGNER */}
+      {activeTab === 'invoice' && (
+        <InvoiceThemeEditor
+          invoiceTheme={invoiceTheme}
+          onChange={setInvoiceTheme}
+          openMediaPicker={openMediaPicker}
+          onSave={handleSaveInvoice}
+          onReset={handleResetInvoice}
+          isSaving={isSaving}
+        />
+      )}
+
       {/* SUBPAGES: DYNAMIC EDITORS FOR ALL 22 PUBLIC STOREFRONT, TOOL, PORTAL, INFO, PARTNER & LEGAL PAGES */}
-      {activeTab !== 'global' && activeTab !== 'home' && activeTab !== 'shop' && (
+      {activeTab !== 'global' && activeTab !== 'home' && activeTab !== 'shop' && activeTab !== 'invoice' && (
         <PagesThemeEditors
           activePage={activeTab}
           pagesTheme={pagesTheme}

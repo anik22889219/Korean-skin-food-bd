@@ -107,6 +107,7 @@ export const AdminOrders: React.FC = () => {
 
   // Invoice Modal State & Courier Sending State
   const [invoiceModalOrder, setInvoiceModalOrder] = useState<Order | null>(null);
+  const [pdfGeneratingOrderId, setPdfGeneratingOrderId] = useState<string | null>(null);
   const [isSteadfastLoading, setIsSteadfastLoading] = useState<boolean>(false);
   const [steadfastNotice, setSteadfastNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -118,6 +119,25 @@ export const AdminOrders: React.FC = () => {
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDownloadInvoice = async (order: Order) => {
+    if (pdfGeneratingOrderId) return;
+    setPdfGeneratingOrderId(order.id);
+    try {
+      const ok = await downloadInvoicePDF(order);
+      if (!ok) {
+        const msg = 'Could not generate invoice PDF. Please try again or use Print.';
+        if (invoiceModalOrder?.id === order.id) {
+          setSteadfastNotice({ type: 'error', text: msg });
+        } else {
+          setActionFeedback({ type: 'error', text: msg });
+          setTimeout(() => setActionFeedback(null), 5000);
+        }
+      }
+    } finally {
+      setPdfGeneratingOrderId(null);
+    }
+  };
 
   // Send Order to Steadfast Courier
   const handleSendToSteadfast = async (orderToDispatch: Order) => {
@@ -463,33 +483,33 @@ export const AdminOrders: React.FC = () => {
   });
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto w-full min-w-0">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-            <Package className="w-8 h-8 text-rose-600" />
-            Order Management & Fulfillment Hub
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5 sm:gap-3">
+            <Package className="w-6 h-6 sm:w-8 sm:h-8 text-rose-600 shrink-0" />
+            <span className="leading-tight">Order Management &amp; Fulfillment Hub</span>
           </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            Strict barcode verification for website orders & immediate POS stock synchronization.
+          <p className="text-slate-500 text-xs sm:text-sm mt-1">
+            Strict barcode verification for website orders &amp; immediate POS stock synchronization.
           </p>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 overflow-x-auto scrollbar-none max-w-full">
           <button
             onClick={() => { setActiveTab('pending'); setActiveFulfillmentOrder(null); }}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+            className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 min-h-[40px] ${
               activeTab === 'pending'
                 ? 'bg-rose-600 text-white shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
             }`}
           >
-            <QrCode className="w-4 h-4" />
-            Pending Verification
+            <QrCode className="w-4 h-4 shrink-0" />
+            <span>Pending Verification</span>
             {pendingOrders.length > 0 && (
-              <span className="ml-1.5 px-2 py-0.5 text-xs font-bold bg-white text-rose-600 rounded-full shadow-xs">
+              <span className="ml-0.5 px-1.5 py-0.5 text-[11px] font-bold bg-white text-rose-600 rounded-full shadow-xs tabular-nums">
                 {pendingOrders.length}
               </span>
             )}
@@ -497,26 +517,26 @@ export const AdminOrders: React.FC = () => {
 
           <button
             onClick={() => { setActiveTab('all'); setActiveFulfillmentOrder(null); }}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+            className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 min-h-[40px] ${
               activeTab === 'all'
                 ? 'bg-rose-600 text-white shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
             }`}
           >
-            <Layers className="w-4 h-4" />
-            All Orders ({orders.length})
+            <Layers className="w-4 h-4 shrink-0" />
+            <span className="tabular-nums">All Orders ({orders.length})</span>
           </button>
 
           <button
             onClick={() => { setActiveTab('movements'); setActiveFulfillmentOrder(null); }}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${
+            className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 min-h-[40px] ${
               activeTab === 'movements'
                 ? 'bg-rose-600 text-white shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
             }`}
           >
-            <History className="w-4 h-4" />
-            Stock Movement Audit
+            <History className="w-4 h-4 shrink-0" />
+            <span>Stock Movement Audit</span>
           </button>
         </div>
       </div>
@@ -549,19 +569,19 @@ export const AdminOrders: React.FC = () => {
       {/* ACTIVE BARCODE FULFILLMENT VERIFICATION SCREEN */}
       {/* ========================================================================= */}
       {activeFulfillmentOrder ? (
-        <div className="bg-white rounded-2xl shadow-lg border-2 border-rose-200 overflow-hidden space-y-6 p-6">
+        <div className="bg-white rounded-2xl shadow-lg border-2 border-rose-200 overflow-hidden space-y-5 sm:space-y-6 p-4 sm:p-6">
           {/* Active Order Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200 pb-5 gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <span className="px-3 py-1 bg-amber-100 text-amber-800 font-bold text-xs uppercase tracking-wider rounded-full border border-amber-200 flex items-center gap-1.5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-200 pb-4 sm:pb-5 gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-1 bg-amber-100 text-amber-800 font-bold text-xs uppercase tracking-wider rounded-full border border-amber-200 flex items-center gap-1.5">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
                   Status: {activeFulfillmentOrder.status.toUpperCase()}
                 </span>
-                <span className="px-3 py-1 bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider rounded-full border border-slate-200">
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider rounded-full border border-slate-200">
                   Source: {activeFulfillmentOrder.order_source}
                 </span>
-                <span className={`px-3 py-1 font-bold text-xs uppercase tracking-wider rounded-full border ${
+                <span className={`px-2.5 py-1 font-bold text-xs uppercase tracking-wider rounded-full border ${
                   activeFulfillmentOrder.stock_deducted
                     ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                     : 'bg-rose-100 text-rose-800 border-rose-200'
@@ -569,7 +589,7 @@ export const AdminOrders: React.FC = () => {
                   Stock Deducted: {activeFulfillmentOrder.stock_deducted ? 'YES' : 'NO (Pending Confirmation)'}
                 </span>
               </div>
-              <h2 className="text-2xl font-black text-slate-900 mt-2">
+              <h2 className="text-lg sm:text-2xl font-black text-slate-900 mt-2 break-words">
                 Order #{activeFulfillmentOrder.id} Fulfillment Verification
               </h2>
             </div>
@@ -651,13 +671,13 @@ export const AdminOrders: React.FC = () => {
             const isAllVerified = totalScanned >= totalRequired && activeFulfillmentOrder.items.every(i => (i.scannedQuantity || 0) === i.quantity);
 
             return (
-              <div className="bg-slate-900 text-white p-5 rounded-2xl space-y-3">
-                <div className="flex justify-between items-center text-sm font-bold">
+              <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 text-sm font-bold">
                   <span className="flex items-center gap-2">
-                    <Barcode className="w-5 h-5 text-rose-400" />
-                    Verification Progress ({totalScanned} / {totalRequired} Items Scanned)
+                    <Barcode className="w-5 h-5 text-rose-400 shrink-0" />
+                    <span>Verification Progress ({totalScanned} / {totalRequired} Items Scanned)</span>
                   </span>
-                  <span className={isAllVerified ? 'text-emerald-400 font-extrabold' : 'text-amber-400'}>
+                  <span className={`tabular-nums ${isAllVerified ? 'text-emerald-400 font-extrabold' : 'text-amber-400'}`}>
                     {percentage}% Verified
                   </span>
                 </div>
@@ -674,21 +694,21 @@ export const AdminOrders: React.FC = () => {
           })()}
 
           {/* Live Camera Barcode Scanner Section */}
-          <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 space-y-4 shadow-xl">
+          <div className="bg-slate-900 rounded-2xl p-4 sm:p-5 border border-slate-800 space-y-4 shadow-xl">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-white">
-              <div className="flex items-center gap-2">
-                <Camera className="w-5 h-5 text-rose-500 animate-pulse" />
+              <div className="flex flex-wrap items-center gap-2">
+                <Camera className="w-5 h-5 text-rose-500 animate-pulse shrink-0" />
                 <h3 className="font-extrabold text-base">Live Camera Barcode Scanner</h3>
                 <span className="px-2 py-0.5 text-xs font-bold bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-full">
                   Auto-Detect Live Feed
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {!isCameraActive ? (
                   <button
                     onClick={() => setIsCameraActive(true)}
-                    className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm whitespace-nowrap"
                   >
                     <Camera className="w-4 h-4" />
                     Open Camera Scanner
@@ -696,14 +716,14 @@ export const AdminOrders: React.FC = () => {
                 ) : (
                   <button
                     onClick={() => setIsCameraActive(false)}
-                    className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-sm flex items-center justify-center gap-2"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700 text-sm flex items-center justify-center gap-2 whitespace-nowrap"
                   >
                     <XCircle className="w-4 h-4 text-rose-400" />
                     Close Camera
                   </button>
                 )}
 
-                <label className="cursor-pointer px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold rounded-xl text-sm flex items-center gap-2 transition-all">
+                <label className="cursor-pointer w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition-all whitespace-nowrap">
                   <Upload className="w-4 h-4 text-rose-400" />
                   Upload Photo
                   <input
@@ -797,12 +817,12 @@ export const AdminOrders: React.FC = () => {
           </div>
 
           {/* Barcode Scanner Input Box */}
-          <div className="bg-rose-50/50 p-5 rounded-2xl border border-rose-200 space-y-3">
+          <div className="bg-rose-50/50 p-4 sm:p-5 rounded-2xl border border-rose-200 space-y-3">
             <label className="block font-bold text-slate-800 text-sm flex items-center gap-2">
-              <QrCode className="w-4 h-4 text-rose-600" />
-              Scan Item Barcode (Use USB Scanner Gun or Type Barcode):
+              <QrCode className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>Scan Item Barcode (Use USB Scanner Gun or Type Barcode):</span>
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 ref={barcodeInputRef}
                 type="text"
@@ -815,11 +835,11 @@ export const AdminOrders: React.FC = () => {
                     handleVerifyScan();
                   }
                 }}
-                className="flex-1 px-4 py-3 bg-white text-slate-900 border-2 border-slate-300 focus:border-rose-500 font-mono font-bold rounded-xl outline-hidden shadow-xs"
+                className="flex-1 min-w-0 w-full px-4 py-3 bg-white text-slate-900 border-2 border-slate-300 focus:border-rose-500 font-mono font-bold rounded-xl outline-hidden shadow-xs"
               />
               <button
                 onClick={() => handleVerifyScan()}
-                className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-sm flex items-center gap-2"
+                className="w-full sm:w-auto px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
               >
                 <Barcode className="w-5 h-5" />
                 Scan Item
@@ -838,16 +858,16 @@ export const AdminOrders: React.FC = () => {
                 {scanMessage.type === 'success' && <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />}
                 {scanMessage.type === 'error' && <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />}
                 {scanMessage.type === 'info' && <AlertTriangle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />}
-                <div>{scanMessage.text}</div>
+                <div className="min-w-0 break-words">{scanMessage.text}</div>
               </div>
             )}
           </div>
 
           {/* Items Checklist Cards */}
           <div className="space-y-3">
-            <h3 className="font-bold text-slate-800 text-base flex items-center justify-between">
+            <h3 className="font-bold text-slate-800 text-base flex flex-col sm:flex-row sm:items-center justify-between gap-1">
               <span>Order Items Checklist</span>
-              <span className="text-xs text-slate-500 font-normal">Click "Quick Scan" button next to item for fast testing</span>
+              <span className="text-xs text-slate-500 font-normal">Click &ldquo;Quick Scan&rdquo; button next to item for fast testing</span>
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -984,18 +1004,18 @@ export const AdminOrders: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'pending' && !activeFulfillmentOrder && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">
-            <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-              <QrCode className="w-5 h-5 text-rose-600" />
-              Website & Wholesale Order Verification Queue ({pendingOrders.length})
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 bg-white p-4 rounded-2xl border border-slate-200">
+            <h2 className="font-bold text-slate-800 text-base sm:text-lg flex items-center gap-2">
+              <QrCode className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>Website &amp; Wholesale Order Verification Queue ({pendingOrders.length})</span>
             </h2>
             <span className="text-xs text-slate-500">
-              Orders requiring barcode verification & fulfillment inspection.
+              Orders requiring barcode verification &amp; fulfillment inspection.
             </span>
           </div>
 
           {pendingOrders.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 space-y-3">
+            <div className="bg-white rounded-2xl p-8 sm:p-12 text-center border border-slate-200 space-y-3">
               <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto" />
               <h3 className="text-lg font-bold text-slate-800">Fulfillment Queue Clear!</h3>
               <p className="text-slate-500 text-sm max-w-md mx-auto">
@@ -1007,11 +1027,11 @@ export const AdminOrders: React.FC = () => {
               {pendingOrders.map(order => (
                 <div
                   key={order.id}
-                  className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-all p-5 flex flex-col md:flex-row md:items-center justify-between gap-6"
+                  className="bg-white rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-all p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6 min-w-0"
                 >
-                  <div className="space-y-2 flex-1">
+                  <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono font-black text-rose-600 text-base">#{order.id}</span>
+                      <span className="font-mono font-black text-rose-600 text-base tabular-nums">#{order.id}</span>
                       <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 font-bold text-xs uppercase rounded-full border border-amber-200">
                         {order.status.toUpperCase()}
                       </span>
@@ -1031,10 +1051,10 @@ export const AdminOrders: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="text-sm font-bold text-slate-900">
+                    <div className="text-sm font-bold text-slate-900 break-words">
                       Customer: {order.customerName} ({order.customerPhone})
                     </div>
-                    <div className="text-xs text-slate-500 truncate">
+                    <div className="text-xs text-slate-500 line-clamp-2 sm:truncate">
                       Delivery: {order.address}
                     </div>
 
@@ -1047,7 +1067,7 @@ export const AdminOrders: React.FC = () => {
                           const prod = productService.getProductById(i.productId);
                           const img = i.image || prod?.image || (prod?.images && prod.images[0]) || '';
                           return (
-                            <div key={iIdx} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1.5 pr-3 shadow-2xs">
+                            <div key={iIdx} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1.5 pr-3 shadow-2xs max-w-full min-w-0">
                               {img && img.trim() !== '' ? (
                                 <img
                                   src={img}
@@ -1062,8 +1082,8 @@ export const AdminOrders: React.FC = () => {
                                 </div>
                               )}
                               <div className="min-w-0">
-                                <div className="text-xs font-bold text-slate-800 truncate max-w-[180px]">{i.name}</div>
-                                <div className="text-[10px] text-slate-500 font-semibold">Qty: <strong className="text-rose-600">x{i.quantity}</strong> • ৳{i.price.toLocaleString()}</div>
+                                <div className="text-xs font-bold text-slate-800 truncate max-w-[160px] sm:max-w-[180px]">{i.name}</div>
+                                <div className="text-[10px] text-slate-500 font-semibold tabular-nums">Qty: <strong className="text-rose-600">x{i.quantity}</strong> • ৳{i.price.toLocaleString()}</div>
                               </div>
                             </div>
                           );
@@ -1072,28 +1092,28 @@ export const AdminOrders: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 justify-between md:justify-end">
-                    <div className="text-right">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 border-t md:border-t-0 pt-4 md:pt-0 border-slate-100 justify-between md:justify-end shrink-0">
+                    <div className="flex items-center justify-between sm:block sm:text-right">
                       <div className="text-xs text-slate-400 font-semibold">Total Amount</div>
-                      <div className="text-lg font-extrabold text-slate-900">৳{order.totalAmount.toLocaleString()}</div>
+                      <div className="text-lg font-extrabold text-slate-900 font-mono tabular-nums">৳{order.totalAmount.toLocaleString()}</div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                       <button
                         onClick={() => handleStartFulfillment(order)}
-                        className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center gap-2 shrink-0"
+                        className="flex-1 sm:flex-none px-4 sm:px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 whitespace-nowrap min-h-[42px]"
                       >
-                        <Barcode className="w-4 h-4" />
-                        Start Fulfillment & Scan
+                        <Barcode className="w-4 h-4 shrink-0" />
+                        <span>Start Fulfillment &amp; Scan</span>
                       </button>
 
                       <button
                         onClick={() => handleCancelOrder(order)}
-                        className="px-3 py-2.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 hover:border-rose-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1 shrink-0"
+                        className="px-3.5 py-2.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 hover:border-rose-200 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 shrink-0 min-h-[42px]"
                         title="Cancel Order"
                       >
                         <Ban className="w-3.5 h-3.5" />
-                        Cancel
+                        <span>Cancel</span>
                       </button>
                     </div>
                   </div>
@@ -1108,11 +1128,11 @@ export const AdminOrders: React.FC = () => {
       {/* TAB 2: ALL ORDERS TABLE */}
       {/* ========================================================================= */}
       {activeTab === 'all' && !activeFulfillmentOrder && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-6 space-y-4 sm:space-y-6">
           {/* Filters Row */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="relative w-full md:w-80">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
+            <div className="relative w-full lg:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search by Order ID, Name, Phone..."
@@ -1122,14 +1142,16 @@ export const AdminOrders: React.FC = () => {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                <Filter className="w-4 h-4" />
-                Source:
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 sm:gap-3 w-full lg:w-auto">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-xs sm:text-sm font-bold text-slate-600 min-w-0">
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <Filter className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400" />
+                  Source:
+                </span>
                 <select
                   value={sourceFilter}
                   onChange={(e: any) => setSourceFilter(e.target.value)}
-                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-hidden"
+                  className="w-full sm:w-auto px-3 py-2.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:outline-hidden"
                 >
                   <option value="ALL">All Sources</option>
                   <option value="WEBSITE">Website</option>
@@ -1138,12 +1160,12 @@ export const AdminOrders: React.FC = () => {
                 </select>
               </div>
 
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                Status:
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-xs sm:text-sm font-bold text-slate-600 min-w-0">
+                <span className="shrink-0">Status:</span>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:outline-hidden"
+                  className="w-full sm:w-auto px-3 py-2.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:outline-hidden"
                 >
                   <option value="ALL">All Statuses</option>
                   <option value="pending">Pending</option>
@@ -1156,20 +1178,20 @@ export const AdminOrders: React.FC = () => {
           </div>
 
           {/* Order Cards Grid System */}
-          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
             {filteredOrders.length === 0 ? (
               <div className="col-span-full p-8 text-center text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                 No orders found matching selected filters.
               </div>
             ) : (
               filteredOrders.map(order => (
-                <div key={order.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3 flex flex-col justify-between hover:border-rose-300 transition-all">
-                  <div className="space-y-2.5">
+                <div key={order.id} className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3 flex flex-col justify-between hover:border-rose-300 transition-all min-w-0 overflow-hidden">
+                  <div className="space-y-2.5 min-w-0">
                     {/* Top Row: Order ID, Source & Status */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-black text-rose-600 text-sm">#{order.id}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-mono font-black text-rose-600 text-sm tabular-nums truncate">#{order.id}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border shrink-0 ${
                           order.order_source === 'POS'
                             ? 'bg-amber-100 text-amber-800 border-amber-200'
                             : order.order_source === 'WHOLESALE'
@@ -1179,7 +1201,7 @@ export const AdminOrders: React.FC = () => {
                           {order.order_source || 'WEBSITE'}
                         </span>
                       </div>
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border shrink-0 ${
                         order.status === 'delivered'
                           ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                           : order.status === 'cancelled'
@@ -1191,29 +1213,29 @@ export const AdminOrders: React.FC = () => {
                     </div>
 
                     {/* Customer Info */}
-                    <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 space-y-1">
-                      <div className="font-bold text-slate-900 text-sm">{order.customerName}</div>
-                      <div className="text-xs text-slate-500 font-medium">{order.customerPhone}</div>
-                      <div className="text-[10px] text-slate-400 font-medium pt-0.5">
+                    <div className="bg-slate-50/80 p-2.5 sm:p-3 rounded-xl border border-slate-100 space-y-1 min-w-0">
+                      <div className="font-bold text-slate-900 text-sm truncate" title={order.customerName}>{order.customerName}</div>
+                      <div className="text-xs text-slate-500 font-medium tabular-nums truncate">{order.customerPhone}</div>
+                      <div className="text-[11px] text-slate-400 font-medium pt-0.5 tabular-nums">
                         {new Date(order.createdAt).toLocaleString()}
                       </div>
                     </div>
 
                     {/* Amount & Stock Info */}
-                    <div className="grid grid-cols-2 gap-2 text-xs p-2.5 bg-rose-50/20 rounded-xl border border-rose-100/50">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-bold uppercase">Total Amount</span>
-                        <span className="font-black text-slate-900 text-sm font-mono">৳{order.totalAmount.toLocaleString()}</span>
+                    <div className="grid grid-cols-2 gap-3 text-xs p-2.5 sm:p-3 bg-rose-50/20 rounded-xl border border-rose-100/50">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wide">Total Amount</span>
+                        <span className="font-black text-slate-900 text-sm font-mono tabular-nums block mt-0.5 truncate">৳{order.totalAmount.toLocaleString()}</span>
                       </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 block font-bold uppercase">Stock Deducted</span>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wide">Stock Deducted</span>
                         {order.stock_deducted ? (
-                          <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 mt-0.5">
-                            <CheckCircle className="w-3.5 h-3.5" /> YES
+                          <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 mt-0.5 whitespace-nowrap">
+                            <CheckCircle className="w-3.5 h-3.5 shrink-0" /> YES
                           </span>
                         ) : (
-                          <span className="text-xs font-bold text-amber-600 flex items-center gap-1 mt-0.5">
-                            <AlertTriangle className="w-3.5 h-3.5" /> NO
+                          <span className="text-xs font-bold text-amber-600 flex items-center gap-1 mt-0.5 whitespace-nowrap">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> NO
                           </span>
                         )}
                       </div>
@@ -1221,11 +1243,11 @@ export const AdminOrders: React.FC = () => {
                   </div>
 
                   {/* Actions Bar */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5 flex-wrap">
-                    <div className="flex items-center gap-1">
+                  <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         onClick={() => setSelectedOrderDetails(order)}
-                        className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-all"
+                        className="p-2 hover:bg-slate-100 text-slate-600 rounded-lg transition-all min-w-[36px] min-h-[36px] flex items-center justify-center"
                         title="View Order Details"
                       >
                         <Eye className="w-4 h-4" />
@@ -1233,28 +1255,34 @@ export const AdminOrders: React.FC = () => {
 
                       <button
                         onClick={() => setInvoiceModalOrder(order)}
-                        className="p-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] rounded-lg transition-all border border-pink-200"
+                        className="p-2 bg-pink-50 hover:bg-pink-100 text-[#C81E78] rounded-lg transition-all border border-pink-200 min-w-[36px] min-h-[36px] flex items-center justify-center"
                         title="View Shared Invoice"
                       >
                         <FileText className="w-4 h-4" />
                       </button>
 
                       <button
-                        onClick={() => downloadInvoicePDF(order)}
-                        className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all"
+                        type="button"
+                        disabled={pdfGeneratingOrderId === order.id}
+                        onClick={() => handleDownloadInvoice(order)}
+                        className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all min-w-[36px] min-h-[36px] flex items-center justify-center disabled:opacity-60"
                         title="Download PDF Invoice"
                       >
-                        <Download className="w-4 h-4" />
+                        {pdfGeneratingOrderId === order.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-[#C81E78]" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {order.courier ? (
                         <span 
-                          className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[10px] rounded-full flex items-center gap-1"
+                          className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-[11px] rounded-full flex items-center gap-1 whitespace-nowrap shrink-0 tabular-nums"
                           title={`Steadfast CN: ${order.courier.consignmentId}`}
                         >
-                          <Truck className="w-3 h-3 text-emerald-600" />
+                          <Truck className="w-3 h-3 text-emerald-600 shrink-0" />
                           CN #{order.courier.consignmentId}
                         </span>
                       ) : (
@@ -1262,10 +1290,10 @@ export const AdminOrders: React.FC = () => {
                           <button
                             disabled={isSteadfastLoading}
                             onClick={() => handleSendToSteadfast(order)}
-                            className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 font-bold text-xs rounded-lg transition-all flex items-center gap-1 disabled:opacity-50"
+                            className="px-2.5 py-1.5 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 font-bold text-xs rounded-lg transition-all flex items-center gap-1 disabled:opacity-50 whitespace-nowrap shrink-0"
                             title="Send to Steadfast Courier"
                           >
-                            <Truck className="w-3 h-3" /> Steadfast
+                            <Truck className="w-3.5 h-3.5 shrink-0" /> Steadfast
                           </button>
                         )
                       )}
@@ -1273,16 +1301,16 @@ export const AdminOrders: React.FC = () => {
                       {(order.status === 'pending' || order.status === 'packing') && (
                         <button
                           onClick={() => handleStartFulfillment(order)}
-                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1"
+                          className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1 whitespace-nowrap shrink-0"
                         >
-                          <Barcode className="w-3 h-3" /> Fulfill
+                          <Barcode className="w-3.5 h-3.5 shrink-0" /> Fulfill
                         </button>
                       )}
 
                       {order.status !== 'cancelled' && (
                         <button
                           onClick={() => handleCancelOrder(order)}
-                          className="px-2 py-1 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-lg transition-all"
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-lg transition-all whitespace-nowrap shrink-0"
                           title="Cancel Order"
                         >
                           Cancel
@@ -1301,38 +1329,38 @@ export const AdminOrders: React.FC = () => {
       {/* TAB 3: STOCK MOVEMENT AUDIT LOG */}
       {/* ========================================================================= */}
       {activeTab === 'movements' && !activeFulfillmentOrder && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-bold text-slate-900 text-lg flex items-center gap-2">
-                <History className="w-5 h-5 text-rose-600" />
-                Real-Time Stock Movement Audit Trail
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-6 space-y-4 sm:space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="font-bold text-slate-900 text-base sm:text-lg flex items-center gap-2">
+                <History className="w-5 h-5 text-rose-600 shrink-0" />
+                <span>Real-Time Stock Movement Audit Trail</span>
               </h2>
-              <p className="text-slate-500 text-xs">
-                Mandatory logging for all sales (POS & Website fulfillment), returns, restocks, and manual adjustments.
+              <p className="text-slate-500 text-xs mt-0.5">
+                Mandatory logging for all sales (POS &amp; Website fulfillment), returns, restocks, and manual adjustments.
               </p>
             </div>
 
             <button
               onClick={() => setMovements([...productService.getStockMovements()])}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
+              className="self-start sm:self-auto px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Refresh Log
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
             {movements.length === 0 ? (
               <div className="col-span-full p-8 text-center text-slate-400 font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                 No stock movements recorded yet.
               </div>
             ) : (
               movements.map(m => (
-                <div key={m.id} className="p-4 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-3 hover:border-slate-300 transition-all">
+                <div key={m.id} className="p-3.5 sm:p-4 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-3 hover:border-slate-300 transition-all min-w-0">
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-bold text-slate-900 text-sm leading-tight">{m.productName}</div>
-                      <div className="text-[10px] text-slate-400 mt-1 font-medium">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 text-sm leading-tight break-words">{m.productName}</div>
+                      <div className="text-[11px] text-slate-400 mt-1 font-medium tabular-nums">
                         {new Date(m.createdAt).toLocaleString()}
                       </div>
                     </div>
@@ -1350,27 +1378,27 @@ export const AdminOrders: React.FC = () => {
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 text-xs p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-[9px] text-slate-400 block font-bold uppercase">Source</span>
-                      <span className="font-bold text-slate-700">{m.source}</span>
+                      <span className="font-bold text-slate-700 truncate block">{m.source}</span>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-[9px] text-slate-400 block font-bold uppercase">Qty Delta</span>
-                      <span className={`font-black ${m.quantity < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      <span className={`font-black tabular-nums ${m.quantity < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                         {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
                       </span>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-[9px] text-slate-400 block font-bold uppercase">Stock Shift</span>
-                      <span className="font-mono text-[11px] text-slate-800 font-bold">
+                      <span className="font-mono text-[11px] text-slate-800 font-bold tabular-nums">
                         {m.previousStock !== undefined ? `${m.previousStock}→${m.newStock}` : 'N/A'}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs text-slate-600 pt-1 font-semibold border-t border-slate-100">
-                    <div>By: <span className="text-slate-800">{m.performedBy || 'Staff'}</span></div>
-                    {m.orderId && <div className="text-rose-600 font-mono text-[11px]">Order #{m.orderId}</div>}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 pt-1 font-semibold border-t border-slate-100">
+                    <div className="truncate">By: <span className="text-slate-800">{m.performedBy || 'Staff'}</span></div>
+                    {m.orderId && <div className="text-rose-600 font-mono text-[11px] tabular-nums shrink-0">Order #{m.orderId}</div>}
                   </div>
                 </div>
               ))
@@ -1381,15 +1409,15 @@ export const AdminOrders: React.FC = () => {
 
       {/* Modal: Selected Order Details */}
       {selectedOrderDetails && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h3 className="font-extrabold text-slate-900 text-lg">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 space-y-4 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-3">
+              <h3 className="font-extrabold text-slate-900 text-base sm:text-lg truncate">
                 Order Details #{selectedOrderDetails.id}
               </h3>
               <button
                 onClick={() => setSelectedOrderDetails(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg p-1"
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg p-1.5 shrink-0"
               >
                 ✕
               </button>
@@ -1452,33 +1480,39 @@ export const AdminOrders: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 pt-2">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 pt-2">
               <button
                 onClick={() => {
                   setInvoiceModalOrder(selectedOrderDetails);
                   setSelectedOrderDetails(null);
                 }}
-                className="flex-1 py-2.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] font-bold text-xs rounded-xl border border-pink-200 transition-all flex items-center justify-center gap-1.5"
+                className="sm:flex-1 py-2.5 px-3 bg-pink-50 hover:bg-pink-100 text-[#C81E78] font-bold text-xs rounded-xl border border-pink-200 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
               >
-                <FileText className="w-4 h-4" />
+                <FileText className="w-4 h-4 shrink-0" />
                 View Invoice
               </button>
 
               <button
-                onClick={() => downloadInvoicePDF(selectedOrderDetails)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5"
+                type="button"
+                disabled={pdfGeneratingOrderId === selectedOrderDetails.id}
+                onClick={() => handleDownloadInvoice(selectedOrderDetails)}
+                className="sm:flex-1 py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-60"
               >
-                <Download className="w-4 h-4" />
-                Download PDF
+                {pdfGeneratingOrderId === selectedOrderDetails.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0 text-[#C81E78]" />
+                ) : (
+                  <Download className="w-4 h-4 shrink-0" />
+                )}
+                {pdfGeneratingOrderId === selectedOrderDetails.id ? 'Generating...' : 'Download PDF'}
               </button>
 
               {!selectedOrderDetails.courier && selectedOrderDetails.status !== 'cancelled' && (
                 <button
                   disabled={isSteadfastLoading}
                   onClick={() => handleSendToSteadfast(selectedOrderDetails)}
-                  className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="sm:flex-1 py-2.5 px-3 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 whitespace-nowrap"
                 >
-                  {isSteadfastLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+                  {isSteadfastLoading ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Truck className="w-4 h-4 shrink-0" />}
                   Steadfast
                 </button>
               )}
@@ -1490,9 +1524,9 @@ export const AdminOrders: React.FC = () => {
                     setSelectedOrderDetails(null);
                     handleCancelOrder(ord);
                   }}
-                  className="flex-1 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-all flex items-center justify-center gap-1.5"
+                  className="sm:flex-1 py-2.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >
-                  <Ban className="w-4 h-4" />
+                  <Ban className="w-4 h-4 shrink-0" />
                   Cancel Order
                 </button>
               )}
@@ -1510,8 +1544,8 @@ export const AdminOrders: React.FC = () => {
 
       {/* Cancel Order Confirmation Modal */}
       {orderToCancel && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 space-y-5 shadow-2xl border border-slate-200">
             {/* Modal Header */}
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -1641,13 +1675,13 @@ export const AdminOrders: React.FC = () => {
 
       {/* Shared Invoice Document Modal Overlay */}
       {invoiceModalOrder && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 z-50 overflow-y-auto">
-          <div className="bg-slate-100 rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6 z-50 overflow-y-auto">
+          <div className="bg-slate-100 rounded-2xl sm:rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-300 overflow-hidden">
             {/* Modal Sticky Top Header */}
-            <div className="bg-white px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-[#C81E78]" />
-                <h3 className="font-extrabold text-slate-900 text-base sm:text-lg">
+            <div className="bg-white px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-5 h-5 text-[#C81E78] shrink-0" />
+                <h3 className="font-extrabold text-slate-900 text-sm sm:text-lg truncate">
                   Cash Invoice #{invoiceModalOrder.id}
                 </h3>
               </div>
@@ -1672,7 +1706,10 @@ export const AdminOrders: React.FC = () => {
                 )}
 
                 <button
-                  onClick={() => printInvoice(invoiceModalOrder)}
+                  type="button"
+                  onClick={() => {
+                    void printInvoice(invoiceModalOrder);
+                  }}
                   className="px-3.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 transition-all flex items-center gap-1.5 shadow-2xs"
                 >
                   <Printer className="w-3.5 h-3.5 text-slate-600" />
@@ -1680,11 +1717,17 @@ export const AdminOrders: React.FC = () => {
                 </button>
 
                 <button
-                  onClick={() => downloadInvoicePDF(invoiceModalOrder)}
-                  className="px-3.5 py-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] font-bold text-xs rounded-xl border border-pink-200 transition-all flex items-center gap-1.5 shadow-2xs"
+                  type="button"
+                  disabled={pdfGeneratingOrderId === invoiceModalOrder.id}
+                  onClick={() => handleDownloadInvoice(invoiceModalOrder)}
+                  className="px-3.5 py-1.5 bg-pink-50 hover:bg-pink-100 text-[#C81E78] font-bold text-xs rounded-xl border border-pink-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-60"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download PDF</span>
+                  {pdfGeneratingOrderId === invoiceModalOrder.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  <span>{pdfGeneratingOrderId === invoiceModalOrder.id ? 'Generating...' : 'Download PDF'}</span>
                 </button>
 
                 <button
@@ -1709,8 +1752,8 @@ export const AdminOrders: React.FC = () => {
 
             {/* Modal Scrollable Body containing InvoiceDocument */}
             <div className="p-4 sm:p-8 overflow-y-auto flex-1 bg-slate-100/50">
-              <div className="max-w-2xl mx-auto shadow-lg rounded-2xl overflow-hidden">
-                <InvoiceDocument order={invoiceModalOrder} />
+              <div className="w-full max-w-4xl mx-auto flex justify-center">
+                <InvoiceDocument order={invoiceModalOrder} className="shadow-lg" />
               </div>
             </div>
           </div>

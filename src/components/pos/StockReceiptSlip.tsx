@@ -3,7 +3,7 @@ import { StockReceipt } from '../../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { Printer, Download, ArrowLeft, CheckCircle2, PackageCheck } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { renderSafeCanvas } from '../../utils/html2canvasSafe';
 
 interface StockReceiptSlipProps {
   receipt: StockReceipt;
@@ -53,7 +53,8 @@ export const StockReceiptSlip: React.FC<StockReceiptSlipProps> = ({ receipt, onB
     const el = document.getElementById(`stock-receipt-${receipt.id}`);
     if (!el) return;
     try {
-      const canvas = await html2canvas(el, {
+      const canvas = await renderSafeCanvas(el, {
+        preserveComputedStyles: true,
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff'

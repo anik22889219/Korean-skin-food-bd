@@ -154,6 +154,9 @@ export interface OrderItem {
   customUnitPrice?: number;
   originalUnitPrice?: number;
   isBelowCostAlert?: boolean;
+  sku?: string;
+  pricingType?: 'retail' | 'wholesale' | string;
+  pricingTier?: string;
 }
 
 export interface CourierData {
