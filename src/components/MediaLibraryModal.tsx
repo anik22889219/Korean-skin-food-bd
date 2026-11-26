@@ -289,11 +289,11 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-pink-50 bg-pink-50/10 px-4 justify-between items-center">
-          <div className="flex">
+        <div className="flex flex-wrap border-b border-pink-50 bg-pink-50/10 px-3 sm:px-4 justify-between items-center gap-2">
+          <div className="flex overflow-x-auto scrollbar-none">
             <button
               onClick={() => setActiveTab('library')}
-              className={`px-4 py-3 text-xs font-bold border-b-2 transition ${
+              className={`px-3 sm:px-4 py-3 text-xs font-bold border-b-2 transition whitespace-nowrap shrink-0 ${
                 activeTab === 'library'
                   ? 'border-[#E91E8C] text-[#E91E8C]'
                   : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -303,22 +303,22 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('upload')}
-              className={`px-4 py-3 text-xs font-bold border-b-2 transition ${
+              className={`px-3 sm:px-4 py-3 text-xs font-bold border-b-2 transition whitespace-nowrap shrink-0 ${
                 activeTab === 'upload'
                   ? 'border-[#E91E8C] text-[#E91E8C]'
                   : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}
             >
-              Upload Image/Video from Device
+              Upload from Device
             </button>
           </div>
 
           <button
             type="button"
             onClick={() => setShowCloudinaryConfig(!showCloudinaryConfig)}
-            className="text-[10px] text-[#E91E8C] font-bold underline px-2 py-1 hover:text-[#FF4B91]"
+            className="text-[10px] text-[#E91E8C] font-bold underline px-2 py-1.5 hover:text-[#FF4B91] whitespace-nowrap"
           >
-            {showCloudinaryConfig ? "Hide Cloudinary Credentials" : "Cloudinary Direct API Config"}
+            {showCloudinaryConfig ? "Hide Cloudinary Credentials" : "Cloudinary Config"}
           </button>
         </div>
 

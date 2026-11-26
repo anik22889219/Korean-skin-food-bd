@@ -737,6 +737,7 @@ export const DEFAULT_PAGES_THEME: PagesThemeSettings = {
     title: 'Welcome to Korean Skin Food BD',
     subtitle: 'Sign in to access your custom e-commerce profile, view previous orders, and enjoy personalized K-Beauty recommendations.',
     googleButtonText: 'Continue with Google',
+    facebookButtonText: 'Continue with Facebook',
     securityBadgeText: '100% Secure Auth',
     backToShopLabel: 'Back to Shop',
     backToShopLink: '/',

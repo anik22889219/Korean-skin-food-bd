@@ -3,14 +3,33 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { LoginPageThemeSettings } from '../types/theme';
-import { Wand2, ArrowRight } from 'lucide-react';
+import { Wand2, ArrowRight, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 
+function formatAuthErrorMessage(err: any): string | null {
+  const code = err?.code || '';
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return null;
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return 'An account already exists with this email using a different sign-in method (such as Google). Please sign in with that method.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'This sign-in provider is not enabled yet in Firebase Authentication.';
+  }
+  return err?.message || 'Sign-in failed. Please try again.';
+}
+
 export const Login: React.FC = () => {
-  const { user, signInWithGoogle, loading } = useAuth();
+  const { user, signInWithGoogle, signInWithFacebook, loading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [pageTheme, setPageTheme] = useState<LoginPageThemeSettings>(DEFAULT_PAGES_THEME.login);
+  const [activeProvider, setActiveProvider] = useState<'google' | 'facebook' | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     return themeService.subscribePages((p) => {
@@ -26,10 +45,30 @@ export const Login: React.FC = () => {
   }, [user, navigate, searchParams]);
 
   const handleGoogleLogin = async () => {
+    setAuthError(null);
+    setActiveProvider('google');
     try {
       await signInWithGoogle();
     } catch (err) {
       console.error('Google Sign-In Failed:', err);
+      const msg = formatAuthErrorMessage(err);
+      if (msg) setAuthError(msg);
+    } finally {
+      setActiveProvider(null);
+    }
+  };
+
+  const handleFacebookLogin = async () => {
+    setAuthError(null);
+    setActiveProvider('facebook');
+    try {
+      await signInWithFacebook();
+    } catch (err) {
+      console.error('Facebook Sign-In Failed:', err);
+      const msg = formatAuthErrorMessage(err);
+      if (msg) setAuthError(msg);
+    } finally {
+      setActiveProvider(null);
     }
   };
 
@@ -54,14 +93,22 @@ export const Login: React.FC = () => {
           </p>
         </div>
 
-        {/* Action Button */}
-        <div className="pt-2">
+        {authError && (
+          <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-start gap-2 text-left">
+            <AlertCircle size={16} className="shrink-0 mt-0.5 text-rose-500" />
+            <span>{authError}</span>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="pt-2 space-y-3">
           <button
+            type="button"
             onClick={handleGoogleLogin}
             disabled={loading}
             className="w-full flex items-center justify-center gap-3 py-4 bg-white hover:bg-gray-50 text-gray-800 font-bold rounded-2xl border-2 border-gray-100 cursor-pointer shadow-sm hover:shadow-md transition-all disabled:opacity-50"
           >
-            <svg className="h-5 w-5" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24">
               <path
                 fill="#4285F4"
                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -79,7 +126,23 @@ export const Login: React.FC = () => {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            <span>{loading ? 'Signing in...' : pageTheme.googleButtonText}</span>
+            <span>{loading && activeProvider === 'google' ? 'Signing in...' : pageTheme.googleButtonText}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFacebookLogin}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-3 py-4 bg-[#1877F2] hover:bg-[#166FE5] text-white font-bold rounded-2xl border-2 border-[#1877F2] cursor-pointer shadow-sm hover:shadow-md transition-all disabled:opacity-50"
+          >
+            <svg className="h-5 w-5 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg>
+            <span>
+              {loading && activeProvider === 'facebook'
+                ? 'Signing in...'
+                : pageTheme.facebookButtonText || 'Continue with Facebook'}
+            </span>
           </button>
         </div>
 

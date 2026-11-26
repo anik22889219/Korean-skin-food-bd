@@ -46,7 +46,7 @@ export const ProductDetail: React.FC = () => {
   const navigate = useNavigate();
   const { language, addToCart } = useCart();
   const { addToWholesaleCart } = useWholesaleCart();
-  const { user, profile, signInWithGoogle, isAdmin } = useAuth();
+  const { user, profile, signInWithGoogle, signInWithFacebook, isAdmin } = useAuth();
 
   const { data: product, isLoading: isProductLoading, isError } = useProduct(id);
   const { data: allProducts = [] } = useProducts();
@@ -1874,13 +1874,24 @@ export const ProductDetail: React.FC = () => {
                 <span>{showReviewForm ? 'Cancel Review' : 'Write a Product Review'}</span>
               </button>
             ) : (
-              <button
-                onClick={() => signInWithGoogle()}
-                className="px-4 py-2.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer"
-              >
-                <Lock size={14} />
-                <span>Log in to Leave a Review</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => signInWithGoogle().catch((err) => console.warn('Google sign-in skipped:', err))}
+                  className="px-4 py-2.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Lock size={14} />
+                  <span>Google Login to Review</span>
+                </button>
+                <button
+                  onClick={() => signInWithFacebook().catch((err) => console.warn('Facebook sign-in skipped:', err))}
+                  className="px-4 py-2.5 bg-[#1877F2] hover:bg-[#166FE5] text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                  </svg>
+                  <span>Facebook Login</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

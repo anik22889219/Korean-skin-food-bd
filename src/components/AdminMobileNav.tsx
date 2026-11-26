@@ -45,6 +45,7 @@ const SHORT_LABEL_MAP: Record<string, string> = {
   '/admin/taxonomies': 'Catalog',
   '/admin/testimonials': 'Reviews',
   '/admin/seo': 'SEO',
+  '/admin/blogs': 'Blogs',
   '/admin/meta-catalog': 'Meta',
   '/admin/pinterest': 'Pinterest',
   '/admin/social': 'Social',

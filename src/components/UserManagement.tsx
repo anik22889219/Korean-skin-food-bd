@@ -446,25 +446,25 @@ export const UserManagement: React.FC = () => {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-20 right-6 z-50 px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border text-xs font-bold ${
+            className={`fixed top-20 left-4 right-4 sm:left-auto sm:right-6 z-50 px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border text-xs font-bold ${
               notification.type === 'success' 
                 ? 'bg-emerald-950 text-emerald-200 border-emerald-800' 
                 : 'bg-rose-950 text-rose-200 border-rose-800'
             }`}
           >
-            {notification.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+            {notification.type === 'success' ? <CheckCircle2 size={16} className="shrink-0" /> : <AlertCircle size={16} className="shrink-0" />}
             <span>{notification.message}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl border border-slate-800 relative overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-4 sm:p-6 text-white shadow-xl border border-slate-800 relative overflow-hidden">
         <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
         
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
                 <Crown size={12} className="text-amber-400" /> Executive HR Deck
               </span>
@@ -472,9 +472,9 @@ export const UserManagement: React.FC = () => {
                 Live Synchronization
               </span>
             </div>
-            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
-              <Users className="text-indigo-400" size={26} />
-              User & Access Control Center
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-2">
+              <Users className="text-indigo-400 shrink-0" size={24} />
+              <span>User & Access Control Center</span>
             </h1>
             <p className="text-xs text-slate-300 mt-1 max-w-xl">
               Manage accounts, assign staff permissions, adjust loyalty tiers, and enforce access controls across the platform.
@@ -486,7 +486,7 @@ export const UserManagement: React.FC = () => {
               resetForm();
               setIsAddUserOpen(true);
             }}
-            className="px-4 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-black rounded-2xl shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition cursor-pointer shrink-0"
+            className="w-full md:w-auto px-4 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-black rounded-2xl shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition cursor-pointer shrink-0"
           >
             <UserPlus size={16} />
             <span>Add / Invite Staff Member</span>
@@ -561,10 +561,10 @@ export const UserManagement: React.FC = () => {
       </div>
 
       {/* Filters & Search Controls */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:flex-wrap justify-between gap-3">
           {/* Search Input */}
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-0 w-full">
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -576,11 +576,11 @@ export const UserManagement: React.FC = () => {
           </div>
 
           {/* Wholesale Filter Toggle */}
-          <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-200">
+          <div className="grid grid-cols-3 sm:flex items-center gap-1 sm:gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-200 w-full sm:w-auto">
             <button
               type="button"
               onClick={() => setSelectedWholesaleFilter('all')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-bold transition cursor-pointer text-center ${
                 selectedWholesaleFilter === 'all'
                   ? 'bg-white text-slate-900 shadow-xs font-extrabold'
                   : 'text-slate-500 hover:text-slate-800'
@@ -591,19 +591,19 @@ export const UserManagement: React.FC = () => {
             <button
               type="button"
               onClick={() => setSelectedWholesaleFilter('wholesale')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                 selectedWholesaleFilter === 'wholesale'
                   ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
                   : 'text-amber-800 hover:bg-amber-100/50'
               }`}
             >
-              <Building2 size={12} />
-              <span>Wholesale Only</span>
+              <Building2 size={12} className="shrink-0" />
+              <span className="truncate">Wholesale</span>
             </button>
             <button
               type="button"
               onClick={() => setSelectedWholesaleFilter('retail')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-bold transition cursor-pointer text-center ${
                 selectedWholesaleFilter === 'retail'
                   ? 'bg-white text-slate-900 shadow-xs font-extrabold'
                   : 'text-slate-500 hover:text-slate-800'
@@ -614,9 +614,9 @@ export const UserManagement: React.FC = () => {
           </div>
 
           {/* Role Filter Selector */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-none w-full min-w-0">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase shrink-0 flex items-center gap-1">
-              <Filter size={12} /> Filter Role:
+              <Filter size={12} /> Role:
             </span>
             {[
               { id: 'all', label: 'All Roles' },
@@ -631,7 +631,7 @@ export const UserManagement: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setSelectedRole(tab.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer whitespace-nowrap border ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer whitespace-nowrap shrink-0 border ${
                   selectedRole === tab.id
                     ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                     : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -646,8 +646,8 @@ export const UserManagement: React.FC = () => {
 
       {/* Users Table Card */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="p-3.5 sm:p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
               User Roster
             </span>
@@ -664,17 +664,17 @@ export const UserManagement: React.FC = () => {
         </div>
 
         {/* User Cards Grid System */}
-        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 p-3 sm:p-4">
           {filteredUsers.length === 0 ? (
             <div className="col-span-full py-12 text-center text-slate-400 font-medium bg-slate-50/80 rounded-2xl border border-dashed border-slate-200">
               {loading ? 'Loading user database...' : 'No users match your criteria.'}
             </div>
           ) : (
             filteredUsers.map((u) => (
-              <div key={u.uid} className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4 hover:border-indigo-300 transition-all flex flex-col justify-between">
-                <div className="space-y-3">
+              <div key={u.uid} className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-3.5 sm:space-y-4 hover:border-indigo-300 transition-all flex flex-col justify-between min-w-0">
+                <div className="space-y-3 min-w-0">
                   {/* Avatar, Name & UID */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-extrabold flex items-center justify-center shrink-0 shadow-xs overflow-hidden text-sm">
                       {u.photoURL && u.photoURL.trim() !== '' ? (
                         <img src={u.photoURL} alt={u.name} className="w-full h-full object-cover" />
@@ -683,7 +683,7 @@ export const UserManagement: React.FC = () => {
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
+                      <div className="flex items-center justify-between gap-1.5">
                         <span className="font-extrabold text-slate-900 text-sm truncate">{u.name}</span>
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase shrink-0 ${
                           u.status === 'suspended' 
@@ -699,14 +699,14 @@ export const UserManagement: React.FC = () => {
                   </div>
 
                   {/* Role Selector & Badge */}
-                  <div className="flex items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Role Tier</span>
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase shrink-0">Role Tier</span>
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                       {getRoleBadge(u.role)}
                       <select
                         value={u.role}
                         onChange={(e) => handleRoleChange(u.uid, e.target.value as UserRole)}
-                        className="text-[10px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                        className="text-[10px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer max-w-full"
                         title="Change User Role"
                       >
                         <option value="customer">Customer</option>
@@ -721,42 +721,44 @@ export const UserManagement: React.FC = () => {
                   </div>
 
                   {/* Contact Info & Department */}
-                  <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-2 font-semibold truncate">
+                  <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100 min-w-0">
+                    <div className="flex items-center gap-2 font-semibold min-w-0">
                       <Mail size={13} className="text-slate-400 shrink-0" />
                       <span className="truncate">{u.email || 'No Email'}</span>
                     </div>
                     {u.phone && (
-                      <div className="flex items-center gap-2 text-slate-500 font-medium">
+                      <div className="flex items-center gap-2 text-slate-500 font-medium min-w-0">
                         <Phone size={13} className="text-slate-400 shrink-0" />
-                        <span>{u.phone}</span>
+                        <span className="truncate">{u.phone}</span>
                       </div>
                     )}
                     {u.department && (
-                      <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-100/80">
+                      <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-100/80 truncate">
                         Dept: <span className="font-bold text-slate-700">{u.department}</span>
                       </div>
                     )}
                   </div>
 
                   {/* Wholesale Access Control */}
-                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border bg-slate-50 border-slate-200/80">
-                    <div className="flex items-center gap-1.5">
-                      <Building2 size={14} className={u.wholesaleAccess ? 'text-amber-600' : 'text-slate-400'} />
-                      <div>
-                        <span className="text-[10px] font-black uppercase tracking-wider block text-slate-700">
-                          Wholesale Access
-                        </span>
-                        {u.wholesaleAccess && (
-                          <button 
-                            onClick={() => setLedgerCustomerId(u.uid)}
-                            className="ml-2 px-2 py-0.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-[10px] rounded-md font-bold cursor-pointer transition"
-                          >
-                            Ledger
-                          </button>
-                        )}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 p-2.5 rounded-xl border bg-slate-50 border-slate-200/80">
+                    <div className="flex items-start sm:items-center gap-1.5 min-w-0 flex-1">
+                      <Building2 size={14} className={`shrink-0 mt-0.5 sm:mt-0 ${u.wholesaleAccess ? 'text-amber-600' : 'text-slate-400'}`} />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                            Wholesale Access
+                          </span>
+                          {u.wholesaleAccess && (
+                            <button 
+                              onClick={() => setLedgerCustomerId(u.uid)}
+                              className="px-2 py-0.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-[10px] rounded-md font-bold cursor-pointer transition"
+                            >
+                              Ledger
+                            </button>
+                          )}
+                        </div>
 
-                        <span className={`text-[10px] font-bold ${u.wholesaleAccess ? 'text-amber-700' : 'text-slate-400'}`}>
+                        <span className={`text-[10px] font-bold block ${u.wholesaleAccess ? 'text-amber-700' : 'text-slate-400'}`}>
                           {u.wholesaleAccess ? 'Authorized (Tier 1 & 2 Active)' : 'Standard Retail Only'}
                         </span>
                       </div>
@@ -765,7 +767,7 @@ export const UserManagement: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleToggleWholesale(u.uid, !u.wholesaleAccess)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer border ${
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer border shrink-0 ${
                         u.wholesaleAccess
                           ? 'bg-amber-500 text-slate-950 border-amber-500 hover:bg-amber-600 shadow-xs'
                           : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
@@ -778,29 +780,29 @@ export const UserManagement: React.FC = () => {
                 </div>
 
                 {/* Footer: Loyalty Points & Actions */}
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
                     onClick={() => openLoyaltyLedger(u)}
-                    className="inline-flex items-center gap-1.5 font-black text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200 transition cursor-pointer"
+                    className="inline-flex items-center gap-1.5 font-black text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg border border-amber-200 transition cursor-pointer"
                     title="View & Adjust Loyalty Ledger"
                   >
-                    <Award size={13} className="text-amber-500" />
+                    <Award size={13} className="text-amber-500 shrink-0" />
                     <span>{u.loyaltyPoints || 0} Points</span>
-                    <History size={11} className="text-amber-600/80" />
+                    <History size={11} className="text-amber-600/80 shrink-0" />
                   </button>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => openEditModal(u)}
-                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-xl transition cursor-pointer"
+                      className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition cursor-pointer"
                       title="Edit User Profile"
                     >
                       <Edit3 size={15} />
                     </button>
                     <button
                       onClick={() => setUserToDelete(u)}
-                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                      className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition cursor-pointer"
                       title="Delete Account"
                     >
                       <Trash2 size={15} />
@@ -862,7 +864,7 @@ export const UserManagement: React.FC = () => {
                   min={1}
                   value={loyaltyDeltaInput}
                   onChange={(e) => setLoyaltyDeltaInput(e.target.value)}
-                  className="w-28 px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="w-full sm:w-28 px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
                   placeholder="Points"
                 />
                 <input
@@ -870,7 +872,7 @@ export const UserManagement: React.FC = () => {
                   value={loyaltyReasonInput}
                   onChange={(e) => setLoyaltyReasonInput(e.target.value)}
                   placeholder="Reason (e.g. Goodwill credit for delayed courier)"
-                  className="flex-1 px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className="flex-1 min-w-0 px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
                 />
                 <div className="flex gap-1.5 shrink-0">
                   <button
@@ -947,7 +949,7 @@ export const UserManagement: React.FC = () => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200"
+              className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <div className="flex items-center gap-2">
@@ -974,7 +976,7 @@ export const UserManagement: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
                     <input
@@ -996,7 +998,7 @@ export const UserManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Role</label>
                     <select
@@ -1026,7 +1028,7 @@ export const UserManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Loyalty Points</label>
                     <input
@@ -1103,7 +1105,7 @@ export const UserManagement: React.FC = () => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200"
+              className="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <div className="flex items-center gap-2">
@@ -1131,7 +1133,7 @@ export const UserManagement: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Email Address *</label>
                     <input
@@ -1156,7 +1158,7 @@ export const UserManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Role</label>
                     <select

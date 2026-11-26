@@ -26,6 +26,7 @@ import { AdminTaxonomyManagement } from './components/AdminTaxonomyManagement';
 import { AdminTestimonials } from './components/AdminTestimonials';
 import { AdminSEO } from './components/AdminSEO';
 import { AdminSEOPages } from './components/AdminSEOPages';
+import { AdminBlogs } from './components/AdminBlogs';
 import { AdminSocial } from './components/AdminSocial';
 import { AdminChatLeads } from './components/AdminChatLeads';
 import { AdminThemeEditor } from './components/AdminThemeEditor';
@@ -281,6 +282,7 @@ export default function App() {
                   <Route path="reviews" element={<AdminTestimonials />} />
                   <Route path="seo" element={<AdminSEO />} />
                   <Route path="seo/pages" element={<AdminSEOPages />} />
+                  <Route path="blogs" element={<AdminBlogs />} />
                   <Route path="meta-catalog" element={<AdminMetaCatalog />} />
                   <Route path="facebook-catalog" element={<AdminMetaCatalog />} />
                   <Route path="pinterest" element={<AdminPinterest />} />

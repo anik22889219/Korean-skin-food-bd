@@ -8,7 +8,7 @@ import {
   Palette, Package, Bot, Users, Sparkles, ChevronsLeft, ChevronsRight,
   PanelLeftClose, PanelLeftOpen, FileText, Wallet, Landmark, Receipt,
   Percent, Layers, SlidersHorizontal, MessageSquareQuote, Share2, Activity,
-  PackageCheck, Pin
+  PackageCheck, Pin, BookOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WhatsAppChatBot } from './WhatsAppChatBot';
@@ -128,6 +128,7 @@ export const AdminLayout: React.FC = () => {
     { to: '/admin/taxonomies', label: 'Categories', badge: 'Catalog', icon: SlidersHorizontal },
     { to: '/admin/testimonials', label: 'Customer Review', badge: 'GMB', icon: MessageSquareQuote },
     { to: '/admin/seo', label: 'SEO Optimizer', badge: 'Google', icon: TrendingUp },
+    { to: '/admin/blogs', label: 'Blogs', badge: 'Guides', icon: BookOpen },
     { to: '/admin/meta-catalog', label: 'Meta Catalog', badge: 'Sync', icon: Share2 },
     { to: '/admin/pinterest', label: 'Pinterest Hub', badge: 'Sync', icon: Pin },
     { to: '/admin/social', label: 'Social Copy Studio', badge: 'AI', icon: Wand2 },

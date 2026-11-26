@@ -307,6 +307,51 @@ service cloud.firestore {
       allow delete: if isStaff() && isValidSeoPageId(pageId);
     }
 
+    function isValidArticleId(articleId) {
+      return articleId.matches('^[a-zA-Z0-9_\\-]{2,160}$');
+    }
+
+    function isValidEducationalArticle(data, articleId) {
+      return data.keys().hasAll(['id', 'slug', 'title', 'category', 'publishedDate']) &&
+        data.keys().hasOnly([
+          'id', 'slug', 'title', 'titleBN', 'excerpt', 'excerptBN',
+          'category', 'status', 'isDeleted', 'readingTimeMinutes',
+          'publishedDate', 'lastUpdatedDate', 'heroImage', 'imageAltText',
+          'targetSkinTypes', 'keyIngredients', 'recommendedBrandSlugs',
+          'recommendedProductIds', 'content', 'contentBN', 'faqs', 'author'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 160 &&
+        data.slug is string && data.slug == articleId && data.slug.size() >= 2 && data.slug.size() <= 160 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 300 &&
+        data.category in ['routine', 'sun_care', 'sensitive', 'acne', 'dry_skin', 'authentication', 'ingredients', 'layering'] &&
+        data.publishedDate is string && data.publishedDate.size() <= 64 &&
+        (!('titleBN' in data) || data.titleBN == null || (data.titleBN is string && data.titleBN.size() <= 400)) &&
+        (!('excerpt' in data) || data.excerpt == null || (data.excerpt is string && data.excerpt.size() <= 1000)) &&
+        (!('excerptBN' in data) || data.excerptBN == null || (data.excerptBN is string && data.excerptBN.size() <= 1200)) &&
+        (!('status' in data) || data.status in ['published', 'draft']) &&
+        (!('isDeleted' in data) || data.isDeleted is bool) &&
+        (!('readingTimeMinutes' in data) || (data.readingTimeMinutes is number && data.readingTimeMinutes >= 1 && data.readingTimeMinutes <= 120)) &&
+        (!('lastUpdatedDate' in data) || data.lastUpdatedDate == null || (data.lastUpdatedDate is string && data.lastUpdatedDate.size() <= 64)) &&
+        (!('heroImage' in data) || data.heroImage == null || (data.heroImage is string && data.heroImage.size() <= 1500)) &&
+        (!('imageAltText' in data) || data.imageAltText == null || (data.imageAltText is string && data.imageAltText.size() <= 400)) &&
+        (!('targetSkinTypes' in data) || (data.targetSkinTypes is list && data.targetSkinTypes.size() <= 20 && (data.targetSkinTypes.size() == 0 || data.targetSkinTypes[0] is string))) &&
+        (!('keyIngredients' in data) || (data.keyIngredients is list && data.keyIngredients.size() <= 30 && (data.keyIngredients.size() == 0 || data.keyIngredients[0] is string))) &&
+        (!('recommendedBrandSlugs' in data) || (data.recommendedBrandSlugs is list && data.recommendedBrandSlugs.size() <= 20 && (data.recommendedBrandSlugs.size() == 0 || data.recommendedBrandSlugs[0] is string))) &&
+        (!('recommendedProductIds' in data) || (data.recommendedProductIds is list && data.recommendedProductIds.size() <= 24 && (data.recommendedProductIds.size() == 0 || data.recommendedProductIds[0] is string))) &&
+        (!('content' in data) || data.content == null || (data.content is string && data.content.size() <= 60000)) &&
+        (!('contentBN' in data) || data.contentBN == null || (data.contentBN is string && data.contentBN.size() <= 60000)) &&
+        (!('faqs' in data) || (data.faqs is list && data.faqs.size() <= 30 && (data.faqs.size() == 0 || data.faqs[0] is map))) &&
+        (!('author' in data) || data.author == null || data.author is map);
+    }
+
+    // educational_articles - Public read for dynamic skincare guides, verified staff only writes
+    match /educational_articles/{articleId} {
+      allow read: if true;
+      allow create: if isStaff() && isValidArticleId(articleId) && isValidEducationalArticle(request.resource.data, articleId);
+      allow update: if isStaff() && isValidArticleId(articleId) && isValidEducationalArticle(request.resource.data, articleId);
+      allow delete: if isStaff() && isValidArticleId(articleId);
+    }
+
     // ==========================================
     // ORDERS & COMMERCE TRANSACTIONS
     // ==========================================

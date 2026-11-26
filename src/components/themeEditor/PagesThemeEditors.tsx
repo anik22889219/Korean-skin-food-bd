@@ -1097,6 +1097,7 @@ export const PagesThemeEditors: React.FC<PagesThemeEditorsProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FieldInput label="Welcome Title" value={d.title} onChange={(v) => set({ title: v })} />
               <FieldInput label="Google Button Label" value={d.googleButtonText} onChange={(v) => set({ googleButtonText: v })} />
+              <FieldInput label="Facebook Button Label" value={d.facebookButtonText || 'Continue with Facebook'} onChange={(v) => set({ facebookButtonText: v })} />
               <FieldInput label="Security Badge Text" value={d.securityBadgeText} onChange={(v) => set({ securityBadgeText: v })} />
               <FieldInput label="Back Link Label" value={d.backToShopLabel} onChange={(v) => set({ backToShopLabel: v })} />
               <FieldInput label="Back Link Target Route" value={d.backToShopLink} onChange={(v) => set({ backToShopLink: v })} mono />

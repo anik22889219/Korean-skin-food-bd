@@ -6,6 +6,8 @@ export interface SkincareGuide {
   excerpt: string;
   excerptBN: string;
   category: 'routine' | 'sun_care' | 'sensitive' | 'acne' | 'dry_skin' | 'authentication' | 'ingredients' | 'layering';
+  status?: 'published' | 'draft';
+  isDeleted?: boolean;
   readingTimeMinutes: number;
   publishedDate: string;
   lastUpdatedDate: string;
@@ -14,6 +16,7 @@ export interface SkincareGuide {
   targetSkinTypes: string[];
   keyIngredients: string[];
   recommendedBrandSlugs: string[];
+  recommendedProductIds?: string[];
   content: string;
   contentBN: string;
   faqs: Array<{ question: string; questionBN?: string; answer: string; answerBN?: string }>;

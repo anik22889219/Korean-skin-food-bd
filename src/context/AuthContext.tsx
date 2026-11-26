@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { 
   User, 
   GoogleAuthProvider, 
+  FacebookAuthProvider,
   signInWithPopup, 
   signOut as fbSignOut, 
   onAuthStateChanged 
@@ -16,6 +17,7 @@ interface AuthContextType {
   creatorProfile: CreatorProfile | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithFacebook: () => Promise<void>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isSuperAdmin: boolean;
@@ -135,6 +137,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const signInWithFacebook = async () => {
+    setLoading(true);
+    const provider = new FacebookAuthProvider();
+    provider.addScope('email');
+    provider.addScope('public_profile');
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error('[AuthContext] Facebook sign-in error:', error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
     setLoading(true);
     try {
@@ -167,6 +184,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       creatorProfile,
       loading,
       signInWithGoogle,
+      signInWithFacebook,
       signOut,
       isAdmin,
       isSuperAdmin,

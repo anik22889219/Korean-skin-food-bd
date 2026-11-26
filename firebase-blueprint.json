@@ -786,6 +786,36 @@
         "updatedBy": { "type": "string", "maxLength": 200 }
       },
       "required": ["id", "path", "pageType", "label", "metaTitle", "metaDescription"]
+    },
+    "EducationalArticle": {
+      "title": "EducationalArticle",
+      "description": "Dynamic bilingual Korean skincare guide and blog article for the /guides hub and /guide/:slug pages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 160, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "slug": { "type": "string", "maxLength": 160, "pattern": "^[a-z0-9\\-]+$" },
+        "title": { "type": "string", "maxLength": 300 },
+        "titleBN": { "type": "string", "maxLength": 400 },
+        "excerpt": { "type": "string", "maxLength": 1000 },
+        "excerptBN": { "type": "string", "maxLength": 1200 },
+        "category": { "type": "string", "enum": ["routine", "sun_care", "sensitive", "acne", "dry_skin", "authentication", "ingredients", "layering"] },
+        "status": { "type": "string", "enum": ["published", "draft"] },
+        "isDeleted": { "type": "boolean" },
+        "readingTimeMinutes": { "type": "number" },
+        "publishedDate": { "type": "string", "maxLength": 64 },
+        "lastUpdatedDate": { "type": "string", "maxLength": 64 },
+        "heroImage": { "type": "string", "maxLength": 1500 },
+        "imageAltText": { "type": "string", "maxLength": 400 },
+        "targetSkinTypes": { "type": "array" },
+        "keyIngredients": { "type": "array" },
+        "recommendedBrandSlugs": { "type": "array" },
+        "recommendedProductIds": { "type": "array" },
+        "content": { "type": "string", "maxLength": 60000 },
+        "contentBN": { "type": "string", "maxLength": 60000 },
+        "faqs": { "type": "array" },
+        "author": { "type": "object" }
+      },
+      "required": ["id", "slug", "title", "category", "publishedDate"]
     }
   },
   "firestore": {
@@ -940,6 +970,10 @@
     "/seo_pages/{pageId}": {
       "schema": "SeoPage",
       "description": "Full-website per-URL SEO metadata, meta images, FAQs, and canonical configurations"
+    },
+    "/educational_articles/{articleId}": {
+      "schema": "EducationalArticle",
+      "description": "Dynamic bilingual skincare guides and blog posts managed from Admin Blogs"
     }
   }
 }

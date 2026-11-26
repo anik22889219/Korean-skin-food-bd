@@ -536,6 +536,7 @@ export interface LoginPageThemeSettings {
   title: string;
   subtitle: string;
   googleButtonText: string;
+  facebookButtonText?: string;
   securityBadgeText: string;
   backToShopLabel: string;
   backToShopLink: string;

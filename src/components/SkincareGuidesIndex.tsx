@@ -90,24 +90,26 @@ export const SkincareGuidesIndex: React.FC = () => {
     { id: 'sun_care', label: 'Sun Protection' },
     { id: 'sensitive', label: 'Sensitive Skin' },
     { id: 'acne', label: 'Acne & Pores' },
+    { id: 'dry_skin', label: 'Dry Skin' },
     { id: 'ingredients', label: 'Active Ingredients' },
+    { id: 'layering', label: 'Layering' },
     { id: 'authentication', label: 'Authenticity Checks' }
   ];
 
   return (
-    <div className="w-full max-w-[1720px] mx-auto px-4 py-8 md:px-8 lg:px-12 space-y-12">
+    <div className="w-full max-w-[1720px] mx-auto px-3.5 py-5 sm:px-6 sm:py-8 md:px-8 lg:px-12 space-y-8 sm:space-y-12">
       <SeoHead metadata={seoMetadata} />
 
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-xs text-gray-400 font-medium" aria-label="Breadcrumb">
+      <nav className="flex flex-wrap items-center gap-1.5 text-xs text-gray-400 font-medium" aria-label="Breadcrumb">
         <Link to="/" className="hover:text-[#E91E8C] transition">Home</Link>
         <ChevronRight size={12} />
         <span className="text-[#E91E8C] font-extrabold">Skincare Guides</span>
       </nav>
 
       {/* Hero Banner */}
-      <header className="relative bg-white border border-pink-100 rounded-[32px] p-6 sm:p-10 md:p-12 shadow-sm overflow-hidden space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <header className="relative bg-white border border-pink-100 rounded-2xl sm:rounded-[32px] p-5 sm:p-10 md:p-12 shadow-sm overflow-hidden space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs font-bold text-[#E91E8C] bg-pink-50 px-3 py-1 rounded-full border border-pink-100">
             <BookOpen size={14} />
             <span>{pageTheme.badgeText}</span>
@@ -119,14 +121,14 @@ export const SkincareGuidesIndex: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSelectedLanguage('en')}
-                className={`px-3 py-1 rounded-lg transition ${selectedLanguage === 'en' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-500 hover:text-gray-900'}`}
+                className={`px-3 py-1.5 sm:py-1 rounded-lg transition cursor-pointer ${selectedLanguage === 'en' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 English
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedLanguage('bn')}
-                className={`px-3 py-1 rounded-lg transition ${selectedLanguage === 'bn' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-500 hover:text-gray-900'}`}
+                className={`px-3 py-1.5 sm:py-1 rounded-lg transition cursor-pointer ${selectedLanguage === 'bn' ? 'bg-white text-[#E91E8C] shadow-xs' : 'text-gray-500 hover:text-gray-900'}`}
               >
                 বাংলা
               </button>
@@ -134,7 +136,7 @@ export const SkincareGuidesIndex: React.FC = () => {
           )}
         </div>
 
-        <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-900 tracking-tight text-balance">
+        <h1 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-gray-900 tracking-tight text-balance">
           {selectedLanguage === 'en' ? pageTheme.titleEN : pageTheme.titleBN}
         </h1>
 
@@ -144,13 +146,13 @@ export const SkincareGuidesIndex: React.FC = () => {
 
         {/* Category Filter Tabs */}
         {pageTheme.showCategoryTabs && (
-          <div className="pt-4 flex items-center gap-2 overflow-x-auto pb-1">
+          <div className="pt-2 sm:pt-4 flex items-center gap-2 overflow-x-auto scrollbar-none pb-1 -mx-1 px-1">
             {categories.map(cat => (
               <button
                 key={cat.id}
                 type="button"
                 onClick={() => setActiveCategory(cat.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                className={`px-3.5 sm:px-4 py-2 min-h-[40px] rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer ${
                   activeCategory === cat.id
                     ? 'bg-[#E91E8C] text-white shadow-xs'
                     : 'bg-pink-50/40 text-gray-600 hover:text-gray-900 border border-pink-100/50'
@@ -164,7 +166,7 @@ export const SkincareGuidesIndex: React.FC = () => {
       </header>
 
       {/* Guides Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {filteredGuides.map(guide => {
           const displayTitle = selectedLanguage === 'bn' && guide.titleBN ? guide.titleBN : guide.title;
           const displayExcerpt = selectedLanguage === 'bn' && guide.excerptBN ? guide.excerptBN : guide.excerpt;
@@ -175,13 +177,23 @@ export const SkincareGuidesIndex: React.FC = () => {
               className="bg-white border border-pink-100 hover:border-[#E91E8C]/40 rounded-2xl overflow-hidden transition shadow-xs hover:shadow-md flex flex-col justify-between group"
             >
               <div>
-                <div className="relative aspect-[16/9] overflow-hidden bg-pink-50">
-                  <img
-                    src={guide.heroImage}
-                    alt={guide.imageAltText || guide.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    loading="lazy"
-                  />
+                <div className="relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-pink-50 via-rose-50 to-slate-100">
+                  {guide.heroImage ? (
+                    <img
+                      src={guide.heroImage}
+                      alt={guide.imageAltText || guide.title}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[#E91E8C]/60">
+                      <BookOpen size={28} />
+                    </div>
+                  )}
                   <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-xs text-white text-[10px] font-bold px-2.5 py-1 rounded-md flex items-center gap-1">
                     <Clock size={11} />
                     <span>{guide.readingTimeMinutes} min read</span>
