@@ -1,27 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, formatAuthErrorMessage } from '../context/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { themeService, DEFAULT_PAGES_THEME } from '../services/themeService';
 import { LoginPageThemeSettings } from '../types/theme';
 import { Wand2, ArrowRight, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
-
-function formatAuthErrorMessage(err: any): string | null {
-  const code = err?.code || '';
-  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-    return null;
-  }
-  if (code === 'auth/account-exists-with-different-credential') {
-    return 'An account already exists with this email using a different sign-in method (such as Google). Please sign in with that method.';
-  }
-  if (code === 'auth/popup-blocked') {
-    return 'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
-  }
-  if (code === 'auth/operation-not-allowed') {
-    return 'This sign-in provider is not enabled yet in Firebase Authentication.';
-  }
-  return err?.message || 'Sign-in failed. Please try again.';
-}
 
 export const Login: React.FC = () => {
   const { user, signInWithGoogle, signInWithFacebook, loading } = useAuth();

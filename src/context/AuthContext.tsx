@@ -1,15 +1,42 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   User, 
   GoogleAuthProvider, 
   FacebookAuthProvider,
-  signInWithPopup, 
+  OAuthCredential,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  linkWithCredential,
   signOut as fbSignOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../services/firebase';
 import { UserProfile, CreatorProfile, CreatorStatus } from '../types';
+
+export function formatAuthErrorMessage(err: any): string | null {
+  const code = err?.code || '';
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return null;
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return 'An account already exists with this email using Google. Please click Google Sign-In to log in and automatically link your Facebook account.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'This sign-in provider is not enabled yet in Firebase Authentication.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return 'This domain is not authorized for OAuth sign-in in Firebase Authentication.';
+  }
+  if (code === 'auth/user-disabled') {
+    return 'This account has been disabled. Please contact support.';
+  }
+  return err?.message || 'Sign-in failed. Please try again.';
+}
 
 interface AuthContextType {
   user: User | null;
@@ -33,6 +60,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [creatorProfile, setCreatorProfile] = useState<CreatorProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const pendingFacebookCredRef = useRef<OAuthCredential | null>(null);
+
+  useEffect(() => {
+    getRedirectResult(auth).catch((error) => {
+      console.error('[AuthContext] Redirect sign-in error:', error);
+    });
+  }, []);
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
@@ -128,8 +162,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
+      const result = await signInWithPopup(auth, provider);
+      if (pendingFacebookCredRef.current && result.user) {
+        try {
+          await linkWithCredential(result.user, pendingFacebookCredRef.current);
+        } catch (linkErr) {
+          console.warn('[AuthContext] Could not link pending Facebook credential:', linkErr);
+        } finally {
+          pendingFacebookCredRef.current = null;
+        }
+      }
+    } catch (error: any) {
+      if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
       console.error('[AuthContext] Google sign-in error:', error);
       throw error;
     } finally {
@@ -142,9 +189,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const provider = new FacebookAuthProvider();
     provider.addScope('email');
     provider.addScope('public_profile');
+    provider.setCustomParameters({ display: 'popup' });
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+      pendingFacebookCredRef.current = null;
+    } catch (error: any) {
+      if (error?.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = FacebookAuthProvider.credentialFromError(error);
+        if (pendingCred) {
+          pendingFacebookCredRef.current = pendingCred;
+        }
+      } else if (error?.code === 'auth/popup-blocked' || error?.code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
       console.error('[AuthContext] Facebook sign-in error:', error);
       throw error;
     } finally {

@@ -22,7 +22,7 @@ import {
   User as UserIcon,
   X
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, formatAuthErrorMessage } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useProducts } from '../hooks/queries/products';
 import { Product } from '../types';
@@ -51,6 +51,7 @@ export const CheckoutPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, profile, signInWithGoogle, signInWithFacebook } = useAuth();
+  const [authError, setAuthError] = useState<string | null>(null);
   const {
     cart,
     isSubmitting,
@@ -504,7 +505,8 @@ export const CheckoutPage: React.FC = () => {
               {/* Optional Google Account Banner for Guest Users / Rewards */}
               {!user ? (
                 pageTheme.showGuestRewardsBanner && (
-                <div className="bg-white rounded-2xl border border-pink-100 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="bg-white rounded-2xl border border-pink-100 p-4 sm:p-5 shadow-xs space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#E91E8C] shrink-0">
                       <Gift size={18} />
@@ -523,7 +525,13 @@ export const CheckoutPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => signInWithGoogle().catch((err) => console.warn('Google sign-in skipped:', err))}
+                      onClick={() => {
+                        setAuthError(null);
+                        signInWithGoogle().catch((err) => {
+                          const msg = formatAuthErrorMessage(err);
+                          if (msg) setAuthError(msg);
+                        });
+                      }}
                       className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-gray-800 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
                     >
                       <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
@@ -536,7 +544,13 @@ export const CheckoutPage: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => signInWithFacebook().catch((err) => console.warn('Facebook sign-in skipped:', err))}
+                      onClick={() => {
+                        setAuthError(null);
+                        signInWithFacebook().catch((err) => {
+                          const msg = formatAuthErrorMessage(err);
+                          if (msg) setAuthError(msg);
+                        });
+                      }}
                       className="min-h-[44px] px-4 py-2 rounded-xl bg-[#1877F2] hover:bg-[#166FE5] text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
                     >
                       <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
@@ -545,6 +559,13 @@ export const CheckoutPage: React.FC = () => {
                       <span>{isBn ? 'ফেসবুক' : 'Facebook'}</span>
                     </button>
                   </div>
+                  </div>
+                  {authError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-start gap-2">
+                      <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-500" />
+                      <span>{authError}</span>
+                    </div>
+                  )}
                 </div>
                 )
               ) : (
