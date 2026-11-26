@@ -550,5 +550,31 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if isStaff();
     }
+
+    function isValidDeletionRequestId(requestId) {
+      return requestId.matches('^ksf-del-[a-f0-9]{16}$');
+    }
+
+    function isValidDeletionRequest(data, requestId) {
+      return data.keys().hasAll([
+          'confirmationCode', 'facebookUserIdHash', 'status', 'source', 'requestedAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'confirmationCode', 'facebookUserIdHash', 'status', 'source', 'requestedAt', 'updatedAt'
+        ]) &&
+        data.confirmationCode is string && data.confirmationCode == requestId &&
+        data.facebookUserIdHash is string && data.facebookUserIdHash.matches('^[a-f0-9]{64}$') &&
+        data.status == 'pending' &&
+        data.source == 'facebook_callback' &&
+        data.requestedAt is string && data.requestedAt.size() >= 10 && data.requestedAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() >= 10 && data.updatedAt.size() <= 64;
+    }
+
+    match /data_deletion_requests/{requestId} {
+      allow get: if isStaff() || isValidDeletionRequestId(requestId);
+      allow list: if isStaff();
+      allow create: if isValidDeletionRequestId(requestId) && isValidDeletionRequest(request.resource.data, requestId);
+      allow update, delete: if isStaff();
+    }
   }
 }

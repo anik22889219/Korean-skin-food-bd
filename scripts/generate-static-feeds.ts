@@ -266,6 +266,7 @@ const sitemapEntries: Array<{ url: string; lastmod: string; changefreq: string; 
   { url: `${baseUrl}/become-a-creator`, lastmod: todayIso, changefreq: 'monthly', priority: '0.7' },
   { url: `${baseUrl}/privacy-policy`, lastmod: todayIso, changefreq: 'yearly', priority: '0.3' },
   { url: `${baseUrl}/terms-of-service`, lastmod: todayIso, changefreq: 'yearly', priority: '0.3' },
+  { url: `${baseUrl}/data-deletion`, lastmod: todayIso, changefreq: 'yearly', priority: '0.3' },
 ];
 
 for (const brandSlug of Object.keys(BRAND_SEO_PROFILES)) {

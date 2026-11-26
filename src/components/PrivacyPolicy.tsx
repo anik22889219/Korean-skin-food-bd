@@ -184,6 +184,18 @@ export const PrivacyPolicy: React.FC = () => {
                         <span className="text-gray-900 font-bold">{privacyTheme.contactAddress}</span>
                       </div>
                     </div>
+
+                    <div className="pt-2 border-t border-pink-100 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs text-gray-600 font-medium">
+                        Want to remove Facebook app data or permanently delete your account?
+                      </span>
+                      <Link
+                        to="/data-deletion"
+                        className="text-xs font-bold text-[#E91E8C] hover:underline"
+                      >
+                        View Data Deletion Instructions ›
+                      </Link>
+                    </div>
                   </div>
                 )}
               </section>
@@ -202,7 +214,10 @@ export const PrivacyPolicy: React.FC = () => {
               <span>Return to Shopping</span>
             </Link>
 
-            <div className="flex items-center gap-4 text-xs font-semibold text-gray-600">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-gray-600">
+              <Link to="/data-deletion" className="hover:text-[#E91E8C] transition-colors">
+                Data Deletion ›
+              </Link>
               <Link to="/terms-of-service" className="hover:text-[#E91E8C] transition-colors">
                 Terms of Service ›
               </Link>

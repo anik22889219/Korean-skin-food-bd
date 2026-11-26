@@ -298,6 +298,13 @@ class ArticleService {
 
       this.rebuildCache();
       this.notifySubscribers();
+      if (cleanArticle.status === 'published' && !cleanArticle.isDeleted) {
+        import('./indexNowService')
+          .then(({ notifyIndexNowUrls }) => {
+            notifyIndexNowUrls([`/guide/${cleanArticle.slug}`]).catch(() => {});
+          })
+          .catch(() => {});
+      }
       return cleanArticle;
     } catch (err: any) {
       console.error('[ArticleService] Failed to save article to Firestore:', err);

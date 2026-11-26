@@ -33,7 +33,9 @@ import {
   TrackingSettings, 
   validateGtmId, 
   validateGa4Id, 
-  validatePixelId 
+  validatePixelId,
+  validateFacebookAppId,
+  validateFacebookApiVersion
 } from '../services/trackingSettingsService';
 
 interface DiagnosticState {
@@ -115,6 +117,8 @@ export const AdminAnalyticsHealth: React.FC = () => {
   const [gtmError, setGtmError] = useState<string | null>(null);
   const [ga4Error, setGa4Error] = useState<string | null>(null);
   const [pixelError, setPixelError] = useState<string | null>(null);
+  const [fbAppIdError, setFbAppIdError] = useState<string | null>(null);
+  const [fbApiVersionError, setFbApiVersionError] = useState<string | null>(null);
 
   // Simulation & Logs
   const [testEventCode, setTestEventCode] = useState<string>('');
@@ -206,6 +210,34 @@ export const AdminAnalyticsHealth: React.FC = () => {
     setPixelError(v.isValid ? null : (v.message || 'Invalid format'));
   };
 
+  const handleFbAppIdChange = (val: string) => {
+    const cleaned = val.trim();
+    setSettings(prev => ({
+      ...prev,
+      facebookSdk: {
+        enabled: prev.facebookSdk?.enabled ?? true,
+        apiVersion: prev.facebookSdk?.apiVersion || 'v21.0',
+        appId: cleaned,
+      },
+    }));
+    const v = validateFacebookAppId(cleaned);
+    setFbAppIdError(v.isValid ? null : (v.message || 'Invalid format'));
+  };
+
+  const handleFbApiVersionChange = (val: string) => {
+    const cleaned = val.trim();
+    setSettings(prev => ({
+      ...prev,
+      facebookSdk: {
+        enabled: prev.facebookSdk?.enabled ?? true,
+        appId: prev.facebookSdk?.appId || '',
+        apiVersion: cleaned,
+      },
+    }));
+    const v = validateFacebookApiVersion(cleaned);
+    setFbApiVersionError(v.isValid ? null : (v.message || 'Invalid format'));
+  };
+
   // Save Settings to Firestore & Server
   const handleSaveSettings = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -236,6 +268,21 @@ export const AdminAnalyticsHealth: React.FC = () => {
       const pixelValidation = validatePixelId(settings.metaPixel.pixelId);
       if (!pixelValidation.isValid) {
         setPixelError(pixelValidation.message || 'Invalid Pixel ID');
+        setIsSaving(false);
+        return;
+      }
+    }
+
+    if (settings.facebookSdk?.enabled && settings.facebookSdk.appId) {
+      const fbIdValidation = validateFacebookAppId(settings.facebookSdk.appId);
+      if (!fbIdValidation.isValid) {
+        setFbAppIdError(fbIdValidation.message || 'Invalid Facebook App ID');
+        setIsSaving(false);
+        return;
+      }
+      const fbVerValidation = validateFacebookApiVersion(settings.facebookSdk.apiVersion || 'v21.0');
+      if (!fbVerValidation.isValid) {
+        setFbApiVersionError(fbVerValidation.message || 'Invalid Graph API Version');
         setIsSaving(false);
         return;
       }
@@ -603,6 +650,66 @@ export const AdminAnalyticsHealth: React.FC = () => {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* 5. Facebook JavaScript SDK (App ID & App Events) */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3 md:col-span-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-[#1877F2]" />
+                    <label className="text-sm font-bold text-slate-900 dark:text-white">
+                      Facebook JavaScript SDK (App Events &amp; FB.init)
+                    </label>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.facebookSdk?.enabled ?? true}
+                      onChange={(e) => setSettings(prev => ({
+                        ...prev,
+                        facebookSdk: {
+                          appId: prev.facebookSdk?.appId || '',
+                          apiVersion: prev.facebookSdk?.apiVersion || 'v21.0',
+                          enabled: e.target.checked,
+                        },
+                      }))}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pink-600"></div>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                      Facebook App ID:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 1234567890123456"
+                      value={settings.facebookSdk?.appId || ''}
+                      onChange={(e) => handleFbAppIdChange(e.target.value)}
+                      className={`w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border ${fbAppIdError ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-300 dark:border-slate-700'} rounded-lg text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-pink-500`}
+                    />
+                    {fbAppIdError && <p className="text-[11px] text-rose-500 mt-1">{fbAppIdError}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                      Graph API Version:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="v21.0"
+                      value={settings.facebookSdk?.apiVersion || 'v21.0'}
+                      onChange={(e) => handleFbApiVersionChange(e.target.value)}
+                      className={`w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-800 border ${fbApiVersionError ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-300 dark:border-slate-700'} rounded-lg text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-pink-500`}
+                    />
+                    {fbApiVersionError && <p className="text-[11px] text-rose-500 mt-1">{fbApiVersionError}</p>}
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Loads <code className="font-mono">connect.facebook.net/en_US/sdk.js</code> with <code className="font-mono">FB.init</code> &amp; <code className="font-mono">FB.AppEvents.logPageView()</code> once your Meta App ID is saved. Firebase Auth Facebook Login works independently via Firebase OAuth.
+                </p>
               </div>
             </div>
 

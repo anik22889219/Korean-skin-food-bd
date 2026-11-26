@@ -55,6 +55,7 @@ export const DEFAULT_FOOTER_COLUMNS: FooterColumnsSettings = {
       { id: 'lg-about', label: 'About Our Story', to: '/about-us', enabled: true },
       { id: 'lg-contact', label: 'Contact & Help Desk', to: '/contact-us', enabled: true },
       { id: 'lg-privacy', label: 'Privacy Policy', to: '/privacy-policy', enabled: true },
+      { id: 'lg-data-deletion', label: 'Data Deletion', to: '/data-deletion', enabled: true },
       { id: 'lg-terms', label: 'Terms of Service', to: '/terms-of-service', enabled: true },
     ]
   }
@@ -955,9 +956,31 @@ function mergeGlobalTheme(data?: Partial<GlobalThemeSettings> | null): GlobalThe
       },
       legal: {
         title: rawCols.legal?.title || DEFAULT_FOOTER_COLUMNS.legal.title,
-        links: Array.isArray(rawCols.legal?.links) && rawCols.legal.links.length > 0
-          ? rawCols.legal.links
-          : DEFAULT_FOOTER_COLUMNS.legal.links,
+        links: (() => {
+          const baseLinks =
+            Array.isArray(rawCols.legal?.links) && rawCols.legal.links.length > 0
+              ? rawCols.legal.links
+              : DEFAULT_FOOTER_COLUMNS.legal.links;
+          const hasDataDeletion = baseLinks.some(
+            (l) => l.id === 'lg-data-deletion' || l.to === '/data-deletion'
+          );
+          if (hasDataDeletion) return baseLinks;
+          const termsIndex = baseLinks.findIndex((l) => l.to === '/terms-of-service');
+          const defaultDeletionLink: FooterColumnsSettings['legal']['links'][number] = {
+            id: 'lg-data-deletion',
+            label: 'Data Deletion',
+            to: '/data-deletion',
+            enabled: true,
+          };
+          if (termsIndex >= 0) {
+            return [
+              ...baseLinks.slice(0, termsIndex),
+              defaultDeletionLink,
+              ...baseLinks.slice(termsIndex),
+            ];
+          }
+          return [...baseLinks, defaultDeletionLink];
+        })(),
       },
     },
   };

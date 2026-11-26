@@ -816,6 +816,20 @@
         "author": { "type": "object" }
       },
       "required": ["id", "slug", "title", "category", "publishedDate"]
+    },
+    "DataDeletionRequest": {
+      "title": "DataDeletionRequest",
+      "description": "Non-PII Meta/Facebook automated data deletion tracking record",
+      "type": "object",
+      "properties": {
+        "confirmationCode": { "type": "string", "maxLength": 32, "pattern": "^ksf-del-[a-f0-9]{16}$" },
+        "facebookUserIdHash": { "type": "string", "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] },
+        "source": { "type": "string", "enum": ["facebook_callback"] },
+        "requestedAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["confirmationCode", "facebookUserIdHash", "status", "source", "requestedAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -974,6 +988,10 @@
     "/educational_articles/{articleId}": {
       "schema": "EducationalArticle",
       "description": "Dynamic bilingual skincare guides and blog posts managed from Admin Blogs"
+    },
+    "/data_deletion_requests/{requestId}": {
+      "schema": "DataDeletionRequest",
+      "description": "Meta/Facebook automated data deletion confirmation and status records"
     }
   }
 }

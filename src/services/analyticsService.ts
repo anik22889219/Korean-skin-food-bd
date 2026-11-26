@@ -20,11 +20,23 @@ declare global {
     gtag?: (...args: any[]) => void;
     fbq?: (...args: any[]) => void;
     _fbq?: any;
+    fbAsyncInit?: () => void;
+    FB?: {
+      init: (params: { appId: string; cookie?: boolean; xfbml?: boolean; version: string }) => void;
+      AppEvents?: {
+        logPageView: () => void;
+      };
+      XFBML?: {
+        parse: () => void;
+      };
+    };
     __KSF_ANALYTICS_INITIALIZED__?: boolean;
     __KSF_META_PIXEL_INITIALIZED__?: boolean;
+    __KSF_FB_SDK_INITIALIZED__?: boolean;
     __KSF_CURRENT_GTM_ID__?: string;
     __KSF_CURRENT_GA4_ID__?: string;
     __KSF_CURRENT_PIXEL_ID__?: string;
+    __KSF_CURRENT_FB_APP_ID__?: string;
     __KSF_ANALYTICS_DEBUG__?: {
       GTM_ID: string;
       GA4_MEASUREMENT_ID: string;
@@ -273,6 +285,51 @@ class AnalyticsService {
       }
     }
 
+    // 4. Facebook JavaScript SDK (FB.init + AppEvents)
+    const facebookSdk = settings.facebookSdk;
+    const cleanFbAppId = (facebookSdk?.appId || '').trim();
+    const cleanFbVersion = (facebookSdk?.apiVersion || 'v21.0').trim();
+    if (facebookSdk?.enabled && /^\d{10,22}$/.test(cleanFbAppId)) {
+      try {
+        const initFbSdk = () => {
+          if (!window.FB) return;
+          if (window.__KSF_CURRENT_FB_APP_ID__ !== cleanFbAppId) {
+            window.FB.init({
+              appId: cleanFbAppId,
+              cookie: true,
+              xfbml: true,
+              version: cleanFbVersion || 'v21.0',
+            });
+            window.FB.AppEvents?.logPageView();
+            window.__KSF_CURRENT_FB_APP_ID__ = cleanFbAppId;
+            window.__KSF_FB_SDK_INITIALIZED__ = true;
+            logDebug('Facebook SDK Initialized', { appId: cleanFbAppId, version: cleanFbVersion });
+          }
+        };
+
+        window.fbAsyncInit = initFbSdk;
+
+        if (window.FB) {
+          initFbSdk();
+        } else if (!document.getElementById('facebook-jssdk')) {
+          const js = document.createElement('script');
+          js.id = 'facebook-jssdk';
+          js.async = true;
+          js.defer = true;
+          js.crossOrigin = 'anonymous';
+          js.src = 'https://connect.facebook.net/en_US/sdk.js';
+          const fjs = document.getElementsByTagName('script')[0];
+          if (fjs && fjs.parentNode) {
+            fjs.parentNode.insertBefore(js, fjs);
+          } else {
+            document.head.appendChild(js);
+          }
+        }
+      } catch (err) {
+        console.warn('[Analytics] Facebook SDK dynamic init notice:', err);
+      }
+    }
+
     // Update global debug object
     window.__KSF_ANALYTICS_DEBUG__ = {
       GTM_ID: settings.gtm.containerId,
@@ -281,7 +338,7 @@ class AnalyticsService {
       isGa4Configured: Boolean(settings.ga4.enabled && settings.ga4.measurementId),
       source: 'dynamic-firestore',
       gtagScriptRequested: Boolean(document.querySelector('script[src*="googletagmanager.com/gtag/js"]')),
-      fbqScriptRequested: Boolean(document.querySelector('script[src*="connect.facebook.net"]')),
+      fbqScriptRequested: Boolean(document.querySelector('script[src*="connect.facebook.net/en_US/fbevents.js"]')),
       gtmScriptRequested: Boolean(document.querySelector('script[src*="googletagmanager.com/gtm.js"]')),
       settings,
     };
@@ -310,6 +367,15 @@ class AnalyticsService {
     if (this.activeSettings.metaPixel.enabled) {
       if (typeof window.fbq === 'function') {
         window.fbq('track', 'PageView');
+      }
+    }
+
+    // Facebook JS SDK AppEvents
+    if (this.activeSettings.facebookSdk?.enabled && window.__KSF_FB_SDK_INITIALIZED__) {
+      try {
+        window.FB?.AppEvents?.logPageView();
+      } catch {
+        // ignore
       }
     }
 
@@ -903,7 +969,7 @@ class AnalyticsService {
 
     const gtmScriptInDom = isBrowser ? Boolean(document.querySelector('script[src*="googletagmanager.com/gtm.js"]')) : false;
     const gtagScriptInDom = isBrowser ? Boolean(document.querySelector('script[src*="googletagmanager.com/gtag/js"]')) : false;
-    const fbqScriptInDom = isBrowser ? Boolean(document.querySelector('script[src*="connect.facebook.net"]')) : false;
+    const fbqScriptInDom = isBrowser ? Boolean(document.querySelector('script[src*="connect.facebook.net/en_US/fbevents.js"]')) : false;
     const noscriptInDom = isBrowser ? Boolean(document.querySelector('iframe[src*="googletagmanager.com/ns.html"]')) : false;
 
     return {

@@ -32,8 +32,8 @@ export const Login: React.FC = () => {
     setActiveProvider('google');
     try {
       await signInWithGoogle();
-    } catch (err) {
-      console.error('Google Sign-In Failed:', err);
+    } catch (err: any) {
+      console.warn('Google Sign-In Notice:', err?.code || err?.message);
       const msg = formatAuthErrorMessage(err);
       if (msg) setAuthError(msg);
     } finally {
@@ -46,8 +46,8 @@ export const Login: React.FC = () => {
     setActiveProvider('facebook');
     try {
       await signInWithFacebook();
-    } catch (err) {
-      console.error('Facebook Sign-In Failed:', err);
+    } catch (err: any) {
+      console.warn('Facebook Sign-In Notice:', err?.code || err?.message);
       const msg = formatAuthErrorMessage(err);
       if (msg) setAuthError(msg);
     } finally {

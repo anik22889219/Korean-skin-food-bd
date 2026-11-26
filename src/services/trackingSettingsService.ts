@@ -20,6 +20,11 @@ export interface TrackingSettings {
     accessToken?: string;
     testEventCode?: string;
   };
+  facebookSdk?: {
+    enabled: boolean;
+    appId: string;
+    apiVersion: string;
+  };
   customScripts?: {
     headerScript?: string;
     bodyScript?: string;
@@ -47,6 +52,11 @@ export const DEFAULT_TRACKING_SETTINGS: TrackingSettings = {
     enabled: true,
     accessToken: '',
     testEventCode: '',
+  },
+  facebookSdk: {
+    enabled: true,
+    appId: (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_FACEBOOK_APP_ID) || '',
+    apiVersion: (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_FACEBOOK_API_VERSION) || 'v21.0',
   },
   customScripts: {
     headerScript: '',
@@ -86,6 +96,28 @@ export function validatePixelId(id: string): { isValid: boolean; message?: strin
   }
   if (!/^\d{12,20}$/.test(trimmed)) {
     return { isValid: false, message: 'Invalid format. Pixel ID must be 12-20 numeric digits' };
+  }
+  return { isValid: true };
+}
+
+export function validateFacebookAppId(id: string): { isValid: boolean; message?: string } {
+  const trimmed = id.trim();
+  if (!trimmed) {
+    return { isValid: true }; // Optional unless explicitly entered
+  }
+  if (!/^\d{10,22}$/.test(trimmed)) {
+    return { isValid: false, message: 'Invalid format. Facebook App ID must be 10-22 numeric digits' };
+  }
+  return { isValid: true };
+}
+
+export function validateFacebookApiVersion(version: string): { isValid: boolean; message?: string } {
+  const trimmed = version.trim();
+  if (!trimmed) {
+    return { isValid: false, message: 'Graph API version is required (e.g. v21.0)' };
+  }
+  if (!/^v\d+\.\d+$/.test(trimmed)) {
+    return { isValid: false, message: 'Invalid format. Expected format like v21.0' };
   }
   return { isValid: true };
 }
@@ -141,6 +173,11 @@ class TrackingSettingsService {
         enabled: incoming.metaCapi?.enabled ?? DEFAULT_TRACKING_SETTINGS.metaCapi.enabled,
         accessToken: incoming.metaCapi?.accessToken?.trim() || '',
         testEventCode: incoming.metaCapi?.testEventCode?.trim().toUpperCase() || '',
+      },
+      facebookSdk: {
+        enabled: incoming.facebookSdk?.enabled ?? DEFAULT_TRACKING_SETTINGS.facebookSdk?.enabled ?? true,
+        appId: (incoming.facebookSdk?.appId || DEFAULT_TRACKING_SETTINGS.facebookSdk?.appId || '').trim(),
+        apiVersion: (incoming.facebookSdk?.apiVersion || DEFAULT_TRACKING_SETTINGS.facebookSdk?.apiVersion || 'v21.0').trim(),
       },
       customScripts: {
         headerScript: incoming.customScripts?.headerScript || '',

@@ -185,6 +185,13 @@ export const pageSeoService = {
       await setDoc(doc(db, 'seo_pages', id), sanitized);
       pagesCache = [...pagesCache.filter((p) => p.id !== id), sanitized];
       notifySubscribers();
+      if (!sanitized.noindex && !sanitized.path.startsWith('/admin')) {
+        import('./indexNowService')
+          .then(({ notifyIndexNowUrls }) => {
+            notifyIndexNowUrls([sanitized.path]).catch(() => {});
+          })
+          .catch(() => {});
+      }
       return sanitized;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `seo_pages/${id}`);
@@ -497,6 +504,15 @@ export function discoverWebsitePages(
       description:
         'Review Korean Skin Food BD Terms of Service, Cash on Delivery conditions, and our 48-hour damaged or wrong-item inspection policy.',
       keywords: ['Korean Skin Food BD terms of service'],
+    },
+    {
+      path: '/data-deletion',
+      label: 'User Data Deletion',
+      subtitle: 'Facebook app & personal data removal instructions',
+      title: 'User Data Deletion Instructions',
+      description:
+        'Step-by-step instructions to remove Facebook app access and request permanent deletion of your personal data from Korean Skin Food BD.',
+      keywords: ['Korean Skin Food BD data deletion', 'Facebook data deletion'],
     },
   ];
 

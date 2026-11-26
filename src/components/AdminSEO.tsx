@@ -9,7 +9,8 @@ import {
   Search, Wand2, Save, CheckCircle, AlertCircle, FileText, Globe, Key, 
   ExternalLink, Smartphone, Monitor, Share2, Layers, Sparkles, Check, 
   Eye, RefreshCw, Info, HelpCircle, BookOpen, AlertTriangle, ShieldCheck,
-  CheckSquare, XCircle, Plus, Edit3, Image as ImageIcon, Link as LinkIcon, ChevronRight
+  CheckSquare, XCircle, Plus, Edit3, Image as ImageIcon, Link as LinkIcon, ChevronRight,
+  Send, Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -22,6 +23,7 @@ import {
   DEFAULT_HOMEPAGE_DESCRIPTION,
   buildCanonicalUrl
 } from '../services/seoService';
+import { fetchSeoOverviewStats, notifyIndexNowUrls } from '../services/indexNowService';
 import { getSiteHostname, getSiteUrl } from '../utils/siteUrl';
 import { getProductPath } from '../utils/productSlug';
 
@@ -59,6 +61,9 @@ export const AdminSEO: React.FC = () => {
 
   // Health Audit Filter
   const [healthFilter, setHealthFilter] = useState<'all' | 'errors' | 'warnings'>('all');
+  const [serverStats, setServerStats] = useState<any>(null);
+  const [isPingingIndexNow, setIsPingingIndexNow] = useState(false);
+  const [indexNowFeedback, setIndexNowFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     const loaded = productService.getProducts();
@@ -68,11 +73,42 @@ export const AdminSEO: React.FC = () => {
       loadProductFields(loaded[0]);
     }
 
+    fetchSeoOverviewStats()
+      .then((res) => {
+        if (res?.success && res?.stats) {
+          setServerStats(res.stats);
+        }
+      })
+      .catch(() => {});
+
     const unsubGuides = articleService.subscribe(loadedGuides => {
       setGuides(loadedGuides);
     });
     return () => unsubGuides();
   }, []);
+
+  const handleManualIndexNowSubmit = async () => {
+    setIsPingingIndexNow(true);
+    setIndexNowFeedback(null);
+    try {
+      const result = await notifyIndexNowUrls([], true);
+      if (result?.success) {
+        setIndexNowFeedback({
+          ok: true,
+          text: `Submitted ${result.submittedCount || 0} URLs to IndexNow (${result.upstreamMessage || 'Accepted'}).`,
+        });
+      } else {
+        setIndexNowFeedback({
+          ok: false,
+          text: result?.error || result?.upstreamMessage || 'IndexNow submission returned a non-2xx status.',
+        });
+      }
+    } catch (err: any) {
+      setIndexNowFeedback({ ok: false, text: err?.message || 'IndexNow ping failed.' });
+    } finally {
+      setIsPingingIndexNow(false);
+    }
+  };
 
   const selectedProduct = useMemo(() => {
     return products.find(p => p.id === selectedProductId) || null;
@@ -578,14 +614,14 @@ export const AdminSEO: React.FC = () => {
 
           {/* Quick Technical Links Bar */}
           <div className="bg-white p-4 rounded-2xl border border-pink-100 flex flex-wrap items-center justify-between gap-3 text-xs font-bold">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <a
                 href="/robots.txt"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-pink-50 text-[#E91E8C] rounded-lg hover:bg-pink-100 transition"
               >
-                <span>Live robots.txt</span>
+                <span>robots.txt</span>
                 <ExternalLink size={12} />
               </a>
               <a
@@ -594,7 +630,26 @@ export const AdminSEO: React.FC = () => {
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-pink-50 text-[#E91E8C] rounded-lg hover:bg-pink-100 transition"
               >
-                <span>Live sitemap.xml</span>
+                <span>sitemap.xml Index</span>
+                <ExternalLink size={12} />
+              </a>
+              <a
+                href="/llms.txt"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition"
+              >
+                <Bot size={12} />
+                <span>llms.txt</span>
+                <ExternalLink size={12} />
+              </a>
+              <a
+                href="/rss.xml"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition"
+              >
+                <span>RSS Feed</span>
                 <ExternalLink size={12} />
               </a>
               <a
@@ -606,12 +661,43 @@ export const AdminSEO: React.FC = () => {
                 <span>Google Search Console</span>
                 <ExternalLink size={12} />
               </a>
+              <a
+                href="https://www.bing.com/webmasters"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 text-sky-700 rounded-lg hover:bg-sky-100 transition"
+              >
+                <span>Bing Webmaster</span>
+                <ExternalLink size={12} />
+              </a>
+              <button
+                type="button"
+                onClick={handleManualIndexNowSubmit}
+                disabled={isPingingIndexNow}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50"
+              >
+                <Send size={12} />
+                <span>{isPingingIndexNow ? 'Submitting...' : 'Ping IndexNow'}</span>
+              </button>
             </div>
 
             <span className="text-gray-400 text-[11px] font-mono">
-              Verification Tag: GwiMlKnv8wLcjHMFH3GxOMi4h3eLpy2MX3ZXkzJUhXg
+              Google Verification: GwiMlKnv8wLcjHMFH3GxOMi4h3eLpy2MX3ZXkzJUhXg
             </span>
           </div>
+
+          {indexNowFeedback && (
+            <div
+              className={`p-3 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
+                indexNowFeedback.ok
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}
+            >
+              {indexNowFeedback.ok ? <CheckCircle size={15} /> : <AlertTriangle size={15} />}
+              <span>{indexNowFeedback.text}</span>
+            </div>
+          )}
 
           {/* Real-Time SEO Issues Audit Table */}
           <div className="bg-white rounded-[28px] border border-pink-100 p-6 shadow-sm space-y-4">
@@ -1320,17 +1406,74 @@ export const AdminSEO: React.FC = () => {
                   </p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-gray-400 block">Sitemap XML Endpoint</span>
-                  <p className="font-mono text-[11px] text-[#E91E8C] mt-0.5">
-                    {getSiteUrl()}/sitemap.xml
-                  </p>
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block">Sitemap Index &amp; Segmented XML Feeds</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mt-1.5 font-mono text-[11px]">
+                    {[
+                      { path: '/sitemap.xml', label: 'Sitemap Index', count: serverStats?.totalSitemapUrls },
+                      { path: '/sitemap-pages.xml', label: 'Pages', count: serverStats?.pagesCount },
+                      { path: '/sitemap-products.xml', label: 'Products', count: serverStats?.productsCount },
+                      { path: '/sitemap-categories.xml', label: 'Categories', count: serverStats?.categoriesCount },
+                      { path: '/sitemap-brands.xml', label: 'Brands', count: serverStats?.brandsCount },
+                      { path: '/sitemap-guides.xml', label: 'Guides', count: serverStats?.guidesCount },
+                      { path: '/sitemap-ingredients.xml', label: 'Ingredients', count: serverStats?.ingredientsCount },
+                    ].map((sm) => (
+                      <a
+                        key={sm.path}
+                        href={sm.path}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-pink-50/60 hover:bg-pink-100/80 text-[#E91E8C] transition"
+                      >
+                        <span className="truncate">{sm.path}</span>
+                        <span className="text-[10px] text-gray-600 font-bold ml-2 shrink-0">
+                          {typeof sm.count === 'number' ? sm.count : sm.label}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-gray-400 block">Search Console Action Steps</span>
-                  <p className="text-[11px] text-gray-500 leading-relaxed mt-0.5">
-                    Submit `{getSiteUrl()}/sitemap.xml` directly in Google Search Console under Sitemaps tab. The Google site verification meta tag `GwiMlKnv8wLcjHMFH3GxOMi4h3eLpy2MX3ZXkzJUhXg` is permanently embedded in `index.html`.
-                  </p>
+                  <span className="text-[10px] uppercase font-bold text-gray-400 block">AI Discovery &amp; Feed Endpoints</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    <a href="/llms.txt" target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 font-mono text-[11px] hover:bg-purple-100">
+                      /llms.txt
+                    </a>
+                    <a href="/llms-full.txt" target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 font-mono text-[11px] hover:bg-purple-100">
+                      /llms-full.txt
+                    </a>
+                    <a href="/rss.xml" target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg bg-orange-50 text-orange-700 font-mono text-[11px] hover:bg-orange-100">
+                      /rss.xml
+                    </a>
+                    <a href="/robots.txt" target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-mono text-[11px] hover:bg-gray-200">
+                      /robots.txt
+                    </a>
+                  </div>
                 </div>
+                <div className="pt-1 border-t border-pink-50 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[11px] text-gray-500">
+                    <span className="font-bold text-gray-700">IndexNow Key:</span>{' '}
+                    <span className="font-mono text-[#E91E8C]">
+                      {serverStats?.indexNowKey ? `/${serverStats.indexNowKey}.txt` : 'Auto-provisioned'}
+                    </span>
+                    {' · '}
+                    <span className="font-bold text-gray-700">Bing Tag:</span>{' '}
+                    {serverStats?.bingConfigured ? 'Active (msvalidate.01)' : 'Set BING_SITE_VERIFICATION'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleManualIndexNowSubmit}
+                    disabled={isPingingIndexNow}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E91E8C] hover:bg-[#d0177c] text-white text-[11px] font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Send size={12} />
+                    <span>{isPingingIndexNow ? 'Submitting...' : 'Submit All via IndexNow'}</span>
+                  </button>
+                </div>
+                {indexNowFeedback && (
+                  <p className={`text-[11px] font-semibold ${indexNowFeedback.ok ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {indexNowFeedback.text}
+                  </p>
+                )}
               </div>
             </div>
 

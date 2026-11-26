@@ -57,6 +57,7 @@ import { AboutUs } from './components/AboutUs';
 import { ContactUs } from './components/ContactUs';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { TermsOfService } from './components/TermsOfService';
+import { DataDeletion } from './components/DataDeletion';
 import { BrandLandingPage } from './components/BrandLandingPage';
 import { BrandsIndexPage } from './components/BrandsIndexPage';
 import { SkincareGuidesIndex } from './components/SkincareGuidesIndex';
@@ -199,6 +200,8 @@ export default function App() {
                   <Route path="privacy" element={<Navigate to="/privacy-policy" replace />} />
                   <Route path="terms-of-service" element={<TermsOfService />} />
                   <Route path="terms" element={<Navigate to="/terms-of-service" replace />} />
+                  <Route path="data-deletion" element={<DataDeletion />} />
+                  <Route path="user-data-deletion" element={<Navigate to="/data-deletion" replace />} />
                   <Route path="product/:id" element={<ProductDetail />} />
                   <Route path="brands" element={<BrandsIndexPage />} />
                   <Route path="brand/:brandSlug" element={<BrandLandingPage />} />

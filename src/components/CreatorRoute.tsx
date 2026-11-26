@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth, formatAuthErrorMessage } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { applyForCreatorProfile } from '../services/creatorService';
 import { 
   Sparkles, 
@@ -29,7 +29,6 @@ export const CreatorRoute: React.FC = () => {
   const [profileImage, setProfileImage] = useState(profile?.photoURL || user?.photoURL || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [authError, setAuthError] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -63,23 +62,9 @@ export const CreatorRoute: React.FC = () => {
             </p>
           </div>
 
-          {authError && (
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-start gap-2 text-left">
-              <ShieldAlert size={16} className="shrink-0 mt-0.5 text-rose-500" />
-              <span>{authError}</span>
-            </div>
-          )}
-
           <div className="space-y-3">
             <button
-              type="button"
-              onClick={() => {
-                setAuthError(null);
-                signInWithGoogle().catch((err) => {
-                  const msg = formatAuthErrorMessage(err);
-                  if (msg) setAuthError(msg);
-                });
-              }}
+              onClick={() => signInWithGoogle().catch((err) => console.warn('Google sign-in skipped:', err))}
               className="w-full py-3.5 bg-gradient-to-r from-pink-600 via-rose-500 to-pink-600 hover:from-pink-700 hover:to-rose-600 text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-pink-500/25 flex items-center justify-center gap-2 transition cursor-pointer"
             >
               <UserCheck size={18} />
@@ -87,14 +72,7 @@ export const CreatorRoute: React.FC = () => {
             </button>
 
             <button
-              type="button"
-              onClick={() => {
-                setAuthError(null);
-                signInWithFacebook().catch((err) => {
-                  const msg = formatAuthErrorMessage(err);
-                  if (msg) setAuthError(msg);
-                });
-              }}
+              onClick={() => signInWithFacebook().catch((err) => console.warn('Facebook sign-in skipped:', err))}
               className="w-full py-3.5 bg-[#1877F2] hover:bg-[#166FE5] text-white font-extrabold text-sm rounded-2xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition cursor-pointer"
             >
               <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">

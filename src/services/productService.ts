@@ -349,7 +349,15 @@ export const productService = {
       newStock: product.stock,
       reason: 'Initial catalog registration'
     });
-    
+
+    if (!newProduct.noindex) {
+      Promise.all([import('../utils/productSlug'), import('./indexNowService')])
+        .then(([{ getProductPath }, { notifyIndexNowUrls }]) => {
+          notifyIndexNowUrls([getProductPath(newProduct)]).catch(() => {});
+        })
+        .catch(() => {});
+    }
+
     return newProduct;
   },
 
@@ -408,6 +416,15 @@ export const productService = {
         slackNotificationService.notifyStockAlert(updatedProduct, eventType, oldProduct.stock).catch(console.warn);
       });
     }
+
+    if (!updatedProduct.noindex && !(updatedProduct as any).isDeleted) {
+      Promise.all([import('../utils/productSlug'), import('./indexNowService')])
+        .then(([{ getProductPath }, { notifyIndexNowUrls }]) => {
+          notifyIndexNowUrls([getProductPath(updatedProduct)]).catch(() => {});
+        })
+        .catch(() => {});
+    }
+
     return product;
   },
 

@@ -5,7 +5,7 @@ import { useProduct, useProducts } from '../hooks/queries/products';
 import { reviewService } from '../services/reviewService';
 import { posService } from '../services/posService';
 import { Product, ProductReview, Order } from '../types';
-import { useAuth, formatAuthErrorMessage } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useWholesaleCart } from '../context/WholesaleCartContext';
 import { db } from '../services/firebase';
@@ -725,7 +725,12 @@ export const ProductDetail: React.FC = () => {
                     : 'border-pink-100 hover:border-pink-300'
                 }`}
               >
-                <img src={product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                <img
+                  src={product.image || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
+                  alt={product.imageAltText || `${product.name} ${product.brand} main thumbnail`}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
               </button>
               {product.images.map((imgUrl, idx) => (
                 <button
@@ -738,7 +743,12 @@ export const ProductDetail: React.FC = () => {
                       : 'border-pink-100 hover:border-pink-300'
                   }`}
                 >
-                  <img src={imgUrl || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <img
+                    src={imgUrl || 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=200'}
+                    alt={`${product.imageAltText || product.name} - view ${idx + 2}`}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
                 </button>
               ))}
             </div>
@@ -1876,28 +1886,14 @@ export const ProductDetail: React.FC = () => {
             ) : (
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  type="button"
-                  onClick={() => {
-                    setReviewErrorMsg(null);
-                    signInWithGoogle().catch((err) => {
-                      const msg = formatAuthErrorMessage(err);
-                      if (msg) setReviewErrorMsg(msg);
-                    });
-                  }}
+                  onClick={() => signInWithGoogle().catch((err) => console.warn('Google sign-in skipped:', err))}
                   className="px-4 py-2.5 bg-pink-50 hover:bg-pink-100 text-[#E91E8C] border border-pink-200 text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer"
                 >
                   <Lock size={14} />
                   <span>Google Login to Review</span>
                 </button>
                 <button
-                  type="button"
-                  onClick={() => {
-                    setReviewErrorMsg(null);
-                    signInWithFacebook().catch((err) => {
-                      const msg = formatAuthErrorMessage(err);
-                      if (msg) setReviewErrorMsg(msg);
-                    });
-                  }}
+                  onClick={() => signInWithFacebook().catch((err) => console.warn('Facebook sign-in skipped:', err))}
                   className="px-4 py-2.5 bg-[#1877F2] hover:bg-[#166FE5] text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer"
                 >
                   <svg className="h-3.5 w-3.5 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">

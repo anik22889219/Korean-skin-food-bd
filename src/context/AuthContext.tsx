@@ -35,6 +35,13 @@ export function formatAuthErrorMessage(err: any): string | null {
   if (code === 'auth/user-disabled') {
     return 'This account has been disabled. Please contact support.';
   }
+  if (code === 'auth/invalid-credential-or-provider-id') {
+    const rawMsg = String(err?.message || '');
+    if (rawMsg.includes('1349048') || rawMsg.includes('App+Domains') || rawMsg.includes('App Domains')) {
+      return 'Facebook Login is not yet authorized for Firebase auth domain (gen-lang-client-0633897500.firebaseapp.com). Please add it to App Domains and Valid OAuth Redirect URIs in your Meta Developer App settings, or sign in with Google.';
+    }
+    return 'Facebook sign-in could not be completed. Please verify your Meta App credentials or sign in with Google.';
+  }
   return err?.message || 'Sign-in failed. Please try again.';
 }
 
@@ -177,7 +184,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await signInWithRedirect(auth, provider);
         return;
       }
-      console.error('[AuthContext] Google sign-in error:', error);
+      console.warn('[AuthContext] Google sign-in notice:', error?.code || error?.message);
       throw error;
     } finally {
       setLoading(false);
@@ -203,7 +210,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await signInWithRedirect(auth, provider);
         return;
       }
-      console.error('[AuthContext] Facebook sign-in error:', error);
+      console.warn('[AuthContext] Facebook sign-in notice:', error?.code || error?.message);
       throw error;
     } finally {
       setLoading(false);

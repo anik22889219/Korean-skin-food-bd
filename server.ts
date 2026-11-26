@@ -54,10 +54,12 @@ import customersRoutes from "./server/modules/customers/routes";
 import mediaRoutes, { uploadsDir } from "./server/modules/media/routes";
 import steadfastCourierRoutes from "./server/modules/steadfast-courier/routes";
 import catalogSeoRoutes, {
-  buildBotSsrMetadata,
+  buildBotPrerenderResult,
   injectMetaIntoHtml,
+  injectPrerenderedBodyIntoHtml,
   isSearchEngineBot,
 } from "./server/modules/catalog-seo/routes";
+import facebookDeletionRoutes from "./server/modules/facebook-deletion/routes";
 import { createYouTubeShortsRouter } from "./server/modules/youtube/routes";
 
 dotenv.config();
@@ -82,6 +84,7 @@ app.use(customersRoutes);
 app.use(mediaRoutes);
 app.use(steadfastCourierRoutes);
 app.use(catalogSeoRoutes);
+app.use(facebookDeletionRoutes);
 app.use(
   createYouTubeShortsRouter({
     invalidateYouTubeHealthCache: () => invalidateYouTubeHealthCache(),
@@ -6610,6 +6613,7 @@ interface ServerTrackingSettings {
   ga4: { enabled: boolean; measurementId: string };
   metaPixel: { enabled: boolean; pixelId: string };
   metaCapi: { enabled: boolean; accessToken?: string; testEventCode?: string };
+  facebookSdk?: { enabled: boolean; appId: string; apiVersion: string };
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -6631,6 +6635,11 @@ async function getOrFetchTrackingSettings(): Promise<ServerTrackingSettings> {
       enabled: true,
       accessToken: process.env.META_CAPI_ACCESS_TOKEN || process.env.FACEBOOK_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || "",
       testEventCode: process.env.META_TEST_EVENT_CODE || ""
+    },
+    facebookSdk: {
+      enabled: true,
+      appId: (process.env.VITE_FACEBOOK_APP_ID || "").trim(),
+      apiVersion: (process.env.VITE_FACEBOOK_API_VERSION || "v21.0").trim(),
     }
   };
 
@@ -6661,6 +6670,11 @@ async function getOrFetchTrackingSettings(): Promise<ServerTrackingSettings> {
           enabled: data.metaCapi?.enabled ?? true,
           accessToken: (data.metaCapi?.accessToken || fallbackSettings.metaCapi.accessToken || "").trim(),
           testEventCode: (data.metaCapi?.testEventCode || fallbackSettings.metaCapi.testEventCode || "").trim().toUpperCase(),
+        },
+        facebookSdk: {
+          enabled: data.facebookSdk?.enabled ?? fallbackSettings.facebookSdk?.enabled ?? true,
+          appId: (data.facebookSdk?.appId || fallbackSettings.facebookSdk?.appId || "").trim(),
+          apiVersion: (data.facebookSdk?.apiVersion || fallbackSettings.facebookSdk?.apiVersion || "v21.0").trim(),
         },
         updatedAt: data.updatedAt,
         updatedBy: data.updatedBy,
@@ -6729,6 +6743,15 @@ app.post("/api/tracking/settings", verifyAdminAuth, async (req, res) => {
           ? incoming.metaCapi.testEventCode
           : current.metaCapi.testEventCode || "").trim().toUpperCase(),
       },
+      facebookSdk: {
+        enabled: incoming.facebookSdk?.enabled ?? current.facebookSdk?.enabled ?? true,
+        appId: (incoming.facebookSdk?.appId !== undefined
+          ? incoming.facebookSdk.appId
+          : current.facebookSdk?.appId || "").trim(),
+        apiVersion: (incoming.facebookSdk?.apiVersion !== undefined
+          ? incoming.facebookSdk.apiVersion
+          : current.facebookSdk?.apiVersion || "v21.0").trim(),
+      },
       updatedAt: new Date().toISOString(),
       updatedBy: (req as any).user?.email || req.body.updatedBy || "admin"
     };
@@ -6736,7 +6759,10 @@ app.post("/api/tracking/settings", verifyAdminAuth, async (req, res) => {
     serverTrackingSettingsCache = updated;
     lastTrackingSettingsFetch = Date.now();
 
-    if (db) {
+    const idToken = getIdTokenFromRequest(req);
+    if (idToken) {
+      await setFirestoreDocWithToken("settings", "tracking", updated, idToken, true);
+    } else if (db) {
       const trackingDocRef = doc(db, "settings", "tracking");
       await setDoc(trackingDocRef, updated, { merge: true });
     }
@@ -6748,7 +6774,7 @@ app.post("/api/tracking/settings", verifyAdminAuth, async (req, res) => {
       actorUid: (req as any).user?.uid,
       actorEmail: (req as any).user?.email,
       actorRole: (req as any).user?.role,
-    });
+    }, idToken);
 
     res.json({
       success: true,
@@ -10076,8 +10102,9 @@ async function startServer() {
         return res.status(200).send(rawHtml);
       }
 
-      const { status, meta } = await buildBotSsrMetadata(req);
-      const injectedHtml = injectMetaIntoHtml(rawHtml, meta);
+      const { status, meta, bodyHtml } = await buildBotPrerenderResult(req);
+      let injectedHtml = injectMetaIntoHtml(rawHtml, meta);
+      injectedHtml = injectPrerenderedBodyIntoHtml(injectedHtml, bodyHtml);
       return res.status(status).send(injectedHtml);
     } catch (err) {
       logger.warn('ssr-meta', 'Crawler meta injection error', { error: (err as any)?.message });
